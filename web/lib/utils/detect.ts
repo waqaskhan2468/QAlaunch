@@ -8,7 +8,7 @@ import type { WebsiteType } from '@/types/zod';
 const CONTACT_EMAIL = 'hello@getqalaunch.com';
 
 const AUTH_BANNER =
-	'We noticed this site has login / sign-up areas. Authenticated pages were not tested — contact us for a Custom plan to include them.';
+	'Web app detected — for full testing of authenticated areas, contact us for a Custom plan.';
 
 const AUTH_NOTE =
 	'This site has login or sign-up functionality. Authenticated areas were not scanned. Only publicly accessible pages were tested.';
@@ -118,21 +118,6 @@ export function normalisePage($: cheerio.CheerioAPI): NormalisedPage {
 // AUTH DETECTION — CORE LOGIC
 // ─────────────────────────────────────────────
 
-/**
- * Detects whether a site has login / sign-up / auth areas.
- *
- * Works in layers — each layer catches a different class of site:
- *
- *   Layer 1 — URL structure signals (catches app.* subdomains, /login paths)
- *   Layer 2 — Login form in HTML (password field = strongest possible signal)
- *   Layer 3 — Page title signals (catches JS-heavy sites like Notion, Facebook
- *              that return minimal HTML but still set a meaningful <title>)
- *   Layer 4 — Nav / body text signals (catches marketing sites with login CTA)
- *   Layer 5 — Structural signals (dashboard, authenticated, user-portal)
- *
- * Per spec: when true → scan runs on public pages + banner + note shown.
- * DO NOT stop the scan. DO NOT auto-bypass login.
- */
 function detectAuthPresence(
 	$: cheerio.CheerioAPI,
 	url: URL,
@@ -141,19 +126,41 @@ function detectAuthPresence(
 	body: string,
 	title: string,
 ): boolean {
-	// ── Layer 1: URL structure ─────────────────────────────────────────────
-	// app.* subdomains or /app paths are almost always gated products
+	// Layer 1: URL / hostname signals
+	const host = url.hostname.toLowerCase();
+	const path = url.pathname.toLowerCase();
+
+	const authSubdomains = [
+		'app.',
+		'accounts.',
+		'auth.',
+		'id.',
+		'login.',
+		'workspace.',
+		'my.',
+	];
+
+	if (authSubdomains.some((prefix) => host.startsWith(prefix))) {
+		return true;
+	}
+
 	if (
-		url.hostname.startsWith('app.') ||
-		url.hostname.startsWith('accounts.') ||
-		url.hostname.startsWith('my.') ||
-		url.pathname.startsWith('/app/')
+		path === '/app' ||
+		path.startsWith('/app/') ||
+		path.startsWith('/login') ||
+		path.startsWith('/log-in') ||
+		path.startsWith('/signin') ||
+		path.startsWith('/sign-in') ||
+		path.startsWith('/signup') ||
+		path.startsWith('/sign-up') ||
+		path.startsWith('/register') ||
+		path.startsWith('/auth') ||
+		path.startsWith('/account')
 	) {
 		return true;
 	}
 
-	// ── Layer 2: Password field in HTML ───────────────────────────────────
-	// The single strongest signal — a password input means a login form exists
+	// Layer 2: Password field in HTML
 	if (
 		html.includes('type="password"') ||
 		html.includes("type='password'") ||
@@ -162,49 +169,49 @@ function detectAuthPresence(
 		return true;
 	}
 
-	// ── Layer 3: Page title signals ───────────────────────────────────────
-	// Catches JS-rendered sites (Notion, Facebook, Gmail) that return a <title>
-	// even when the body HTML is minimal or server-rendered differently
-	if (
-		includesAny(title, [
-			'log in',
-			'login',
-			'sign in',
-			'signin',
-			'sign up',
-			'signup',
-			'create account',
-			'register',
-			'welcome back',
-		])
-	) {
+	// Layer 3: Anchor/form attribute signals
+	const authHrefSelectors = [
+		'a[href*="login" i]',
+		'a[href*="log-in" i]',
+		'a[href*="signin" i]',
+		'a[href*="sign-in" i]',
+		'a[href*="signup" i]',
+		'a[href*="sign-up" i]',
+		'a[href*="register" i]',
+		'a[href*="/auth" i]',
+		'form[action*="login" i]',
+		'form[action*="signin" i]',
+		'form[action*="signup" i]',
+		'form[action*="auth" i]',
+	].join(', ');
+
+	if ($(authHrefSelectors).length > 0) {
 		return true;
 	}
 
-	// ── Layer 4: Nav / body text login signals ────────────────────────────
-	// Login CTA in nav is a strong signal — combined with any secondary signal
-	const hasLoginCta = includesAny(nav, [
+	// Layer 4: Text signals
+	const authWords = [
 		'log in',
 		'login',
 		'sign in',
 		'signin',
-	]);
-
-	const hasSignupCta = includesAny(nav, [
 		'sign up',
 		'signup',
-		'get started for free',
-		'create account',
 		'register',
-	]);
+		'create account',
+		'welcome back',
+		'forgot password',
+	];
 
-	// Nav has BOTH login and signup = definite auth-aware site
-	if (hasLoginCta && hasSignupCta) {
+	if (
+		includesAny(title, authWords) ||
+		includesAny(nav, authWords) ||
+		includesAny(body, authWords)
+	) {
 		return true;
 	}
 
-	// ── Layer 5: Structural / gated product signals ───────────────────────
-	// Dashboard, user-portal, authenticated markers = product is gated
+	// Layer 5: Structural gated signals
 	const hasGatedSignal =
 		html.includes('dashboard') ||
 		html.includes('user-portal') ||
@@ -212,28 +219,26 @@ function detectAuthPresence(
 		html.includes("'authenticated'") ||
 		html.includes('data-auth') ||
 		html.includes('isloggedin') ||
-		html.includes('is-logged-in');
+		html.includes('is-logged-in') ||
+		html.includes('workspace') ||
+		html.includes('admin panel');
 
-	// Login CTA + gated signal together = webapp
-	if (hasLoginCta && hasGatedSignal) {
+	if (hasGatedSignal) {
 		return true;
 	}
 
-	// ── Layer 6: Meta / link signals ─────────────────────────────────────
-	// OpenGraph or meta tags explicitly mentioning login/signup pages
+	// Layer 6: Meta / OpenGraph signals
 	const metaDesc =
 		$('meta[name="description"]').attr('content')?.toLowerCase() ?? '';
 	const ogTitle =
 		$('meta[property="og:title"]').attr('content')?.toLowerCase() ?? '';
+	const ogDesc =
+		$('meta[property="og:description"]').attr('content')?.toLowerCase() ?? '';
 
 	if (
-		includesAny(metaDesc, [
-			'log in',
-			'sign in',
-			'create account',
-			'sign up to',
-		]) ||
-		includesAny(ogTitle, ['log in', 'sign in', 'welcome back'])
+		includesAny(metaDesc, authWords) ||
+		includesAny(ogTitle, authWords) ||
+		includesAny(ogDesc, authWords)
 	) {
 		return true;
 	}
@@ -251,19 +256,20 @@ function signalEcommerce(
 	nav: string,
 ): boolean {
 	return (
-		html.includes('shopify') ||
+		// Shopify / eCommerce signals
 		html.includes('shopify-checkout-api-token') ||
+		html.includes('shopify.com') ||
+		/\/products\/|\/collections\//i.test(html) ||
+		includesAny(nav, ['add to cart', 'buy now', 'shop now']) ||
+		html.includes('<meta property="product:') ||
+		// WooCommerce / WordPress signals
 		html.includes('/wp-content/') ||
 		html.includes('woocommerce') ||
-		$('[class*="wc-"]').length > 0 ||
-		includesAny(nav, ['add to cart', 'buy now', 'shop now']) ||
-		// NOTE: 'product:' must NOT match generic words — check carefully
-		html.includes('<meta property="product:') ||
-		/\/products\/|\/collections\//i.test(html)
+		$('[class*="wc-"]').length > 0
 	);
 }
 
-function signalSaas(html: string, nav: string): boolean {
+function signalSaas(html: string, nav: string, url: URL): boolean {
 	return (
 		includesAny(nav, [
 			'pricing',
@@ -271,6 +277,9 @@ function signalSaas(html: string, nav: string): boolean {
 			'start for free',
 			'features',
 			'solutions',
+			'login',
+			'sign in',
+			'sign up',
 		]) ||
 		includesAny(html, [
 			'free trial',
@@ -279,7 +288,9 @@ function signalSaas(html: string, nav: string): boolean {
 			'per user',
 			'/month',
 			'subscription',
-		])
+			'dashboard',
+		]) ||
+		url.hostname.startsWith('app.')
 	);
 }
 
@@ -309,20 +320,31 @@ function signalBlog(
 		$('article').length > 0 ||
 		html.includes('application/rss') ||
 		body.includes('recent posts') ||
-		$('[itemtype*="Article"]').length > 0
+		$('[itemtype*="Article"]').length > 0 ||
+		/\/blog\//i.test(html)
 	);
 }
 
-function signalPortfolio(nav: string): boolean {
-	return includesAny(nav, ['portfolio', 'work', 'projects', 'case studies']);
+function signalPortfolio(nav: string, body: string): boolean {
+	return (
+		includesAny(nav, ['portfolio', 'work', 'projects', 'case studies']) ||
+		includesAny(body, ['case studies', 'our team', 'selected work'])
+	);
 }
 
-function signalLanding($: cheerio.CheerioAPI): boolean {
+function signalLanding($: cheerio.CheerioAPI, body: string): boolean {
 	const navAnchorCount = $('nav a').length;
 	const hashLinkCount = $('a[href^="#"]').length;
 	const hasNav = $('nav').length > 0;
+
+	const repeatedCta =
+		(body.match(/get started|book demo|start free trial|contact us/g) ?? [])
+			.length >= 2;
+
 	return (
-		(navAnchorCount <= 3 && hashLinkCount > 5) || (!hasNav && hashLinkCount > 3)
+		(navAnchorCount <= 3 && hashLinkCount > 5) ||
+		(!hasNav && hashLinkCount > 3) ||
+		repeatedCta
 	);
 }
 
@@ -330,22 +352,6 @@ function signalLanding($: cheerio.CheerioAPI): boolean {
 // MAIN EXPORT — WEBSITE TYPE DETECTION
 // ─────────────────────────────────────────────
 
-/**
- * Classifies a website and detects auth presence from its homepage HTML.
- *
- * Detection priority (first match wins):
- *   ecommerce → saas → business → blog → portfolio → landing → unknown
- *
- * Auth detection runs INDEPENDENTLY across all types via detectAuthPresence().
- * Any site can have requiresAuth: true regardless of its type.
- *
- * Per spec Section 3.2 — when requiresAuth is true:
- *   1. Scan still runs on public pages (homepage, pricing, features)
- *   2. Report body shows AUTH_NOTE
- *   3. Results page shows AUTH_BANNER + Custom plan CTA
- *   4. CTA → hello@getqalaunch.com
- *   DO NOT auto-bypass login.
- */
 export function detectWebsiteType(
 	homepageHtml: string,
 	baseUrl: string,
@@ -354,10 +360,8 @@ export function detectWebsiteType(
 	const { html, nav, body, title } = normalisePage($);
 	const url = new URL(baseUrl);
 
-	// Auth detection runs first and is independent of website type
 	const requiresAuth = detectAuthPresence($, url, html, nav, body, title);
 
-	// Build the auth payload once — reused in the result if needed
 	const authPayload =
 		requiresAuth ?
 			{
@@ -367,40 +371,32 @@ export function detectWebsiteType(
 			}
 		:	{};
 
-	// ── 1. Ecommerce ──────────────────────────────────────────────────────
+	// Detection priority:
+	// ecommerce -> saas -> business -> blog -> portfolio -> landing -> unknown
+
 	if (signalEcommerce($, html, nav)) {
 		return { type: 'ecommerce', requiresAuth, ...authPayload };
 	}
 
-	// ── 2. SaaS ───────────────────────────────────────────────────────────
-	// Note: webapp is no longer a separate type per this refactor.
-	// A webapp IS a SaaS — the difference is captured by requiresAuth.
-	// notion.com → saas + requiresAuth: true
-	// stripe.com → saas + requiresAuth: false
-	if (signalSaas(html, nav)) {
+	if (signalSaas(html, nav, url)) {
 		return { type: 'saas', requiresAuth, ...authPayload };
 	}
 
-	// ── 3. Business / Services ────────────────────────────────────────────
 	if (signalBusiness($, nav, body)) {
 		return { type: 'business', requiresAuth, ...authPayload };
 	}
 
-	// ── 4. Blog / Content ─────────────────────────────────────────────────
 	if (signalBlog($, html, body)) {
 		return { type: 'blog', requiresAuth, ...authPayload };
 	}
 
-	// ── 5. Portfolio / Agency ─────────────────────────────────────────────
-	if (signalPortfolio(nav)) {
+	if (signalPortfolio(nav, body)) {
 		return { type: 'portfolio', requiresAuth, ...authPayload };
 	}
 
-	// ── 6. Single-page landing ────────────────────────────────────────────
-	if (signalLanding($)) {
+	if (signalLanding($, body)) {
 		return { type: 'landing', requiresAuth, ...authPayload };
 	}
 
-	// ── 7. Unknown — still flag auth if detected ──────────────────────────
 	return { type: 'unknown', requiresAuth, ...authPayload };
 }

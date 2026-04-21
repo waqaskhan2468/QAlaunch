@@ -38,10 +38,10 @@ export async function POST(req: Request) {
 	await supabase.from('scans').update({ status: 'crawling' }).eq('id', scanId);
 
 	try {
-		// ── 1. Fetch homepage HTML ─────────────────────────────────────────
+		// 1) Fetch homepage HTML (simple fetch + cheerio pipeline in utils)
 		const homepageHtml = await fetchHomepageHtml(targetUrl);
 
-		// ── 2. Detect website type + auth presence ─────────────────────────
+		// 2) Detect website type + auth presence
 		const detection = detectWebsiteType(homepageHtml, targetUrl);
 
 		console.log('[process] detection', {
@@ -50,12 +50,8 @@ export async function POST(req: Request) {
 			requiresAuth: detection.requiresAuth,
 		});
 
-		// ── 3. Select pages ────────────────────────────────────────────────
-		//
-		// Per spec Section 3.2:
-		// Even when requiresAuth is true, scan STILL RUNS on public pages.
-		// selectPagesToTest always returns only public pages — login/signup/
-		// dashboard routes are filtered by isPublicPage() automatically.
+		// 3) Select pages by package + website type
+		// Auth/private routes are filtered in page-selection via isPublicPage().
 		const pagesToTest = selectPagesToTest(
 			homepageHtml,
 			targetUrl,
@@ -71,16 +67,7 @@ export async function POST(req: Request) {
 			pages: pagesToTest,
 		});
 
-		// ── 4. Persist to DB ───────────────────────────────────────────────
-		//
-		// Columns written match the spec DB schema exactly:
-		//   website_type  → text  e.g. 'saas', 'ecommerce', 'business'
-		//   pages_to_test → jsonb array of URL strings
-		//   status        → 'crawling' (Playwright VPS picks up from here)
-		//   error_message → null (cleared on success)
-		//
-		// requiresAuth, banner, notes, contactUrl are NOT DB columns —
-		// they live in the response body for the frontend to consume.
+		// 4) Persist scan metadata for downstream workers
 		await supabase
 			.from('scans')
 			.update({
@@ -91,21 +78,16 @@ export async function POST(req: Request) {
 			})
 			.eq('id', scanId);
 
-		// ── 5. Return response ─────────────────────────────────────────────
-		//
-		// Always 200 — scan is running on public pages regardless of requiresAuth.
-		//
-		// When requiresAuth is true, the frontend must:
-		//   - Show detection.auth.banner on the results page (per spec)
-		//   - Show detection.auth.notes in the report body (per spec)
-		//   - Show "contact us" CTA with detection.auth.contactUrl
-		//   - Make clear login/signup areas were NOT tested
+		// 5) Return payload for frontend
+		// If requiresAuth=true, frontend should show:
+		// - auth.banner on results page
+		// - auth.notes in report body
+		// - contact CTA using auth.contactUrl
 		return NextResponse.json({
 			ok: true,
 			websiteType: detection.type,
 			requiresAuth: detection.requiresAuth,
 			pagesToTest,
-			// Auth copy for the frontend — NOT stored in DB
 			...(detection.requiresAuth && {
 				auth: {
 					notes: detection.notes,
@@ -119,7 +101,6 @@ export async function POST(req: Request) {
 
 		console.error('[process] scan failed', { scanId, error: message });
 
-		// Per spec DB schema: error_message populated when status = 'failed'
 		await supabase
 			.from('scans')
 			.update({
@@ -131,4 +112,3 @@ export async function POST(req: Request) {
 		return NextResponse.json({ error: message }, { status: 500 });
 	}
 }
-

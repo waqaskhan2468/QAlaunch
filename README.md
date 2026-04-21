@@ -62,8 +62,8 @@ qa-launch/
 ### 1) Clone the repository
 
 ```bash
-git clone https://github.com/yourname/qa-launch.git
-cd qa-launch
+git clone https://github.com/yourname/QALaunch.git
+cd QALaunch
 ```
 
 ### 2) Install and run the frontend
@@ -112,8 +112,8 @@ Deploy the frontend normally on Vercel.
 ### VPS on your server
 
 ```bash
-git clone https://github.com/yourname/qa-launch.git
-cd qa-launch/vps
+git clone https://github.com/yourname/QALaunch.git
+cd QALaunch/vps
 
 docker build -t qa-playwright .
 docker run -d -p 3000:3000 qa-playwright

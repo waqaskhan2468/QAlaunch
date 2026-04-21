@@ -8,45 +8,88 @@ import {
 } from '@/lib/utils/detect';
 
 // ─────────────────────────────────────────────
-// LINK COLLECTION
+// LINK COLLECTION + NORMALIZATION
 // ─────────────────────────────────────────────
 
+const AUTH_KEYWORDS = [
+	'login',
+	'log-in',
+	'signin',
+	'sign-in',
+	'signup',
+	'sign-up',
+	'register',
+	'auth',
+	'account',
+	'dashboard',
+	'settings',
+	'logout',
+	'profile',
+	'my-account',
+];
+
+function hasAuthKeyword(url: URL): boolean {
+	const haystack = `${url.pathname}${url.search}${url.hash}`.toLowerCase();
+	return AUTH_KEYWORDS.some((k) => haystack.includes(k));
+}
+
+function normalizeInternalPublicUrl(
+	href: string | undefined,
+	baseUrl: string,
+): string | undefined {
+	const resolved = resolveUrl(href, baseUrl);
+	if (!resolved) return undefined;
+
+	const base = new URL(baseUrl);
+	const u = new URL(resolved);
+
+	if (u.origin !== base.origin) return undefined;
+	if (!isPublicPage(u.toString())) return undefined;
+	if (hasAuthKeyword(u)) return undefined;
+
+	u.hash = '';
+
+	let out = u.toString();
+	if (u.pathname !== '/' && out.endsWith('/')) {
+		out = out.slice(0, -1);
+	}
+	return out;
+}
+
 /**
- * Collects internal, publicly accessible links from nav / header.
- * Falls back to all <a> tags when fewer than 3 nav links are found.
+ * Collect internal, public links from nav/header first.
+ * Fallback to all anchors if nav is too sparse.
  */
 function collectNavLinks($: cheerio.CheerioAPI, baseUrl: string): string[] {
-	const origin = new URL(baseUrl).origin;
-
-	function toValidPublicUrl(href: string): string | undefined {
-		const resolved = resolveUrl(href, baseUrl);
-		return resolved && resolved.startsWith(origin) && isPublicPage(resolved) ?
-				resolved
-			:	undefined;
-	}
-
 	const navHrefs = extractHrefs($, 'nav a[href], header a[href]');
-	const navLinks = dedupe(navHrefs.map(toValidPublicUrl));
+	const navLinks = dedupe(
+		navHrefs.map((href) => normalizeInternalPublicUrl(href, baseUrl)),
+	);
 
 	if (navLinks.length >= 3) return navLinks;
 
-	// Fallback: scan all anchors on the page
 	const allHrefs = extractHrefs($, 'a[href]');
-	return dedupe(allHrefs.map(toValidPublicUrl));
+	return dedupe(
+		allHrefs.map((href) => normalizeInternalPublicUrl(href, baseUrl)),
+	);
+}
+
+function collectAllPublicLinks(
+	$: cheerio.CheerioAPI,
+	baseUrl: string,
+): string[] {
+	const hrefs = extractHrefs($, 'a[href]');
+	return dedupe(hrefs.map((href) => normalizeInternalPublicUrl(href, baseUrl)));
 }
 
 // ─────────────────────────────────────────────
-// FINDERS
+// HELPERS
 // ─────────────────────────────────────────────
 
 function findFirst(links: string[], patterns: string[]): string | undefined {
 	return links.find((l) => patterns.some((p) => l.toLowerCase().includes(p)));
 }
 
-/**
- * Finds up to `limit` product/item page URLs.
- * Uses .reduce() — no .each() / return false.
- */
 function findProductPages(
 	$: cheerio.CheerioAPI,
 	baseUrl: string,
@@ -55,47 +98,98 @@ function findProductPages(
 	const origin = new URL(baseUrl).origin;
 	return extractHrefs($, 'a[href]').reduce<string[]>((acc, href) => {
 		if (acc.length >= limit) return acc;
-		const resolved = resolveUrl(href, baseUrl);
+
+		const normalized = normalizeInternalPublicUrl(href, baseUrl);
+		if (!normalized) return acc;
+		if (!normalized.startsWith(origin)) return acc;
+
 		if (
-			resolved &&
-			resolved.startsWith(origin) &&
-			isPublicPage(resolved) &&
-			/\/products?\/|\/item\//i.test(resolved) &&
-			!acc.includes(resolved)
+			/\/products?\/|\/item\/|\/collections\/|\/shop\//i.test(normalized) &&
+			!acc.includes(normalized)
 		) {
-			acc.push(resolved);
+			acc.push(normalized);
 		}
 		return acc;
 	}, []);
 }
 
-/** Finds the first blog post / article URL via semantic selectors. */
 function findFirstArticle(
 	$: cheerio.CheerioAPI,
 	baseUrl: string,
 ): string | undefined {
-	const origin = new URL(baseUrl).origin;
 	return extractHrefs($, 'article a[href], .post a[href], .blog a[href]')
-		.map((href) => resolveUrl(href, baseUrl))
-		.find(
-			(resolved): resolved is string =>
-				resolved !== undefined &&
-				resolved.startsWith(origin) &&
-				isPublicPage(resolved),
-		);
+		.map((href) => normalizeInternalPublicUrl(href, baseUrl))
+		.find((url): url is string => Boolean(url));
+}
+
+function scoreUrl(url: string): number {
+	const l = url.toLowerCase();
+	let score = 0;
+
+	if (l.includes('/pricing')) score += 100;
+	if (
+		l.includes('/product') ||
+		l.includes('/features') ||
+		l.includes('/solutions')
+	)
+		score += 90;
+	if (
+		l.includes('/docs') ||
+		l.includes('/documentation') ||
+		l.includes('/help') ||
+		l.includes('/faq')
+	)
+		score += 80;
+	if (
+		l.includes('/security') ||
+		l.includes('/privacy') ||
+		l.includes('/compliance')
+	)
+		score += 70;
+	if (
+		l.includes('/about') ||
+		l.includes('/company') ||
+		l.includes('/team') ||
+		l.includes('/services')
+	)
+		score += 60;
+	if (
+		l.includes('/blog') ||
+		l.includes('/resources') ||
+		l.includes('/news') ||
+		l.includes('/insights') ||
+		l.includes('/changelog')
+	)
+		score += 50;
+	if (l.includes('/contact') || l.includes('/demo')) score += 40;
+
+	const depth = new URL(url).pathname.split('/').filter(Boolean).length;
+	score -= Math.max(0, depth - 2) * 5;
+
+	return score;
+}
+
+function rankLinks(links: string[]): string[] {
+	return [...links].sort((a, b) => scoreUrl(b) - scoreUrl(a));
+}
+
+function mergeUnique(
+	base: (string | undefined)[],
+	extras: string[],
+	maxCount: number,
+): string[] {
+	const merged = dedupe(base).filter(Boolean);
+	for (const link of extras) {
+		if (merged.length >= maxCount) break;
+		if (!merged.includes(link)) merged.push(link);
+	}
+	return merged.slice(0, maxCount);
 }
 
 // ─────────────────────────────────────────────
-// STANDARD PAGE SELECTION (2–5 pages)
+// TYPE-BASED STANDARD (2–5)
 // ─────────────────────────────────────────────
 
-/**
- * Per spec Section 3.3 — Standard Package (2-5 pages).
- *
- * For all types including saas with requiresAuth:
- *   - Public pages only (homepage, pricing, features, about, contact)
- *   - Auth routes NEVER included (isPublicPage filters them)
- */
 function selectStandardPages(
 	homepageHtml: string,
 	baseUrl: string,
@@ -103,45 +197,47 @@ function selectStandardPages(
 ): string[] {
 	const $ = cheerio.load(homepageHtml);
 	const navLinks = collectNavLinks($, baseUrl);
+	const allPublic = collectAllPublicLinks($, baseUrl);
 	const homepage = new URL('/', baseUrl).toString();
-	const pages: (string | undefined)[] = [homepage];
+
+	const curated: (string | undefined)[] = [homepage];
 
 	switch (type) {
-		// saas covers both pure marketing SaaS AND webapps (notion, facebook etc.)
-		// Per spec: scan public pages — homepage + pricing + features
 		case 'saas':
-		case 'webapp': // kept for backwards compat if WebsiteType still has it
-			pages.push(findFirst(navLinks, ['/features', '/product']));
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact', '/demo']));
+		case 'webapp':
+			curated.push(
+				findFirst(navLinks, ['/features', '/product', '/solutions']),
+			);
+			curated.push(findFirst(navLinks, ['/pricing']));
+			curated.push(findFirst(navLinks, ['/about', '/company']));
+			curated.push(findFirst(navLinks, ['/contact', '/demo']));
 			break;
 
 		case 'ecommerce':
-			pages.push(
+			curated.push(
 				findFirst(navLinks, ['/shop', '/products', '/collections', '/store']),
 			);
-			pages.push(...findProductPages($, baseUrl, 1));
-			pages.push(findFirst(navLinks, ['/cart', '/basket']));
-			pages.push(findFirst(navLinks, ['/checkout']));
+			curated.push(...findProductPages($, baseUrl, 1));
+			curated.push(findFirst(navLinks, ['/cart', '/basket']));
+			curated.push(findFirst(navLinks, ['/checkout']));
 			break;
 
 		case 'business':
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/services', '/what-we-do']));
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/contact', '/get-quote', '/book']));
+			curated.push(findFirst(navLinks, ['/about', '/company']));
+			curated.push(findFirst(navLinks, ['/services', '/what-we-do']));
+			curated.push(findFirst(navLinks, ['/pricing']));
+			curated.push(findFirst(navLinks, ['/contact', '/get-quote', '/book']));
 			break;
 
 		case 'blog':
-			pages.push(findFirst(navLinks, ['/blog', '/posts', '/articles']));
-			pages.push(findFirstArticle($, baseUrl));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact']));
+			curated.push(findFirst(navLinks, ['/blog', '/posts', '/articles']));
+			curated.push(findFirstArticle($, baseUrl));
+			curated.push(findFirst(navLinks, ['/about']));
+			curated.push(findFirst(navLinks, ['/contact']));
 			break;
 
 		case 'portfolio':
-			pages.push(
+			curated.push(
 				findFirst(navLinks, [
 					'/work',
 					'/portfolio',
@@ -149,28 +245,26 @@ function selectStandardPages(
 					'/case-studies',
 				]),
 			);
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact']));
+			curated.push(findFirst(navLinks, ['/about', '/team']));
+			curated.push(findFirst(navLinks, ['/contact']));
+			curated.push(findFirst(navLinks, ['/services']));
 			break;
 
 		default:
-			// landing / unknown
-			pages.push(...navLinks.slice(0, 4));
+			curated.push(...navLinks.slice(0, 4));
 	}
 
-	return dedupe(pages).slice(0, 5);
+	const fallbackPool = rankLinks(
+		allPublic.filter((u) => u !== homepage && !dedupe(curated).includes(u)),
+	);
+
+	return mergeUnique(curated, fallbackPool, 5);
 }
 
 // ─────────────────────────────────────────────
-// PREMIUM PAGE SELECTION (6–10 pages)
+// TYPE-BASED PREMIUM (6–10)
 // ─────────────────────────────────────────────
 
-/**
- * Per spec Section 3.3 — Premium Package (6-10 pages).
- * Same logic as Standard but wider coverage per category.
- * For eCommerce: 2-3 product pages from different categories.
- * For business: include FAQ, blog index, team pages.
- */
 function selectPremiumPages(
 	homepageHtml: string,
 	baseUrl: string,
@@ -178,66 +272,77 @@ function selectPremiumPages(
 ): string[] {
 	const $ = cheerio.load(homepageHtml);
 	const navLinks = collectNavLinks($, baseUrl);
+	const allPublic = collectAllPublicLinks($, baseUrl);
 	const homepage = new URL('/', baseUrl).toString();
-	const pages: (string | undefined)[] = [homepage];
+
+	const curated: (string | undefined)[] = [homepage];
 
 	switch (type) {
 		case 'saas':
 		case 'webapp':
-			pages.push(findFirst(navLinks, ['/features', '/product']));
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact', '/demo']));
-			pages.push(findFirst(navLinks, ['/blog', '/resources', '/changelog']));
-			pages.push(findFirst(navLinks, ['/faq', '/help', '/docs']));
-			pages.push(findFirst(navLinks, ['/security', '/privacy', '/compliance']));
+			curated.push(
+				findFirst(navLinks, ['/features', '/product', '/solutions']),
+			);
+			curated.push(findFirst(navLinks, ['/pricing']));
+			curated.push(findFirst(navLinks, ['/about', '/company']));
+			curated.push(findFirst(navLinks, ['/contact', '/demo']));
+			curated.push(findFirst(navLinks, ['/docs', '/help', '/resources']));
+			curated.push(findFirst(navLinks, ['/blog', '/changelog']));
+			curated.push(
+				findFirst(navLinks, ['/security', '/privacy', '/compliance']),
+			);
 			break;
 
 		case 'ecommerce':
-			pages.push(
+			curated.push(
 				findFirst(navLinks, ['/shop', '/products', '/collections', '/store']),
 			);
-			// Per spec: 2-3 product pages from different categories
-			pages.push(...findProductPages($, baseUrl, 3));
-			pages.push(findFirst(navLinks, ['/cart', '/basket']));
-			pages.push(findFirst(navLinks, ['/checkout']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact', '/faq', '/help']));
+			// Premium: 2-3 product pages
+			curated.push(...findProductPages($, baseUrl, 3));
+			curated.push(findFirst(navLinks, ['/cart', '/basket']));
+			curated.push(findFirst(navLinks, ['/checkout']));
+			curated.push(findFirst(navLinks, ['/about']));
+			curated.push(findFirst(navLinks, ['/contact', '/faq', '/help']));
 			break;
 
 		case 'business':
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/services', '/what-we-do']));
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/contact', '/get-quote']));
-			// Per spec: FAQ, blog index, team pages for business premium
-			pages.push(findFirst(navLinks, ['/team', '/our-team']));
-			pages.push(findFirst(navLinks, ['/faq']));
-			pages.push(findFirst(navLinks, ['/blog', '/news', '/insights']));
+			curated.push(findFirst(navLinks, ['/about', '/company']));
+			curated.push(findFirst(navLinks, ['/services', '/what-we-do']));
+			curated.push(findFirst(navLinks, ['/pricing']));
+			curated.push(findFirst(navLinks, ['/contact', '/get-quote', '/book']));
+			// Premium additions requested by spec
+			curated.push(findFirst(navLinks, ['/team', '/our-team']));
+			curated.push(findFirst(navLinks, ['/faq']));
+			curated.push(findFirst(navLinks, ['/blog', '/news', '/insights']));
 			break;
 
 		case 'blog':
-			pages.push(findFirst(navLinks, ['/blog', '/posts', '/articles']));
-			pages.push(findFirstArticle($, baseUrl));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact']));
-			pages.push(findFirst(navLinks, ['/categories', '/tags', '/topics']));
-			pages.push(...navLinks.slice(0, 3));
+			curated.push(findFirst(navLinks, ['/blog', '/posts', '/articles']));
+			curated.push(findFirstArticle($, baseUrl));
+			curated.push(findFirst(navLinks, ['/about']));
+			curated.push(findFirst(navLinks, ['/contact']));
+			curated.push(findFirst(navLinks, ['/categories', '/tags', '/topics']));
+			curated.push(...navLinks.slice(0, 3));
 			break;
 
 		case 'portfolio':
-			pages.push(findFirst(navLinks, ['/work', '/portfolio', '/projects']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact']));
-			pages.push(findFirst(navLinks, ['/services']));
-			pages.push(...navLinks.slice(0, 4));
+			curated.push(findFirst(navLinks, ['/work', '/portfolio', '/projects']));
+			curated.push(findFirst(navLinks, ['/about', '/team']));
+			curated.push(findFirst(navLinks, ['/contact']));
+			curated.push(findFirst(navLinks, ['/services']));
+			curated.push(findFirst(navLinks, ['/case-studies', '/testimonials']));
+			curated.push(...navLinks.slice(0, 4));
 			break;
 
 		default:
-			pages.push(...navLinks.slice(0, 9));
+			curated.push(...navLinks.slice(0, 9));
 	}
 
-	return dedupe(pages).slice(0, 10);
+	const fallbackPool = rankLinks(
+		allPublic.filter((u) => u !== homepage && !dedupe(curated).includes(u)),
+	);
+
+	return mergeUnique(curated, fallbackPool, 10);
 }
 
 // ─────────────────────────────────────────────
@@ -245,16 +350,10 @@ function selectPremiumPages(
 // ─────────────────────────────────────────────
 
 /**
- * Returns the ordered list of URLs to scan for a given package tier.
- *
- * Per spec Section 3.3:
- *   free / basic  → homepage only (1 page)
- *   standard      → 2–5 pages curated by website type
- *   premium       → 6–10 pages curated by website type
- *   enterprise    → [] (manual QA team selects pages)
- *
- * Auth safety: isPublicPage() filters auth routes from every collected link.
- * Login / signup / dashboard pages NEVER appear in the returned list.
+ * free/basic   => homepage only
+ * standard     => 2-5 pages, type-based + fallback fill
+ * premium      => 6-10 pages, wider type-based + fallback fill
+ * enterprise   => [] (manual QA team selection)
  */
 export function selectPagesToTest(
 	homepageHtml: string,
@@ -276,7 +375,6 @@ export function selectPagesToTest(
 			return selectPremiumPages(homepageHtml, baseUrl, websiteType);
 
 		case 'enterprise':
-			// Pages selected manually by QA team
 			return [];
 
 		default:
