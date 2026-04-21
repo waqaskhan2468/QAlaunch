@@ -1,128 +1,72 @@
 import * as cheerio from 'cheerio';
-import type { WebsiteType, ScanPackage } from '@/types/zod';
+import type { WebsiteType } from '@/types/zod';
 
 // ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
 
-/**
- * All contact/upsell copy lives here.
- * Swap the email string when the custom address is ready.
- */
-const CONTACT_EMAIL = 'hello@getqalaunch.com'; // TODO: replace with custom email when ready
+const CONTACT_EMAIL = 'hello@getqalaunch.com';
 
-// Webapp: core product is gated — hard block, manual QA only
-const WEBAPP_BANNER =
-	'Web app detected — authenticated areas need manual QA. Contact us for a Custom plan.';
-const WEBAPP_NOTE =
-	'Authenticated areas were not tested. Only publicly accessible pages were scanned.';
+const AUTH_BANNER =
+	'We noticed this site has login / sign-up areas. Authenticated pages were not tested — contact us for a Custom plan to include them.';
 
-// SaaS with login: public site that also has a login — soft upsell notice
-const SAAS_LOGIN_NOTICE =
-	'We noticed your site has a login. For testing of authenticated areas, contact us for a Custom plan.';
+const AUTH_NOTE =
+	'This site has login or sign-up functionality. Authenticated areas were not scanned. Only publicly accessible pages were tested.';
 
 /**
- * URL path segments that indicate a private / authenticated page.
- * These are always filtered out of the crawlable page list regardless of type.
+ * URL path segments that are private / authenticated.
+ * Used to filter these out of the crawlable page list.
  */
-const AUTH_PATH_PATTERN =
-	/\/(login|log-in|sign-in|signup|sign-up|register|dashboard|account|settings|auth)(\/|$|\?)/i;
+export const AUTH_PATH_PATTERN =
+	/\/(login|log-in|sign-in|signin|signup|sign-up|register|dashboard|account|settings|auth|logout|profile|my-account)(\/|$|\?|#)/i;
 
 // ─────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────
 
-/**
- * Describes how the scan should behave and what to show the user.
- *
- * requiresAuth = true  → webapp: core product is gated, creds stored for manual QA
- * hasLoginUpsell = true → saas-with-login: public site detected but login exists,
- *                         show soft notice encouraging Custom plan upgrade
- */
 export type DetectionResult = {
 	type: WebsiteType;
 
 	/**
-	 * TRUE only for webapp: the site's core value requires authentication.
-	 * Scan is limited to public pages. Credentials are stored for manual QA.
-	 * DO NOT auto-bypass login.
+	 * True when the site has login / sign-up / auth areas detected.
+	 *
+	 * Per spec Section 3.2:
+	 *   1. Scan STILL RUNS on publicly accessible pages
+	 *   2. Report shows AUTH_NOTE  ("Authenticated areas not tested")
+	 *   3. Results page shows AUTH_BANNER + Custom plan CTA
+	 *   4. CTA → hello@getqalaunch.com
+	 *   DO NOT auto-bypass login.
 	 */
 	requiresAuth: boolean;
-
-	/**
-	 * TRUE for SaaS sites that also have a login UI.
-	 * The homepage IS publicly accessible so a full scan runs,
-	 * but we surface a soft upsell nudge to the user.
-	 */
-	hasLoginUpsell: boolean;
 
 	/** Shown inline in the scan report body. */
 	notes?: string;
 
-	/**
-	 * Shown as a prominent banner on the results page.
-	 * Set for webapp (hard warning) and saas-with-login (soft notice).
-	 */
+	/** Shown as a prominent banner on the results page. */
 	banner?: string;
 
-	/**
-	 * Pre-populated mailto href for the CTA button.
-	 * Shown when requiresAuth OR hasLoginUpsell is true.
-	 */
+	/** Pre-populated mailto CTA for the Custom plan. */
 	contactUrl?: string;
-
-	/**
-	 * When requiresAuth is true and the user provided credentials,
-	 * this flag tells the caller to persist them for the manual QA team.
-	 * Credentials must NEVER be used for automated login bypass.
-	 */
-	storeCredentialsForManualQA: boolean;
-};
-
-// ─────────────────────────────────────────────
-// CREDENTIALS PAYLOAD
-// ─────────────────────────────────────────────
-
-/**
- * Shape of the login credentials the user fills in via the QAlaunch form.
- * Stored securely and handed off to the manual QA team — never used
- * for automated login.
- */
-export type WebappCredentials = {
-	loginUrl: string;
-	email: string;
-	/** Store encrypted at rest. Never log. */
-	password: string;
-	/** Optional: extra context the QA team needs (e.g. 2FA notes, role) */
-	notes?: string;
 };
 
 // ─────────────────────────────────────────────
 // UTILITIES
 // ─────────────────────────────────────────────
 
-function includesAny(text: string, needles: string[]): boolean {
+export function includesAny(text: string, needles: string[]): boolean {
 	return needles.some((n) => text.includes(n));
 }
 
-function dedupe(arr: (string | undefined)[]): string[] {
-	return [...new Set(arr.filter((v): v is string => Boolean(v)))];
-}
-
-/**
- * Safely resolves a href against a base URL.
- * Skips javascript:, mailto:, tel:, and fragment-only hrefs.
- */
-function resolveUrl(
+export function resolveUrl(
 	href: string | undefined,
 	baseUrl: string,
 ): string | undefined {
 	if (
 		!href ||
+		href === '#' ||
 		href.startsWith('javascript:') ||
 		href.startsWith('mailto:') ||
-		href.startsWith('tel:') ||
-		href === '#'
+		href.startsWith('tel:')
 	) {
 		return undefined;
 	}
@@ -133,124 +77,172 @@ function resolveUrl(
 	}
 }
 
-/** Returns true when the URL does NOT match any known auth/private path. */
-function isPublicPage(url: string): boolean {
+export function isPublicPage(url: string): boolean {
 	return !AUTH_PATH_PATTERN.test(url);
+}
+
+export function dedupe(arr: (string | undefined)[]): string[] {
+	return [...new Set(arr.filter((v): v is string => Boolean(v)))];
+}
+
+export function extractHrefs(
+	$: cheerio.CheerioAPI,
+	selector: string,
+): string[] {
+	return $(selector)
+		.map((_i, el) => $(el).attr('href'))
+		.get() as string[];
 }
 
 // ─────────────────────────────────────────────
 // HTML NORMALISATION
 // ─────────────────────────────────────────────
 
-interface NormalisedPage {
+export interface NormalisedPage {
 	html: string;
 	nav: string;
 	body: string;
+	title: string;
 }
 
-/**
- * Lowercases HTML, nav text, and body text once upfront.
- * All signal functions receive these pre-lowercased strings.
- */
-function normalisePage($: cheerio.CheerioAPI): NormalisedPage {
+export function normalisePage($: cheerio.CheerioAPI): NormalisedPage {
 	return {
 		html: ($.html() ?? '').toLowerCase(),
 		nav: $('nav, header').text().toLowerCase(),
 		body: $('body').text().toLowerCase(),
+		title: $('title').text().toLowerCase(),
 	};
 }
 
 // ─────────────────────────────────────────────
-// LINK HELPERS
+// AUTH DETECTION — CORE LOGIC
 // ─────────────────────────────────────────────
 
 /**
- * Extracts all href attribute values from a selector as a plain string[].
- * Uses .map().get() — the stable Cheerio API that avoids Element/AnyNode types.
+ * Detects whether a site has login / sign-up / auth areas.
+ *
+ * Works in layers — each layer catches a different class of site:
+ *
+ *   Layer 1 — URL structure signals (catches app.* subdomains, /login paths)
+ *   Layer 2 — Login form in HTML (password field = strongest possible signal)
+ *   Layer 3 — Page title signals (catches JS-heavy sites like Notion, Facebook
+ *              that return minimal HTML but still set a meaningful <title>)
+ *   Layer 4 — Nav / body text signals (catches marketing sites with login CTA)
+ *   Layer 5 — Structural signals (dashboard, authenticated, user-portal)
+ *
+ * Per spec: when true → scan runs on public pages + banner + note shown.
+ * DO NOT stop the scan. DO NOT auto-bypass login.
  */
-function extractHrefs($: cheerio.CheerioAPI, selector: string): string[] {
-	return $(selector)
-		.map((_i, el) => $(el).attr('href'))
-		.get() as string[];
-}
-
-/**
- * Collects internal public-facing links from nav/header.
- * Falls back to all <a> tags when fewer than 3 nav links are found.
- */
-function collectNavLinks($: cheerio.CheerioAPI, baseUrl: string): string[] {
-	const origin = new URL(baseUrl).origin;
-
-	function toValidPublicUrl(href: string): string | undefined {
-		const resolved = resolveUrl(href, baseUrl);
-		return resolved && resolved.startsWith(origin) && isPublicPage(resolved) ?
-				resolved
-			:	undefined;
+function detectAuthPresence(
+	$: cheerio.CheerioAPI,
+	url: URL,
+	html: string,
+	nav: string,
+	body: string,
+	title: string,
+): boolean {
+	// ── Layer 1: URL structure ─────────────────────────────────────────────
+	// app.* subdomains or /app paths are almost always gated products
+	if (
+		url.hostname.startsWith('app.') ||
+		url.hostname.startsWith('accounts.') ||
+		url.hostname.startsWith('my.') ||
+		url.pathname.startsWith('/app/')
+	) {
+		return true;
 	}
 
-	const navHrefs = extractHrefs($, 'nav a[href], header a[href]');
-	const navLinks = dedupe(navHrefs.map(toValidPublicUrl));
+	// ── Layer 2: Password field in HTML ───────────────────────────────────
+	// The single strongest signal — a password input means a login form exists
+	if (
+		html.includes('type="password"') ||
+		html.includes("type='password'") ||
+		html.includes('type=password')
+	) {
+		return true;
+	}
 
-	if (navLinks.length >= 3) return navLinks;
+	// ── Layer 3: Page title signals ───────────────────────────────────────
+	// Catches JS-rendered sites (Notion, Facebook, Gmail) that return a <title>
+	// even when the body HTML is minimal or server-rendered differently
+	if (
+		includesAny(title, [
+			'log in',
+			'login',
+			'sign in',
+			'signin',
+			'sign up',
+			'signup',
+			'create account',
+			'register',
+			'welcome back',
+		])
+	) {
+		return true;
+	}
 
-	// Fallback: scan all anchors on the page
-	const allHrefs = extractHrefs($, 'a[href]');
-	return dedupe(allHrefs.map(toValidPublicUrl));
+	// ── Layer 4: Nav / body text login signals ────────────────────────────
+	// Login CTA in nav is a strong signal — combined with any secondary signal
+	const hasLoginCta = includesAny(nav, [
+		'log in',
+		'login',
+		'sign in',
+		'signin',
+	]);
+
+	const hasSignupCta = includesAny(nav, [
+		'sign up',
+		'signup',
+		'get started for free',
+		'create account',
+		'register',
+	]);
+
+	// Nav has BOTH login and signup = definite auth-aware site
+	if (hasLoginCta && hasSignupCta) {
+		return true;
+	}
+
+	// ── Layer 5: Structural / gated product signals ───────────────────────
+	// Dashboard, user-portal, authenticated markers = product is gated
+	const hasGatedSignal =
+		html.includes('dashboard') ||
+		html.includes('user-portal') ||
+		html.includes('"authenticated"') ||
+		html.includes("'authenticated'") ||
+		html.includes('data-auth') ||
+		html.includes('isloggedin') ||
+		html.includes('is-logged-in');
+
+	// Login CTA + gated signal together = webapp
+	if (hasLoginCta && hasGatedSignal) {
+		return true;
+	}
+
+	// ── Layer 6: Meta / link signals ─────────────────────────────────────
+	// OpenGraph or meta tags explicitly mentioning login/signup pages
+	const metaDesc =
+		$('meta[name="description"]').attr('content')?.toLowerCase() ?? '';
+	const ogTitle =
+		$('meta[property="og:title"]').attr('content')?.toLowerCase() ?? '';
+
+	if (
+		includesAny(metaDesc, [
+			'log in',
+			'sign in',
+			'create account',
+			'sign up to',
+		]) ||
+		includesAny(ogTitle, ['log in', 'sign in', 'welcome back'])
+	) {
+		return true;
+	}
+
+	return false;
 }
 
 // ─────────────────────────────────────────────
-// FINDERS
-// ─────────────────────────────────────────────
-
-/** Returns the first link whose lowercased path contains any of the patterns. */
-function findFirst(links: string[], patterns: string[]): string | undefined {
-	return links.find((l) => patterns.some((p) => l.toLowerCase().includes(p)));
-}
-
-/**
- * Finds up to `limit` product/item page URLs.
- * Uses .reduce() — no .each() / return false needed.
- */
-function findProductPages(
-	$: cheerio.CheerioAPI,
-	baseUrl: string,
-	limit = 3,
-): string[] {
-	const origin = new URL(baseUrl).origin;
-	return extractHrefs($, 'a[href]').reduce<string[]>((acc, href) => {
-		if (acc.length >= limit) return acc;
-		const resolved = resolveUrl(href, baseUrl);
-		if (
-			resolved &&
-			resolved.startsWith(origin) &&
-			isPublicPage(resolved) &&
-			/\/products?\/|\/item\//i.test(resolved) &&
-			!acc.includes(resolved)
-		) {
-			acc.push(resolved);
-		}
-		return acc;
-	}, []);
-}
-
-/** Finds the first blog post / article URL using semantic selectors. */
-function findFirstArticle(
-	$: cheerio.CheerioAPI,
-	baseUrl: string,
-): string | undefined {
-	const origin = new URL(baseUrl).origin;
-	return extractHrefs($, 'article a[href], .post a[href], .blog a[href]')
-		.map((href) => resolveUrl(href, baseUrl))
-		.find(
-			(resolved): resolved is string =>
-				resolved !== undefined &&
-				resolved.startsWith(origin) &&
-				isPublicPage(resolved),
-		);
-}
-
-// ─────────────────────────────────────────────
-// DETECTION SIGNALS
+// WEBSITE TYPE SIGNALS
 // ─────────────────────────────────────────────
 
 function signalEcommerce(
@@ -265,77 +257,30 @@ function signalEcommerce(
 		html.includes('woocommerce') ||
 		$('[class*="wc-"]').length > 0 ||
 		includesAny(nav, ['add to cart', 'buy now', 'shop now']) ||
-		html.includes('product:') ||
+		// NOTE: 'product:' must NOT match generic words — check carefully
+		html.includes('<meta property="product:') ||
 		/\/products\/|\/collections\//i.test(html)
 	);
 }
 
-/**
- * Detects a login CTA anywhere in the nav/header.
- * Used by both webapp and saas-with-login detection.
- */
-function signalHasLoginCta(nav: string): boolean {
-	return includesAny(nav, ['login', 'log in', 'sign in']);
-}
-
-/**
- * Webapp = core product is gated behind a login wall.
- *
- * Requires BOTH a login CTA AND a structural gating signal.
- * This prevents misclassifying a SaaS marketing site (stripe.com has
- * a "Login" button but its homepage is fully public).
- *
- * When true:
- *   → requiresAuth: true
- *   → scan limited to public pages only
- *   → credentials stored for manual QA team
- *   → DO NOT attempt automated login bypass
- */
-function signalWebapp(url: URL, html: string, nav: string): boolean {
-	const hasLoginCta = signalHasLoginCta(nav);
-
-	const hasGatedSignal =
-		url.hostname.startsWith('app.') ||
-		url.pathname.startsWith('/app') ||
-		html.includes('dashboard') ||
-		html.includes('authenticated') ||
-		html.includes('your account') ||
-		html.includes('user-portal');
-
-	return hasLoginCta && hasGatedSignal;
-}
-
-/**
- * SaaS = public marketing site for a software product.
- *
- * Fires AFTER the webapp guard fails, so the homepage is confirmed public.
- * Returns two booleans:
- *   isSaas        — true if commercial SaaS signals are present
- *   hasLoginCta   — true if a login button also exists in the nav
- *
- * hasLoginCta drives the soft upsell notice on the results page.
- */
-function signalSaas(
-	html: string,
-	nav: string,
-): { isSaas: boolean; hasLoginCta: boolean } {
-	const isSaas =
+function signalSaas(html: string, nav: string): boolean {
+	return (
 		includesAny(nav, [
 			'pricing',
-			'sign up',
 			'get started',
 			'start for free',
 			'features',
+			'solutions',
 		]) ||
 		includesAny(html, [
 			'free trial',
 			'per month',
 			'per seat',
 			'per user',
+			'/month',
 			'subscription',
-		]);
-
-	return { isSaas, hasLoginCta: signalHasLoginCta(nav) };
+		])
+	);
 }
 
 function signalBusiness(
@@ -382,379 +327,80 @@ function signalLanding($: cheerio.CheerioAPI): boolean {
 }
 
 // ─────────────────────────────────────────────
-// CONTACT URL BUILDER
-// ─────────────────────────────────────────────
-
-function buildContactUrl(subject: string): string {
-	// TODO: replace CONTACT_EMAIL with custom address when ready
-	return `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}`;
-}
-
-// ─────────────────────────────────────────────
-// WEBSITE TYPE DETECTION
+// MAIN EXPORT — WEBSITE TYPE DETECTION
 // ─────────────────────────────────────────────
 
 /**
- * Classifies a website and determines scan + upsell behaviour.
+ * Classifies a website and detects auth presence from its homepage HTML.
  *
  * Detection priority (first match wins):
- *   ecommerce → webapp → saas → business → blog → portfolio → landing → unknown
+ *   ecommerce → saas → business → blog → portfolio → landing → unknown
  *
- * ── Three login-related outcomes ────────────────────────────────────────
+ * Auth detection runs INDEPENDENTLY across all types via detectAuthPresence().
+ * Any site can have requiresAuth: true regardless of its type.
  *
- *   1. WEBAPP  (requiresAuth: true)
- *      Core product is behind a login wall.
- *      - Scan public pages only (homepage, pricing, features)
- *      - Store user credentials for manual QA team
- *      - Show hard banner on results page
- *      - DO NOT auto-bypass login
- *
- *   2. SAAS WITH LOGIN  (hasLoginUpsell: true)
- *      Public marketing site that also has a login area.
- *      - Scan all public pages normally (full scan runs)
- *      - Show soft notice: "you have a login — contact us for auth testing"
- *      - No credentials needed, no manual QA routing
- *
- *   3. NO LOGIN  (requiresAuth: false, hasLoginUpsell: false)
- *      Fully public site. Standard scan, no special handling.
+ * Per spec Section 3.2 — when requiresAuth is true:
+ *   1. Scan still runs on public pages (homepage, pricing, features)
+ *   2. Report body shows AUTH_NOTE
+ *   3. Results page shows AUTH_BANNER + Custom plan CTA
+ *   4. CTA → hello@getqalaunch.com
+ *   DO NOT auto-bypass login.
  */
 export function detectWebsiteType(
 	homepageHtml: string,
 	baseUrl: string,
 ): DetectionResult {
 	const $ = cheerio.load(homepageHtml);
-	const { html, nav, body } = normalisePage($);
+	const { html, nav, body, title } = normalisePage($);
 	const url = new URL(baseUrl);
 
+	// Auth detection runs first and is independent of website type
+	const requiresAuth = detectAuthPresence($, url, html, nav, body, title);
+
+	// Build the auth payload once — reused in the result if needed
+	const authPayload =
+		requiresAuth ?
+			{
+				notes: AUTH_NOTE,
+				banner: AUTH_BANNER,
+				contactUrl: `mailto:${CONTACT_EMAIL}?subject=Custom%20Plan%20%E2%80%94%20Authenticated%20QA`,
+			}
+		:	{};
+
 	// ── 1. Ecommerce ──────────────────────────────────────────────────────
-	// Must run before webapp: Shopify stores have "Sign in" but are not webapps.
 	if (signalEcommerce($, html, nav)) {
-		return {
-			type: 'ecommerce',
-			requiresAuth: false,
-			hasLoginUpsell: false,
-			storeCredentialsForManualQA: false,
-		};
+		return { type: 'ecommerce', requiresAuth, ...authPayload };
 	}
 
-	// ── 2. Webapp ─────────────────────────────────────────────────────────
-	// Core product requires login. Credentials stored, manual QA only.
-	if (signalWebapp(url, html, nav)) {
-		return {
-			type: 'webapp',
-			requiresAuth: true,
-			hasLoginUpsell: false,
-			storeCredentialsForManualQA: true,
-			notes: WEBAPP_NOTE,
-			banner: WEBAPP_BANNER,
-			contactUrl: buildContactUrl('Custom Plan — Authenticated QA'),
-		};
+	// ── 2. SaaS ───────────────────────────────────────────────────────────
+	// Note: webapp is no longer a separate type per this refactor.
+	// A webapp IS a SaaS — the difference is captured by requiresAuth.
+	// notion.com → saas + requiresAuth: true
+	// stripe.com → saas + requiresAuth: false
+	if (signalSaas(html, nav)) {
+		return { type: 'saas', requiresAuth, ...authPayload };
 	}
 
-	// ── 3. SaaS ───────────────────────────────────────────────────────────
-	// Webapp guard failed → homepage is public. Check for login upsell.
-	const { isSaas, hasLoginCta } = signalSaas(html, nav);
-	if (isSaas) {
-		return {
-			type: 'saas',
-			requiresAuth: false,
-			// Has login UI but homepage is public → soft upsell notice only
-			hasLoginUpsell: hasLoginCta,
-			storeCredentialsForManualQA: false,
-			...(hasLoginCta && {
-				banner: SAAS_LOGIN_NOTICE,
-				contactUrl: buildContactUrl('Custom Plan — Authenticated Area Testing'),
-			}),
-		};
-	}
-
-	// ── 4. Business / Services ────────────────────────────────────────────
+	// ── 3. Business / Services ────────────────────────────────────────────
 	if (signalBusiness($, nav, body)) {
-		return {
-			type: 'business',
-			requiresAuth: false,
-			hasLoginUpsell: false,
-			storeCredentialsForManualQA: false,
-		};
+		return { type: 'business', requiresAuth, ...authPayload };
 	}
 
-	// ── 5. Blog / Content ─────────────────────────────────────────────────
+	// ── 4. Blog / Content ─────────────────────────────────────────────────
 	if (signalBlog($, html, body)) {
-		return {
-			type: 'blog',
-			requiresAuth: false,
-			hasLoginUpsell: false,
-			storeCredentialsForManualQA: false,
-		};
+		return { type: 'blog', requiresAuth, ...authPayload };
 	}
 
-	// ── 6. Portfolio / Agency ─────────────────────────────────────────────
+	// ── 5. Portfolio / Agency ─────────────────────────────────────────────
 	if (signalPortfolio(nav)) {
-		return {
-			type: 'portfolio',
-			requiresAuth: false,
-			hasLoginUpsell: false,
-			storeCredentialsForManualQA: false,
-		};
+		return { type: 'portfolio', requiresAuth, ...authPayload };
 	}
 
-	// ── 7. Landing page ───────────────────────────────────────────────────
+	// ── 6. Single-page landing ────────────────────────────────────────────
 	if (signalLanding($)) {
-		return {
-			type: 'landing',
-			requiresAuth: false,
-			hasLoginUpsell: false,
-			storeCredentialsForManualQA: false,
-		};
+		return { type: 'landing', requiresAuth, ...authPayload };
 	}
 
-	// ── 8. Unknown ────────────────────────────────────────────────────────
-	return {
-		type: 'unknown',
-		requiresAuth: false,
-		hasLoginUpsell: false,
-		storeCredentialsForManualQA: false,
-	};
-}
-
-// ─────────────────────────────────────────────
-// PAGE SELECTION — STANDARD (2–5 pages)
-// ─────────────────────────────────────────────
-
-/**
- * webapp → public pages only (homepage + pricing + features).
- *          Never includes authenticated routes regardless of what's in nav.
- * All other types → curated list by type, up to 5 pages.
- */
-function selectStandardPages(
-	homepageHtml: string,
-	baseUrl: string,
-	type: WebsiteType,
-): string[] {
-	const $ = cheerio.load(homepageHtml);
-	const navLinks = collectNavLinks($, baseUrl);
-	const homepage = new URL('/', baseUrl).toString();
-	const pages: (string | undefined)[] = [homepage];
-
-	switch (type) {
-		case 'webapp':
-			// Hard limit: public marketing pages only. No auth pages ever.
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/features', '/product']));
-			break;
-
-		case 'saas':
-			// Full scan — homepage is public. Login pages filtered by isPublicPage.
-			pages.push(findFirst(navLinks, ['/features', '/product']));
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact', '/demo']));
-			break;
-
-		case 'ecommerce':
-			pages.push(
-				findFirst(navLinks, ['/shop', '/products', '/collections', '/store']),
-			);
-			pages.push(...findProductPages($, baseUrl, 1));
-			pages.push(findFirst(navLinks, ['/cart', '/basket']));
-			pages.push(findFirst(navLinks, ['/checkout']));
-			break;
-
-		case 'business':
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/services', '/what-we-do']));
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/contact', '/get-quote', '/book']));
-			break;
-
-		case 'blog':
-			pages.push(findFirst(navLinks, ['/blog', '/posts', '/articles']));
-			pages.push(findFirstArticle($, baseUrl));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact']));
-			break;
-
-		case 'portfolio':
-			pages.push(
-				findFirst(navLinks, [
-					'/work',
-					'/portfolio',
-					'/projects',
-					'/case-studies',
-				]),
-			);
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact']));
-			break;
-
-		default:
-			// landing / unknown
-			pages.push(...navLinks.slice(0, 4));
-	}
-
-	return dedupe(pages).slice(0, 5);
-}
-
-// ─────────────────────────────────────────────
-// PAGE SELECTION — PREMIUM (6–10 pages)
-// ─────────────────────────────────────────────
-
-/**
- * webapp → still limited to public pages only (expanded list vs standard).
- * All other types → wider curated list by type, up to 10 pages.
- */
-function selectPremiumPages(
-	homepageHtml: string,
-	baseUrl: string,
-	type: WebsiteType,
-): string[] {
-	const $ = cheerio.load(homepageHtml);
-	const navLinks = collectNavLinks($, baseUrl);
-	const homepage = new URL('/', baseUrl).toString();
-	const pages: (string | undefined)[] = [homepage];
-
-	switch (type) {
-		case 'webapp':
-			// Still public-facing only — more pages vs standard but no auth routes.
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/features', '/product']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact', '/demo']));
-			pages.push(findFirst(navLinks, ['/security', '/privacy', '/compliance']));
-			break;
-
-		case 'saas':
-			pages.push(findFirst(navLinks, ['/features', '/product']));
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact', '/demo']));
-			pages.push(findFirst(navLinks, ['/blog', '/resources', '/changelog']));
-			pages.push(findFirst(navLinks, ['/faq', '/help', '/docs']));
-			pages.push(findFirst(navLinks, ['/security', '/privacy', '/compliance']));
-			break;
-
-		case 'ecommerce':
-			pages.push(
-				findFirst(navLinks, ['/shop', '/products', '/collections', '/store']),
-			);
-			pages.push(...findProductPages($, baseUrl, 3));
-			pages.push(findFirst(navLinks, ['/cart', '/basket']));
-			pages.push(findFirst(navLinks, ['/checkout']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact', '/faq', '/help']));
-			break;
-
-		case 'business':
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/services', '/what-we-do']));
-			pages.push(findFirst(navLinks, ['/pricing']));
-			pages.push(findFirst(navLinks, ['/contact', '/get-quote']));
-			pages.push(findFirst(navLinks, ['/team', '/our-team']));
-			pages.push(findFirst(navLinks, ['/faq']));
-			pages.push(findFirst(navLinks, ['/blog', '/news', '/insights']));
-			break;
-
-		case 'blog':
-			pages.push(findFirst(navLinks, ['/blog', '/posts', '/articles']));
-			pages.push(findFirstArticle($, baseUrl));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact']));
-			pages.push(findFirst(navLinks, ['/categories', '/tags', '/topics']));
-			pages.push(...navLinks.slice(0, 3));
-			break;
-
-		case 'portfolio':
-			pages.push(findFirst(navLinks, ['/work', '/portfolio', '/projects']));
-			pages.push(findFirst(navLinks, ['/about']));
-			pages.push(findFirst(navLinks, ['/contact']));
-			pages.push(findFirst(navLinks, ['/services']));
-			pages.push(...navLinks.slice(0, 4));
-			break;
-
-		default:
-			// landing / unknown
-			pages.push(...navLinks.slice(0, 9));
-	}
-
-	return dedupe(pages).slice(0, 10);
-}
-
-// ─────────────────────────────────────────────
-// MAIN ENTRY POINT
-// ─────────────────────────────────────────────
-
-/**
- * Returns the ordered list of URLs to scan for a given package tier.
- *
- * Package behaviour:
- *   free       → homepage only (preview scan)
- *   basic      → homepage only (full single-page scan)
- *   standard   → 2–5 curated pages by website type
- *   premium    → 6–10 curated pages by website type
- *   enterprise → [] — pages chosen manually by QA team
- *
- * Auth safety: when websiteType is 'webapp', authenticated routes are
- * never returned at any tier. isPublicPage() filters them as a second
- * safety net even if they somehow appear in nav.
- */
-export function selectPagesToTest(
-	homepageHtml: string,
-	baseUrl: string,
-	websiteType: WebsiteType,
-	pkg: ScanPackage,
-): string[] {
-	const homepage = new URL('/', baseUrl).toString();
-
-	switch (pkg) {
-		case 'free':
-		case 'basic':
-			return [homepage];
-
-		case 'standard':
-			return selectStandardPages(homepageHtml, baseUrl, websiteType);
-
-		case 'premium':
-			return selectPremiumPages(homepageHtml, baseUrl, websiteType);
-
-		case 'enterprise':
-			// Pages selected manually by QA team — return empty list.
-			return [];
-
-		default:
-			return [homepage];
-	}
-}
-
-// ─────────────────────────────────────────────
-// CREDENTIAL STORAGE HELPER
-// ─────────────────────────────────────────────
-
-/**
- * Validates and prepares a WebappCredentials payload for storage.
- *
- * Call this ONLY when DetectionResult.storeCredentialsForManualQA is true.
- * The returned object should be persisted encrypted and surfaced to the
- * manual QA team — never used for automated login.
- *
- * Usage:
- *   const detection = detectWebsiteType(html, baseUrl);
- *   if (detection.storeCredentialsForManualQA && userSubmittedCreds) {
- *     const creds = prepareCredentials(userSubmittedCreds);
- *     await db.webappCredentials.create({ data: creds, scanId });
- *   }
- */
-export function prepareCredentials(raw: WebappCredentials): WebappCredentials {
-	if (!raw.loginUrl || !raw.email || !raw.password) {
-		throw new Error('loginUrl, email, and password are all required');
-	}
-
-	// Normalise the login URL
-	const loginUrl = new URL(raw.loginUrl).toString();
-
-	return {
-		loginUrl,
-		email: raw.email.trim().toLowerCase(),
-		password: raw.password, // encrypt before persisting — do not trim passwords
-		notes: raw.notes?.trim(),
-	};
+	// ── 7. Unknown — still flag auth if detected ──────────────────────────
+	return { type: 'unknown', requiresAuth, ...authPayload };
 }

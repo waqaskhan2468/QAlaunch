@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/db/supabase';
-import { detectWebsiteType, selectPagesToTest } from '@/lib/utils/detect';
+import { detectWebsiteType } from '@/lib/utils/detect';
+import { selectPagesToTest } from '@/lib/utils/page-selection';
 import { fetchHomepageHtml } from '@/lib/api/pagespeed';
 import type { ScanPackage } from '@/types/zod';
 
@@ -33,15 +34,14 @@ export async function POST(req: Request) {
 	const { scanId, targetUrl } = payload;
 	const supabase = getServiceSupabase();
 
-	// ── Mark scan as crawling ────────────────────────────────────────────
-	// Status values per spec DB schema: pending | crawling | analyzing | done | failed
+	// Mark scan as crawling — spec status values: pending|crawling|analyzing|done|failed
 	await supabase.from('scans').update({ status: 'crawling' }).eq('id', scanId);
 
 	try {
 		// ── 1. Fetch homepage HTML ─────────────────────────────────────────
 		const homepageHtml = await fetchHomepageHtml(targetUrl);
 
-		// ── 2. Detect website type ─────────────────────────────────────────
+		// ── 2. Detect website type + auth presence ─────────────────────────
 		const detection = detectWebsiteType(homepageHtml, targetUrl);
 
 		console.log('[process] detection', {
@@ -50,12 +50,12 @@ export async function POST(req: Request) {
 			requiresAuth: detection.requiresAuth,
 		});
 
-		// ── 3. Select pages to scan ────────────────────────────────────────
+		// ── 3. Select pages ────────────────────────────────────────────────
 		//
 		// Per spec Section 3.2:
-		// When requiresAuth is true (webapp), scan STILL RUNS on public pages.
-		// selectPagesToTest handles this automatically — webapp returns only
-		// public pages (homepage, pricing, features). Auth routes never included.
+		// Even when requiresAuth is true, scan STILL RUNS on public pages.
+		// selectPagesToTest always returns only public pages — login/signup/
+		// dashboard routes are filtered by isPublicPage() automatically.
 		const pagesToTest = selectPagesToTest(
 			homepageHtml,
 			targetUrl,
@@ -73,36 +73,39 @@ export async function POST(req: Request) {
 
 		// ── 4. Persist to DB ───────────────────────────────────────────────
 		//
-		// Columns written here match the spec DB schema exactly:
-		//   website_type  → text  ('ecommerce' | 'business' | 'saas' | etc.)
-		//   pages_to_test → jsonb (array of URL strings)
-		//   status        → text  ('crawling' — next worker picks up from here)
+		// Columns written match the spec DB schema exactly:
+		//   website_type  → text  e.g. 'saas', 'ecommerce', 'business'
+		//   pages_to_test → jsonb array of URL strings
+		//   status        → 'crawling' (Playwright VPS picks up from here)
+		//   error_message → null (cleared on success)
 		//
-		// requiresAuth info is passed back in the response body only —
-		// it is NOT a column in the spec scans table.
+		// requiresAuth, banner, notes, contactUrl are NOT DB columns —
+		// they live in the response body for the frontend to consume.
 		await supabase
 			.from('scans')
 			.update({
-				website_type: detection.type, // string only — never the whole object
-				pages_to_test: pagesToTest, // jsonb array of URLs
-				status: 'crawling', // stays crawling — Playwright VPS picks up next
+				website_type: detection.type,
+				pages_to_test: pagesToTest,
+				status: 'crawling',
+				error_message: null,
 			})
 			.eq('id', scanId);
 
-		// ── 5. Return response to QStash / caller ──────────────────────────
+		// ── 5. Return response ─────────────────────────────────────────────
 		//
-		// Always 200 — scan is running.
-		// When requiresAuth is true, frontend reads the auth fields and shows:
-		//   - banner on results page  (spec: "Web app detected — contact us...")
-		//   - note in report          (spec: "Authenticated areas were not tested")
-		//   - Custom plan CTA         (spec: hello@getqalaunch.com)
-		// The actual scan still runs on the public pages returned in pagesToTest.
+		// Always 200 — scan is running on public pages regardless of requiresAuth.
+		//
+		// When requiresAuth is true, the frontend must:
+		//   - Show detection.auth.banner on the results page (per spec)
+		//   - Show detection.auth.notes in the report body (per spec)
+		//   - Show "contact us" CTA with detection.auth.contactUrl
+		//   - Make clear login/signup areas were NOT tested
 		return NextResponse.json({
 			ok: true,
 			websiteType: detection.type,
 			requiresAuth: detection.requiresAuth,
 			pagesToTest,
-			// Auth copy passed to frontend — shown as banner + note on results page
+			// Auth copy for the frontend — NOT stored in DB
 			...(detection.requiresAuth && {
 				auth: {
 					notes: detection.notes,
@@ -128,3 +131,4 @@ export async function POST(req: Request) {
 		return NextResponse.json({ error: message }, { status: 500 });
 	}
 }
+
