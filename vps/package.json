@@ -1,0 +1,17 @@
+{
+  "name": "vps",
+  "description": "vps – automation and server utility using Playwright and Express",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.33.0",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
