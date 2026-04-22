@@ -1,0 +1,11 @@
+services:
+  vps-scan:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+    container_name: vps-scan
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./src/.env
+    restart: unless-stopped

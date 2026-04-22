@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { runScan } from '../controllers/scan.controller';
-import { verifyToken } from '../utils/auth';
+import { requireBearerToken } from '../utils/auth';
 
 const router = Router();
 
-router.post('/', verifyToken, runScan);
+router.post('/', requireBearerToken, runScan);
 
 export default router;

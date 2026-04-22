@@ -1,12 +1,22 @@
 import express from 'express';
-import dotenv from 'dotenv';
+import morgan from 'morgan';
 import scanRoutes from './routes/scan.route';
-
-dotenv.config();
 
 const app = express();
 
-app.use(express.json({ limit: '10mb' }));
+// HTTP request logger
+if (process.env.NODE_ENV === 'production') {
+	app.use(morgan('combined'));
+} else {
+	app.use(morgan('dev'));
+}
+
+app.use(express.json());
+
+
+app.get('/health', (_req, res) => {
+	res.json({ status: 'ok', ts: new Date().toISOString() });
+});
 
 app.use('/scan', scanRoutes);
 

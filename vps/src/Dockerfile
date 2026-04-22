@@ -1,14 +1,29 @@
-FROM mcr.microsoft.com/playwright:v1.50.0-jammy
-
+FROM mcr.microsoft.com/playwright:v1.59.1-jammy AS deps
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install
+RUN corepack enable
 
-COPY . .
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
-RUN npm run build
+FROM deps AS build
+WORKDIR /app
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN pnpm build
+
+FROM mcr.microsoft.com/playwright:v1.59.1-jammy AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --prod --frozen-lockfile
+
+COPY --from=build /app/dist ./dist
+COPY src/.env ./src/.env
 
 EXPOSE 3000
-
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js"]
