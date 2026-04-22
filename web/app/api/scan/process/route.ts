@@ -18,6 +18,9 @@ type ProcessPayload = {
 	userEmail?: string | null;
 };
 
+const SCAN_SERVICE_URL = process.env.SCAN_SERVICE_URL!; // http://YOUR_VPS_IP:3001
+const SCAN_API_TOKEN = process.env.SCAN_API_TOKEN!;
+
 // ─────────────────────────────────────────────
 // ROUTE HANDLER
 // ─────────────────────────────────────────────
@@ -83,6 +86,38 @@ export async function POST(req: Request) {
 		// - auth.banner on results page
 		// - auth.notes in report body
 		// - contact CTA using auth.contactUrl
+
+
+		// playwright test
+
+		 let res: Response;
+			try {
+				res = await fetch(`${SCAN_SERVICE_URL}/scan`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						Authorization: `Bearer ${SCAN_API_TOKEN}`,
+					},
+					body: JSON.stringify({ url, scanId }),
+					signal: AbortSignal.timeout(10_000),
+				});
+			} catch (err: unknown) {
+				const message = err instanceof Error ? err.message : 'fetch failed';
+				console.error('[trigger-scan] VPS unreachable:', message);
+				return NextResponse.json(
+					{ error: `Scanner unreachable: ${message}` },
+					{ status: 502 },
+				);
+			}
+
+			if (!res.ok) {
+				const text = await res.text();
+				console.error(`[trigger-scan] VPS returned ${res.status}: ${text}`);
+				return NextResponse.json(
+					{ error: `Scanner error ${res.status}: ${text}` },
+					{ status: 502 },
+				);
+			}
 		return NextResponse.json({
 			ok: true,
 			websiteType: detection.type,

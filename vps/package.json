@@ -1,17 +1,30 @@
 {
-  "name": "vps",
-  "description": "vps – automation and server utility using Playwright and Express",
-  "version": "1.0.0",
-  "main": "src/index.js",
-  "type": "module",
-  "scripts": {
-    "start": "node src/index.js"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.33.0",
-  "dependencies": {
-    "express": "^5.2.1"
-  }
+	"name": "vps",
+	"description": "vps – automation and server utility using Playwright and Express",
+	"version": "1.0.0",
+	"main": "src/index.js",
+	"type": "module",
+	"scripts": {
+		"build": "tsc",
+		"start": "pnpm build && node dist/index.js",
+		"dev": "tsx watch src/index.ts"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"packageManager": "pnpm@10.33.0",
+	"dependencies": {
+		"@axe-core/playwright": "^4.11.2",
+		"dotenv": "^17.4.2",
+		"express": "^5.2.1",
+		"playwright": "^1.59.1"
+	},
+	"devDependencies": {
+		"@types/express": "^5.0.6",
+		"@types/node": "^25.6.0",
+		"nodemon": "^3.1.14",
+		"ts-node": "^10.9.2",
+		"tsx": "^4.21.0",
+		"typescript": "^6.0.3"
+	}
 }
