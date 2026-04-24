@@ -1,149 +1,172 @@
-import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { detectWebsiteType } from '@/lib/utils/detect';
 import { selectPagesToTest } from '@/lib/utils/page-selection';
 import { fetchHomepageHtml } from '@/lib/api/pagespeed';
-import type { ScanPackage } from '@/types/zod';
-
+import type { ProcessPayload } from '@/types/api/process';
+import { AppError, asyncHandler } from '@/lib/api/error';
+import { NextResponse } from 'next/server';
+import { Agent, fetch as undiciFetch } from 'undici';
 export const runtime = 'nodejs';
 
-// ─────────────────────────────────────────────
-// TYPES
-// ─────────────────────────────────────────────
+const SCAN_SERVICE_URL = process.env.SCAN_SERVICE_URL;
+const SCAN_API_TOKEN = process.env.SCAN_API_TOKEN;
 
-type ProcessPayload = {
-	scanId: string;
-	package: ScanPackage;
-	targetUrl: string;
-	userEmail?: string | null;
-};
+// TODO: add a timeout to the fetch request to avoid hanging the process.
 
-const SCAN_SERVICE_URL = process.env.SCAN_SERVICE_URL!; // http://YOUR_VPS_IP:3001
-const SCAN_API_TOKEN = process.env.SCAN_API_TOKEN!;
+const SCAN_FETCH_MS = Number.parseInt(
+	process.env.SCAN_FETCH_TIMEOUT_MS ?? '900000',
+	10,
+);
 
-// ─────────────────────────────────────────────
-// ROUTE HANDLER
-// ─────────────────────────────────────────────
+const scannerAgent = new Agent({
+	connectTimeout: 30_000,
+	headersTimeout: SCAN_FETCH_MS,
+	bodyTimeout: SCAN_FETCH_MS,
+});
 
-export async function POST(req: Request) {
-	const bodyText = await req.text();
+export const POST = asyncHandler(async (req: Request) => {
+	if (!SCAN_SERVICE_URL) {
+		throw new AppError(
+			500,
+			'config_missing',
+			'SCAN_SERVICE_URL is missing in environment.',
+		);
+	}
+	if (!SCAN_API_TOKEN) {
+		throw new AppError(
+			500,
+			'config_missing',
+			'SCAN_API_TOKEN is missing in environment.',
+		);
+	}
 
-	// Uncomment when QStash signature verification is ready:
-	// if (!(await verifyQStashRequest(req, bodyText))) {
-	//   return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-	// }
+	const payload = (await req.json()) as ProcessPayload;
+	const { scanId, targetUrl, package: pkg } = payload;
 
-	const payload = JSON.parse(bodyText) as ProcessPayload;
-	const { scanId, targetUrl } = payload;
+	if (!scanId) {
+		throw new AppError(400, 'missing_scan_id', 'scanId is required.');
+	}
+	if (!targetUrl) {
+		throw new AppError(400, 'missing_target_url', 'targetUrl is required.');
+	}
+	if (!pkg) {
+		throw new AppError(400, 'missing_package', 'package is required.');
+	}
+
 	const supabase = getServiceSupabase();
 
-	// Mark scan as crawling — spec status values: pending|crawling|analyzing|done|failed
-	await supabase.from('scans').update({ status: 'crawling' }).eq('id', scanId);
+	const { error: setCrawlingError } = await supabase
+		.from('scans')
+		.update({ status: 'crawling', error_message: null })
+		.eq('id', scanId);
 
-	try {
-		// 1) Fetch homepage HTML (simple fetch + cheerio pipeline in utils)
-		const homepageHtml = await fetchHomepageHtml(targetUrl);
-
-		// 2) Detect website type + auth presence
-		const detection = detectWebsiteType(homepageHtml, targetUrl);
-
-		console.log('[process] detection', {
-			scanId,
-			type: detection.type,
-			requiresAuth: detection.requiresAuth,
-		});
-
-		// 3) Select pages by package + website type
-		// Auth/private routes are filtered in page-selection via isPublicPage().
-		const pagesToTest = selectPagesToTest(
-			homepageHtml,
-			targetUrl,
-			detection.type,
-			payload.package,
+	if (setCrawlingError) {
+		console.error('[process] set crawling failed', setCrawlingError);
+		throw new AppError(
+			500,
+			'scan_status_update_failed',
+			'Could not mark scan as crawling.',
 		);
-
-		console.log('[process] pages selected', {
-			scanId,
-			type: detection.type,
-			requiresAuth: detection.requiresAuth,
-			count: pagesToTest.length,
-			pages: pagesToTest,
-		});
-
-		// 4) Persist scan metadata for downstream workers
-		await supabase
-			.from('scans')
-			.update({
-				website_type: detection.type,
-				pages_to_test: pagesToTest,
-				status: 'crawling',
-				error_message: null,
-			})
-			.eq('id', scanId);
-
-		// 5) Return payload for frontend
-		// If requiresAuth=true, frontend should show:
-		// - auth.banner on results page
-		// - auth.notes in report body
-		// - contact CTA using auth.contactUrl
-
-
-		// playwright test
-
-		 let res: Response;
-			try {
-				res = await fetch(`${SCAN_SERVICE_URL}/scan`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						Authorization: `Bearer ${SCAN_API_TOKEN}`,
-					},
-					body: JSON.stringify({ url, scanId }),
-					signal: AbortSignal.timeout(10_000),
-				});
-			} catch (err: unknown) {
-				const message = err instanceof Error ? err.message : 'fetch failed';
-				console.error('[trigger-scan] VPS unreachable:', message);
-				return NextResponse.json(
-					{ error: `Scanner unreachable: ${message}` },
-					{ status: 502 },
-				);
-			}
-
-			if (!res.ok) {
-				const text = await res.text();
-				console.error(`[trigger-scan] VPS returned ${res.status}: ${text}`);
-				return NextResponse.json(
-					{ error: `Scanner error ${res.status}: ${text}` },
-					{ status: 502 },
-				);
-			}
-		return NextResponse.json({
-			ok: true,
-			websiteType: detection.type,
-			requiresAuth: detection.requiresAuth,
-			pagesToTest,
-			...(detection.requiresAuth && {
-				auth: {
-					notes: detection.notes,
-					banner: detection.banner,
-					contactUrl: detection.contactUrl,
-				},
-			}),
-		});
-	} catch (error) {
-		const message = error instanceof Error ? error.message : 'unknown_error';
-
-		console.error('[process] scan failed', { scanId, error: message });
-
-		await supabase
-			.from('scans')
-			.update({
-				status: 'failed',
-				error_message: message,
-			})
-			.eq('id', payload.scanId);
-
-		return NextResponse.json({ error: message }, { status: 500 });
 	}
-}
+
+	const homepageHtml = await fetchHomepageHtml(targetUrl).catch((err) => {
+		console.error('[process] homepage fetch failed', { targetUrl, err });
+		throw new AppError(
+			502,
+			'homepage_fetch_failed',
+			'Could not access the target website homepage. Please check URL and try again.',
+		);
+	});
+
+	const detection = detectWebsiteType(homepageHtml, targetUrl);
+
+	const pagesToTest = selectPagesToTest(
+		homepageHtml,
+		targetUrl,
+		detection.type,
+		pkg,
+	);
+
+	if (!pagesToTest.length) {
+		throw new AppError(
+			422,
+			'no_testable_pages',
+			'No public pages were found to test on this website.',
+		);
+	}
+
+	const { error: scanUpdateError } = await supabase
+		.from('scans')
+		.update({
+			website_type: detection.type,
+			pages_to_test: pagesToTest,
+			status: 'crawling',
+			error_message: null,
+		})
+		.eq('id', scanId);
+
+	if (scanUpdateError) {
+		console.error('[process] scan metadata update failed', scanUpdateError);
+		throw new AppError(
+			500,
+			'scan_update_failed',
+			'Failed to save scan metadata.',
+		);
+	}
+
+	const pageRows = pagesToTest.map((pageUrl) => ({
+		scan_id: scanId,
+		page_url: pageUrl,
+	}));
+
+	const { error: upsertPagesError } = await supabase
+		.from('scan_pages')
+		.upsert(pageRows, { onConflict: 'scan_id,page_url' });
+
+	if (upsertPagesError) {
+		console.error('[process] scan_pages upsert failed', upsertPagesError);
+		throw new AppError(
+			500,
+			'scan_pages_prepare_failed',
+			'Could not prepare pages for scanning.',
+		);
+	}
+
+
+	// try {
+	//     await undiciFetch(`${SCAN_SERVICE_URL}/scan`, {
+	// 		method: 'POST',
+	// 		headers: {
+	// 			'Content-Type': 'application/json',
+	// 			Authorization: `Bearer ${SCAN_API_TOKEN}`,
+	// 		},
+	// 		body: JSON.stringify({ scanId, urls: pagesToTest }),
+	// 		dispatcher: scannerAgent,
+	// 	});
+	// } catch (err) {
+	// 	console.error('[process] scanner fetch failed', err);
+	// 	throw new AppError(
+	// 		503,
+	// 		'scanner_unreachable',
+	// 		'Scanner is unreachable or the request timed out.',
+	// 	);
+	// }
+
+
+
+	// TODO: In the future, store detection.notes and detection.banner in the database instead of only returning them in the API response.
+	return NextResponse.json({
+		ok: true,
+		scanId,
+		websiteType: detection.type,
+		requiresAuth: detection.requiresAuth,
+		pagesToTest,
+		...(detection.requiresAuth && {
+			auth: {
+				notes: detection.notes,
+				banner: detection.banner,
+				contactUrl: detection.contactUrl,
+			},
+		}),
+	});
+});

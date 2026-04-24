@@ -1,7 +1,7 @@
 
 export interface ScanRequest {
-	urls: string[];
 	scanId: string;
+	urls: string[];
 }
 export type LinkRecord = {
 	href: string;
