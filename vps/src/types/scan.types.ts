@@ -1,8 +1,8 @@
-
 export interface ScanRequest {
 	scanId: string;
 	urls: string[];
 }
+
 export type LinkRecord = {
 	href: string;
 	text: string;
@@ -23,6 +23,22 @@ export type ScanStep = {
 	error?: string;
 };
 
+export type ResponsiveResult = {
+	viewport: string;
+	width: number;
+	height: number;
+	hasHorizontalScroll: boolean;
+	screenshot: Buffer; // temporary binary image from Playwright
+};
+
+export type ResponsivePayload = {
+	viewport: string;
+	width: number;
+	height: number;
+	hasHorizontalScroll: boolean;
+	screenshot_url: string | null; // saved URL for DB/Claude
+};
+
 export type ScanResult = {
 	scanId: string;
 	url: string;
@@ -31,8 +47,8 @@ export type ScanResult = {
 	warnings: string[];
 	steps: ScanStep[];
 	screenshots?: {
-		desktop?: string;
-		mobile?: string;
+		desktop?: Buffer;
+		mobile?: Buffer;
 	};
 	consoleMessages: Array<{ type: string; text: string; url?: string | null }>;
 	failedRequests: Array<{
@@ -83,9 +99,5 @@ export type ScanResult = {
 		language: string | null;
 	};
 	axe?: any[];
-	responsive?: Array<{
-		viewport: string;
-		hasHorizontalScroll: boolean;
-		screenshot: string;
-	}>;
+	responsive?: ResponsiveResult[];
 };

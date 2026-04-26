@@ -1,6 +1,7 @@
 import express from 'express';
 import morgan from 'morgan';
 import scanRoutes from './routes/scan.route';
+import { errorMiddleware } from './middleware/error.middleware';
 
 const app = express();
 
@@ -19,5 +20,6 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/scan', scanRoutes);
-
+// global error handler must be last
+app.use(errorMiddleware);
 export default app;
