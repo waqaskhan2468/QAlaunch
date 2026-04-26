@@ -5,11 +5,12 @@ import { attachPageDiagnostics } from './diagnostics';
 import { cleanError, closeContext, navigatePage, runStep } from './navigation';
 import { collectInteractiveData, collectSeoData } from './seo';
 import { collectLinks } from './links';
-import { collectResponsive } from './responsive';
-import {
-	captureDesktopScreenshot,
-	captureMobileScreenshot,
-} from './screenshots';
+import { collectResponsive, MOBILE_VIEWPORT_NAME } from './responsive';
+import { withRetry } from './retry';
+import { captureDesktopScreenshot } from './screenshots';
+
+const DEFAULT_PAGE_CONCURRENCY = 1;
+const PAGE_SCAN_ATTEMPTS = 2;
 
 function createEmptyScanResult(scanId: string, url: string): ScanResult {
 	return {
@@ -26,6 +27,34 @@ function createEmptyScanResult(scanId: string, url: string): ScanResult {
 
 function hasSuccessfulNavigation(steps: ScanStep[]): boolean {
 	return steps.some((step) => step.name.startsWith('navigate') && step.ok);
+}
+
+function getMissingScanData(result: ScanResult): string[] {
+	const missing: string[] = [];
+
+	if (!hasSuccessfulNavigation(result.steps)) missing.push('navigation');
+	if (!result.links) missing.push('links');
+	if (!result.interactive) missing.push('interactive');
+	if (!result.seoData) missing.push('seo');
+	if (!result.axe) missing.push('axe');
+	if (!result.responsive?.length) missing.push('responsive');
+	if (!result.screenshots?.desktop) missing.push('desktop_screenshot');
+	if (!result.screenshots?.mobile) missing.push('mobile_screenshot');
+
+	return missing;
+}
+
+function getPageConcurrency(urlCount: number): number {
+	const configured = Number.parseInt(
+		process.env.SCAN_PAGE_CONCURRENCY ?? `${DEFAULT_PAGE_CONCURRENCY}`,
+		10,
+	);
+	const safeConfigured =
+		Number.isFinite(configured) && configured > 0 ?
+			configured
+		:	DEFAULT_PAGE_CONCURRENCY;
+
+	return Math.max(1, Math.min(safeConfigured, urlCount));
 }
 
 async function scanSingleUrl(
@@ -47,7 +76,11 @@ async function scanSingleUrl(
 		const desktopScreenshot = await runStep(
 			result.steps,
 			'screenshot:desktop',
-			() => captureDesktopScreenshot(page),
+			() =>
+				withRetry(() => captureDesktopScreenshot(page), {
+					attempts: 2,
+					delayMs: 1_000,
+				}),
 		);
 
 		if (desktopScreenshot) {
@@ -55,10 +88,30 @@ async function scanSingleUrl(
 		}
 
 		const [links, interactive, seoData, axe] = await Promise.all([
-			runStep(result.steps, 'links', () => collectLinks(page, url)),
-			runStep(result.steps, 'interactive', () => collectInteractiveData(page)),
-			runStep(result.steps, 'seo', () => collectSeoData(page)),
-			runStep(result.steps, 'axe', () => collectAxeViolations(page)),
+			runStep(result.steps, 'links', () =>
+				withRetry(() => collectLinks(page, url), {
+					attempts: 2,
+					delayMs: 1_000,
+				}),
+			),
+			runStep(result.steps, 'interactive', () =>
+				withRetry(() => collectInteractiveData(page), {
+					attempts: 2,
+					delayMs: 1_000,
+				}),
+			),
+			runStep(result.steps, 'seo', () =>
+				withRetry(() => collectSeoData(page), {
+					attempts: 2,
+					delayMs: 1_000,
+				}),
+			),
+			runStep(result.steps, 'axe', () =>
+				withRetry(() => collectAxeViolations(page), {
+					attempts: 2,
+					delayMs: 1_000,
+				}),
+			),
 		]);
 
 		result.links = links;
@@ -66,20 +119,35 @@ async function scanSingleUrl(
 		result.seoData = seoData;
 		result.axe = axe;
 
-		const [mobileScreenshot, responsive] = await Promise.all([
-			runStep(result.steps, 'screenshot:mobile', () =>
-				captureMobileScreenshot(browser, url, result.warnings),
-			),
-			runStep(result.steps, 'responsive', () =>
-				collectResponsive(browser, url),
-			),
-		]);
+		const responsive = await runStep(result.steps, 'responsive', () =>
+			withRetry(() => collectResponsive(browser, url), {
+				attempts: 2,
+				delayMs: 1_000,
+			}),
+		);
+
+		result.responsive = responsive;
+
+		const mobileScreenshot = await runStep(
+			result.steps,
+			'screenshot:mobile',
+			async () => {
+				const mobileViewport = responsive?.find(
+					(item) => item.viewport === MOBILE_VIEWPORT_NAME,
+				);
+
+				if (!mobileViewport) {
+					throw new Error(`${MOBILE_VIEWPORT_NAME} screenshot missing`);
+				}
+
+				return mobileViewport.screenshot;
+			},
+		);
 
 		if (mobileScreenshot) {
 			result.screenshots.mobile = mobileScreenshot;
 		}
 
-		result.responsive = responsive;
 		result.ok = hasSuccessfulNavigation(result.steps);
 
 		return result;
@@ -92,6 +160,35 @@ async function scanSingleUrl(
 	}
 }
 
+async function scanSingleUrlWithRetry(
+	browser: Browser,
+	url: string,
+	scanId: string,
+): Promise<ScanResult> {
+	let result = await scanSingleUrl(browser, url, scanId);
+	let missingData = getMissingScanData(result);
+
+	for (
+		let attempt = 2;
+		attempt <= PAGE_SCAN_ATTEMPTS && missingData.length > 0;
+		attempt += 1
+	) {
+		const retryResult = await scanSingleUrl(browser, url, scanId);
+		retryResult.warnings.unshift(
+			`Retried page scan after incomplete attempt: ${missingData.join(', ')}`,
+		);
+
+		result = retryResult;
+		missingData = getMissingScanData(result);
+	}
+
+	if (missingData.length > 0) {
+		result.warnings.push(`Missing scan data: ${missingData.join(', ')}`);
+	}
+
+	return result;
+}
+
 export async function runPlaywrightScan(
 	urls: string[],
 	scanId: string,
@@ -100,9 +197,15 @@ export async function runPlaywrightScan(
 
 	try {
 		const results: ScanResult[] = [];
+		const concurrency = getPageConcurrency(urls.length);
 
-		for (const url of urls) {
-			results.push(await scanSingleUrl(browser, url, scanId));
+		for (let index = 0; index < urls.length; index += concurrency) {
+			const chunk = urls.slice(index, index + concurrency);
+			const chunkResults = await Promise.all(
+				chunk.map((url) => scanSingleUrlWithRetry(browser, url, scanId)),
+			);
+
+			results.push(...chunkResults);
 		}
 
 		return results;

@@ -5,7 +5,7 @@ const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 const SCREENSHOT_QUALITY = 75;
 
 async function takeScreenshot(page: Page): Promise<Buffer> {
-	return await page.screenshot({
+	return page.screenshot({
 		fullPage: true,
 		type: 'jpeg',
 		quality: SCREENSHOT_QUALITY,

@@ -23,6 +23,7 @@ const SCREENSHOT_BUCKET =
 
 const SCREENSHOT_UPLOAD_RETRIES = 3;
 const SCREENSHOT_UPLOAD_RETRY_DELAY_MS = 1_000;
+const DEFAULT_PAGE_UPDATE_CONCURRENCY = 2;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 	throw new AppError('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY', 500);
@@ -40,6 +41,20 @@ function sleep(ms: number): Promise<void> {
 
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : 'unknown_error';
+}
+
+function getPageUpdateConcurrency(pageCount: number): number {
+	const configured = Number.parseInt(
+		process.env.SCAN_PAGE_UPDATE_CONCURRENCY ??
+			`${DEFAULT_PAGE_UPDATE_CONCURRENCY}`,
+		10,
+	);
+	const safeConfigured =
+		Number.isFinite(configured) && configured > 0 ?
+			configured
+		:	DEFAULT_PAGE_UPDATE_CONCURRENCY;
+
+	return Math.max(1, Math.min(safeConfigured, pageCount));
 }
 
 function sanitizeForPath(value: string): string {
@@ -82,7 +97,7 @@ async function uploadScreenshotBuffer(
 	let lastError = 'unknown_error';
 
 	console.log(
-		`[screenshot:${label}] uploading ${(screenshot.length / 1024 / 1024).toFixed(2)}MB`,
+		`[screenshot:${label}] ${pageUrl} uploading ${(screenshot.length / 1024 / 1024).toFixed(2)}MB`,
 	);
 
 	for (let attempt = 1; attempt <= SCREENSHOT_UPLOAD_RETRIES; attempt += 1) {
@@ -161,15 +176,23 @@ async function updateScanPage(
 	pageUrl: string,
 	patch: Record<string, unknown>,
 ): Promise<void> {
-	const { error } = await supabase
+	const { data, error } = await supabase
 		.from('scan_pages')
 		.update(patch)
 		.eq('scan_id', scanId)
-		.eq('page_url', pageUrl);
+		.eq('page_url', pageUrl)
+		.select('id');
 
 	if (error) {
 		throw new AppError(
 			`Failed to update scan page (${pageUrl}): ${error.message}`,
+			500,
+		);
+	}
+
+	if (!data?.length) {
+		throw new AppError(
+			`Failed to update scan page (${pageUrl}): no matching scan_pages row`,
 			500,
 		);
 	}
@@ -191,33 +214,33 @@ async function uploadResponsiveScreenshots(
 ): Promise<ResponsivePayload[] | null> {
 	if (!result.responsive) return null;
 
-	const responsivePayload: ResponsivePayload[] = [];
+	const responsivePayload = await Promise.all(
+		result.responsive.map(async (item, index) => {
+			const viewportSlug = sanitizeForPath(
+				item.viewport || `viewport-${index + 1}`,
+			);
 
-	for (const [index, item] of result.responsive.entries()) {
-		const viewportSlug = sanitizeForPath(
-			item.viewport || `viewport-${index + 1}`,
-		);
+			const upload = await uploadScreenshotBuffer(
+				item.screenshot,
+				scanId,
+				pageUrl,
+				`responsive-${index + 1}-${viewportSlug}`,
+				`responsive:${item.viewport}`,
+			);
 
-		const upload = await uploadScreenshotBuffer(
-			item.screenshot,
-			scanId,
-			pageUrl,
-			`responsive-${index + 1}-${viewportSlug}`,
-			`responsive:${item.viewport}`,
-		);
+			if (upload.warning) {
+				warnings.push(upload.warning);
+			}
 
-		if (upload.warning) {
-			warnings.push(upload.warning);
-		}
-
-		responsivePayload.push({
-			viewport: item.viewport,
-			width: item.width,
-			height: item.height,
-			hasHorizontalScroll: item.hasHorizontalScroll,
-			screenshot_url: upload.url,
-		});
-	}
+			return {
+				viewport: item.viewport,
+				width: item.width,
+				height: item.height,
+				hasHorizontalScroll: item.hasHorizontalScroll,
+				screenshot_url: upload.url,
+			};
+		}),
+	);
 
 	return responsivePayload;
 }
@@ -239,36 +262,29 @@ async function processScanResult(
 		return;
 	}
 
-	const desktopUpload = await uploadScreenshotBuffer(
-		result.screenshots?.desktop,
-		scanId,
-		result.url,
-		'desktop',
-		'desktop',
-	);
+	const [desktopUpload, mobileUpload, responsivePayload] = await Promise.all([
+		uploadScreenshotBuffer(
+			result.screenshots?.desktop,
+			scanId,
+			result.url,
+			'desktop',
+			'desktop',
+		),
+		uploadScreenshotBuffer(
+			result.screenshots?.mobile,
+			scanId,
+			result.url,
+			'mobile',
+			'mobile',
+		),
+		uploadResponsiveScreenshots(scanId, result.url, result, uploadWarnings),
+	]);
 
-	if (desktopUpload.warning) {
-		uploadWarnings.push(desktopUpload.warning);
+	for (const upload of [desktopUpload, mobileUpload]) {
+		if (upload.warning) {
+			uploadWarnings.push(upload.warning);
+		}
 	}
-
-	const mobileUpload = await uploadScreenshotBuffer(
-		result.screenshots?.mobile,
-		scanId,
-		result.url,
-		'mobile',
-		'mobile',
-	);
-
-	if (mobileUpload.warning) {
-		uploadWarnings.push(mobileUpload.warning);
-	}
-
-	const responsivePayload = await uploadResponsiveScreenshots(
-		scanId,
-		result.url,
-		result,
-		uploadWarnings,
-	);
 
 	const resultWithUploadWarnings: ScanResult = {
 		...result,
@@ -302,6 +318,20 @@ async function finalizeScan(
 	return status;
 }
 
+async function processScanResults(
+	scanId: string,
+	results: ScanResult[],
+): Promise<void> {
+	const concurrency = getPageUpdateConcurrency(results.length);
+
+	for (let index = 0; index < results.length; index += concurrency) {
+		const chunk = results.slice(index, index + concurrency);
+		await Promise.all(
+			chunk.map((result) => processScanResult(scanId, result)),
+		);
+	}
+}
+
 export const runScan = asyncHandler(async (req, res: Response) => {
 	const { scanId, urls } = validateScanRequest(req.body);
 
@@ -313,9 +343,7 @@ export const runScan = asyncHandler(async (req, res: Response) => {
 
 		const results = await runPlaywrightScan(urls, scanId);
 
-		for (const result of results) {
-			await processScanResult(scanId, result);
-		}
+		await processScanResults(scanId, results);
 
 		const finalStatus = await finalizeScan(scanId, results);
 

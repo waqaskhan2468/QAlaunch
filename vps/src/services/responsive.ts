@@ -1,11 +1,14 @@
-import type { Browser } from 'playwright';
+import { devices, type Browser } from 'playwright';
 import type { ResponsiveResult } from '../types/scan.types';
 import { closeContext, safeGoto } from './navigation';
+import { withRetry } from './retry';
 import { takeScreenshot } from './screenshots';
+
+export const MOBILE_VIEWPORT_NAME = 'iPhone 14';
 
 const RESPONSIVE_VIEWPORTS = [
 	{ name: 'iPhone SE', width: 375, height: 667 },
-	{ name: 'iPhone 14', width: 390, height: 844 },
+	{ name: MOBILE_VIEWPORT_NAME, width: 390, height: 844 },
 	{ name: 'iPad', width: 768, height: 1024 },
 ];
 
@@ -17,6 +20,9 @@ async function scanViewport(
 	viewport: ResponsiveViewport,
 ): Promise<ResponsiveResult> {
 	const context = await browser.newContext({
+		...(viewport.name === MOBILE_VIEWPORT_NAME ?
+			devices[MOBILE_VIEWPORT_NAME]
+		:	{}),
 		viewport: {
 			width: viewport.width,
 			height: viewport.height,
@@ -49,9 +55,16 @@ export async function collectResponsive(
 	browser: Browser,
 	url: string,
 ): Promise<ResponsiveResult[]> {
-	return Promise.all(
-		RESPONSIVE_VIEWPORTS.map((viewport) =>
-			scanViewport(browser, url, viewport),
-		),
-	);
+	const results: ResponsiveResult[] = [];
+
+	for (const viewport of RESPONSIVE_VIEWPORTS) {
+		results.push(
+			await withRetry(() => scanViewport(browser, url, viewport), {
+				attempts: 2,
+				delayMs: 1_000,
+			}),
+		);
+	}
+
+	return results;
 }
