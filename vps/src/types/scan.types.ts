@@ -101,3 +101,10 @@ export type ScanResult = {
 	axe?: any[];
 	responsive?: ResponsiveResult[];
 };
+
+type ScanStatus = 'pending' | 'crawling' | 'analyzing' | 'done' | 'failed';
+
+type ScreenshotUploadResult = {
+	url: string | null;
+	warning?: string;
+};

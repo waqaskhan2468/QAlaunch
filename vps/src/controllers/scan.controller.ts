@@ -8,13 +8,7 @@ import type {
 import { asyncHandler } from '../utils/asyncHandler';
 import { AppError } from '../utils/AppError';
 import { runPlaywrightScan } from '../services/index';
-
-type ScanStatus = 'pending' | 'crawling' | 'analyzing' | 'done' | 'failed';
-
-type ScreenshotUploadResult = {
-	url: string | null;
-	warning?: string;
-};
+import type { ScanStatus, ScreenshotUploadResult } from '../types/scan.types';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -41,6 +35,43 @@ function sleep(ms: number): Promise<void> {
 
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : 'unknown_error';
+}
+
+function hasSuccessfulNavigation(result: ScanResult): boolean {
+	return result.steps.some(
+		(step) => step.name.startsWith('navigate') && step.ok,
+	);
+}
+
+function getAxeGateFailure(result: ScanResult) {
+	const navigationOk = hasSuccessfulNavigation(result);
+	const axeStep = result.steps.find((step) => step.name === 'axe');
+	const axeStepOk = Boolean(axeStep?.ok);
+	const hasAxeResult = Array.isArray(result.axe);
+
+	if (!navigationOk || (axeStepOk && hasAxeResult)) return null;
+
+	return {
+		classification: 'accessibility_gate_fail',
+		axeStepOk,
+		axeStepError:
+			axeStep?.error ?? (axeStepOk ? 'axe_result_missing' : 'axe_step_missing'),
+		navigationOk,
+		hasDesktopScreenshot: Boolean(result.screenshots?.desktop),
+		hasMobileScreenshot: Boolean(result.screenshots?.mobile),
+	};
+}
+
+function logAxeGateFailure(scanId: string, result: ScanResult): void {
+	const failure = getAxeGateFailure(result);
+
+	if (!failure) return;
+
+	console.warn('[scan:axe_gate_failed]', {
+		scanId,
+		pageUrl: result.url,
+		...failure,
+	});
 }
 
 function getPageUpdateConcurrency(pageCount: number): number {
@@ -251,17 +282,6 @@ async function processScanResult(
 ): Promise<void> {
 	const uploadWarnings: string[] = [];
 
-	if (!result.ok) {
-		await updateScanPage(scanId, result.url, {
-			screenshot_desktop_url: null,
-			screenshot_mobile_url: null,
-			axe_violations: result.axe ?? null,
-			playwright_data: buildPlaywrightPayload(result, null),
-		});
-
-		return;
-	}
-
 	const [desktopUpload, mobileUpload, responsivePayload] = await Promise.all([
 		uploadScreenshotBuffer(
 			result.screenshots?.desktop,
@@ -285,6 +305,8 @@ async function processScanResult(
 			uploadWarnings.push(upload.warning);
 		}
 	}
+
+	logAxeGateFailure(scanId, result);
 
 	const resultWithUploadWarnings: ScanResult = {
 		...result,
@@ -326,9 +348,7 @@ async function processScanResults(
 
 	for (let index = 0; index < results.length; index += concurrency) {
 		const chunk = results.slice(index, index + concurrency);
-		await Promise.all(
-			chunk.map((result) => processScanResult(scanId, result)),
-		);
+		await Promise.all(chunk.map((result) => processScanResult(scanId, result)));
 	}
 }
 

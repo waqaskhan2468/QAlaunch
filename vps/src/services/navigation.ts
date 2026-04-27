@@ -3,7 +3,11 @@ import type { ScanResult, ScanStep } from '../types/scan.types';
 
 const NAV_TIMEOUT = 15_000;
 const NETWORK_IDLE_TIMEOUT = 3_000;
+const CONTENT_READY_TIMEOUT = 10_000;
 const EXTRA_WAIT_MS = 500;
+
+const MIN_BODY_TEXT_LENGTH = 500;
+const MIN_LINK_COUNT = 5;
 
 type NavigationResult = {
 	strategy: string;
@@ -61,15 +65,16 @@ export async function safeGoto(
 			timeout: NAV_TIMEOUT,
 		});
 
-		const networkIdleWarning = await waitForShortNetworkIdle(page);
+		const warnings = [
+			await waitForShortNetworkIdle(page),
+			await waitForMeaningfulContent(page),
+		].filter(Boolean);
+
 		await page.waitForTimeout(EXTRA_WAIT_MS);
 
 		return {
-			strategy:
-				networkIdleWarning ? 'domcontentloaded' : (
-					'domcontentloaded+networkidle'
-				),
-			...(networkIdleWarning ? { warning: networkIdleWarning } : {}),
+			strategy: warnings.length ? 'domcontentloaded' : 'domcontentloaded+ready',
+			...(warnings.length ? { warning: warnings.join(' | ') } : {}),
 		};
 	} catch (domContentLoadedError) {
 		await page.goto(url, {
@@ -77,19 +82,19 @@ export async function safeGoto(
 			timeout: NAV_TIMEOUT,
 		});
 
-		const networkIdleWarning = await waitForShortNetworkIdle(page);
+		const warnings = [
+			`domcontentloaded failed, fallback used: ${cleanError(
+				domContentLoadedError,
+			)}`,
+			await waitForShortNetworkIdle(page),
+			await waitForMeaningfulContent(page),
+		].filter(Boolean);
+
 		await page.waitForTimeout(EXTRA_WAIT_MS);
 
 		return {
-			strategy: networkIdleWarning ? 'load' : 'load+networkidle',
-			warning: [
-				`domcontentloaded failed, fallback used: ${cleanError(
-					domContentLoadedError,
-				)}`,
-				networkIdleWarning,
-			]
-				.filter(Boolean)
-				.join(' | '),
+			strategy: warnings.length ? 'load' : 'load+ready',
+			...(warnings.length ? { warning: warnings.join(' | ') } : {}),
 		};
 	}
 }
@@ -105,6 +110,39 @@ async function waitForShortNetworkIdle(
 		return undefined;
 	} catch (error) {
 		return `networkidle skipped after ${NETWORK_IDLE_TIMEOUT}ms: ${cleanError(
+			error,
+		)}`;
+	}
+}
+
+async function waitForMeaningfulContent(
+	page: Page,
+): Promise<string | undefined> {
+	try {
+		await page.waitForFunction(
+			({ minBodyTextLength, minLinkCount }) => {
+				const bodyText = document.body?.innerText?.trim() ?? '';
+				const linkCount = document.querySelectorAll('a[href]').length;
+				const headingCount = document.querySelectorAll('h1, h2').length;
+
+				return (
+					bodyText.length >= minBodyTextLength ||
+					linkCount >= minLinkCount ||
+					headingCount > 0
+				);
+			},
+			{
+				minBodyTextLength: MIN_BODY_TEXT_LENGTH,
+				minLinkCount: MIN_LINK_COUNT,
+			},
+			{
+				timeout: CONTENT_READY_TIMEOUT,
+			},
+		);
+
+		return undefined;
+	} catch (error) {
+		return `content readiness skipped after ${CONTENT_READY_TIMEOUT}ms: ${cleanError(
 			error,
 		)}`;
 	}

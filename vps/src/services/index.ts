@@ -29,6 +29,23 @@ function hasSuccessfulNavigation(steps: ScanStep[]): boolean {
 	return steps.some((step) => step.name.startsWith('navigate') && step.ok);
 }
 
+function hasSuccessfulAxe(result: ScanResult): boolean {
+	return (
+		result.steps.some((step) => step.name === 'axe' && step.ok) &&
+		Array.isArray(result.axe)
+	);
+}
+
+function getAxeFailureReason(result: ScanResult): string {
+	const axeStep = result.steps.find((step) => step.name === 'axe');
+
+	if (!axeStep) return 'axe_step_missing';
+	if (!axeStep.ok) return axeStep.error ?? 'axe_step_failed';
+	if (!Array.isArray(result.axe)) return 'axe_result_missing';
+
+	return 'axe_unknown_failure';
+}
+
 function getMissingScanData(result: ScanResult): string[] {
 	const missing: string[] = [];
 
@@ -148,7 +165,14 @@ async function scanSingleUrl(
 			result.screenshots.mobile = mobileScreenshot;
 		}
 
-		result.ok = hasSuccessfulNavigation(result.steps);
+		const navigationOk = hasSuccessfulNavigation(result.steps);
+		const axeOk = hasSuccessfulAxe(result);
+
+		result.ok = navigationOk && axeOk;
+
+		if (navigationOk && !axeOk) {
+			result.error = `accessibility_gate_fail: ${getAxeFailureReason(result)}`;
+		}
 
 		return result;
 	} catch (error) {

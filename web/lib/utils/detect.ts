@@ -255,17 +255,29 @@ function signalEcommerce(
 	html: string,
 	nav: string,
 ): boolean {
-	return (
-		// Shopify / eCommerce signals
+	const hasCartOrCheckout =
+		$('a[href*="/cart"], a[href*="/checkout"], form[action*="/cart"]')
+			.length > 0;
+
+	const hasBuyButtons =
+		$('button, a').filter((_i, el) =>
+			/add to cart|buy now|checkout/i.test($(el).text()),
+		).length > 0;
+
+	const hasCommercePlatform =
 		html.includes('shopify-checkout-api-token') ||
-		html.includes('shopify.com') ||
-		/\/products\/|\/collections\//i.test(html) ||
-		includesAny(nav, ['add to cart', 'buy now', 'shop now']) ||
-		html.includes('<meta property="product:') ||
-		// WooCommerce / WordPress signals
-		html.includes('/wp-content/') ||
 		html.includes('woocommerce') ||
-		$('[class*="wc-"]').length > 0
+		$('[class*="woocommerce"], [class*="wc-"]').length > 0;
+
+	const hasProductMetadata = html.includes('<meta property="product:');
+	const hasShopNavigation = includesAny(nav, ['shop', 'cart', 'checkout']);
+
+	return (
+		hasCommercePlatform ||
+		hasCartOrCheckout ||
+		hasBuyButtons ||
+		hasProductMetadata ||
+		hasShopNavigation
 	);
 }
 
@@ -371,8 +383,7 @@ export function detectWebsiteType(
 			}
 		:	{};
 
-	// Detection priority:
-	// ecommerce -> saas -> business -> blog -> portfolio -> landing -> unknown
+	// Strong ecommerce signals first, then SaaS/business/content signals.
 
 	if (signalEcommerce($, html, nav)) {
 		return { type: 'ecommerce', requiresAuth, ...authPayload };

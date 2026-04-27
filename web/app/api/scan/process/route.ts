@@ -1,30 +1,39 @@
-import { getServiceSupabase } from '@/lib/db/supabase';
-import { detectWebsiteType } from '@/lib/utils/detect';
-import { selectPagesToTest } from '@/lib/utils/page-selection';
-import { fetchHomepageHtml } from '@/lib/api/pagespeed';
-import type { ProcessPayload } from '@/types/api/process';
-import { AppError, asyncHandler } from '@/lib/api/error';
 import { NextResponse } from 'next/server';
-import { Agent, fetch as undiciFetch } from 'undici';
+import { getServiceSupabase } from '@/lib/db/supabase';
+import { fetchHomepageHtml } from '@/lib/api/pagespeed';
+import { AppError, asyncHandler } from '@/lib/api/error';
+import { detectWebsiteType } from '@/lib/utils/detect';
+import { selectPagesToTestWithRoles } from '@/lib/utils/page-selection';
+import type { ProcessPayload } from '@/types/api/process';
+
 export const runtime = 'nodejs';
 
 const SCAN_SERVICE_URL = process.env.SCAN_SERVICE_URL;
 const SCAN_API_TOKEN = process.env.SCAN_API_TOKEN;
 
-// TODO: add a timeout to the fetch request to avoid hanging the process.
 
-const SCAN_FETCH_MS = Number.parseInt(
-	process.env.SCAN_FETCH_TIMEOUT_MS ?? '900000',
-	10,
-);
 
-const scannerAgent = new Agent({
-	connectTimeout: 30_000,
-	headersTimeout: SCAN_FETCH_MS,
-	bodyTimeout: SCAN_FETCH_MS,
-});
 
-export const POST = asyncHandler(async (req: Request) => {
+
+function validateProcessPayload(payload: ProcessPayload): ProcessPayload {
+	const { scanId, targetUrl, package: pkg } = payload;
+
+	if (!scanId) {
+		throw new AppError(400, 'missing_scan_id', 'scanId is required.');
+	}
+
+	if (!targetUrl) {
+		throw new AppError(400, 'missing_target_url', 'targetUrl is required.');
+	}
+
+	if (!pkg) {
+		throw new AppError(400, 'missing_package', 'package is required.');
+	}
+
+	return payload;
+}
+
+async function callScanner(scanId: string, urls: string[]): Promise<void> {
 	if (!SCAN_SERVICE_URL) {
 		throw new AppError(
 			500,
@@ -32,6 +41,7 @@ export const POST = asyncHandler(async (req: Request) => {
 			'SCAN_SERVICE_URL is missing in environment.',
 		);
 	}
+
 	if (!SCAN_API_TOKEN) {
 		throw new AppError(
 			500,
@@ -39,19 +49,35 @@ export const POST = asyncHandler(async (req: Request) => {
 			'SCAN_API_TOKEN is missing in environment.',
 		);
 	}
+	const abortController = new AbortController();
+	const timeout = setTimeout(() => {
+		abortController.abort();
+	}, 900000); // 15 minutes
 
-	const payload = (await req.json()) as ProcessPayload;
+	try {
+		
+		await fetch(`${SCAN_SERVICE_URL}/scan`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${SCAN_API_TOKEN}`,
+			},
+			body: JSON.stringify({ scanId, urls }),
+			signal: abortController.signal,
+		});
+	} catch (err) {
+		console.error('[process] scanner fetch failed', err);
+		throw new AppError(
+			503,
+			'scanner_unreachable',
+			'Scanner is unreachable or the request timed out.',
+		);
+	}
+}
+
+export const POST = asyncHandler(async (req: Request) => {
+	const payload = validateProcessPayload((await req.json()) as ProcessPayload);
 	const { scanId, targetUrl, package: pkg } = payload;
-
-	if (!scanId) {
-		throw new AppError(400, 'missing_scan_id', 'scanId is required.');
-	}
-	if (!targetUrl) {
-		throw new AppError(400, 'missing_target_url', 'targetUrl is required.');
-	}
-	if (!pkg) {
-		throw new AppError(400, 'missing_package', 'package is required.');
-	}
 
 	const supabase = getServiceSupabase();
 
@@ -80,12 +106,14 @@ export const POST = asyncHandler(async (req: Request) => {
 
 	const detection = detectWebsiteType(homepageHtml, targetUrl);
 
-	const pagesToTest = selectPagesToTest(
+	const selectedPages = selectPagesToTestWithRoles(
 		homepageHtml,
 		targetUrl,
 		detection.type,
 		pkg,
 	);
+
+	const pagesToTest = selectedPages.map((page) => page.url);
 
 	if (!pagesToTest.length) {
 		throw new AppError(
@@ -114,10 +142,13 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
-	const pageRows = pagesToTest.map((pageUrl) => ({
+	const pageRows = selectedPages.map((page) => ({
 		scan_id: scanId,
-		page_url: pageUrl,
+		page_url: page.url,
+		page_role: page.role,
 	}));
+
+
 
 	const { error: upsertPagesError } = await supabase
 		.from('scan_pages')
@@ -132,35 +163,15 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
+   await callScanner(scanId, pagesToTest);
 
-	// try {
-	//     await undiciFetch(`${SCAN_SERVICE_URL}/scan`, {
-	// 		method: 'POST',
-	// 		headers: {
-	// 			'Content-Type': 'application/json',
-	// 			Authorization: `Bearer ${SCAN_API_TOKEN}`,
-	// 		},
-	// 		body: JSON.stringify({ scanId, urls: pagesToTest }),
-	// 		dispatcher: scannerAgent,
-	// 	});
-	// } catch (err) {
-	// 	console.error('[process] scanner fetch failed', err);
-	// 	throw new AppError(
-	// 		503,
-	// 		'scanner_unreachable',
-	// 		'Scanner is unreachable or the request timed out.',
-	// 	);
-	// }
-
-
-
-	// TODO: In the future, store detection.notes and detection.banner in the database instead of only returning them in the API response.
 	return NextResponse.json({
 		ok: true,
 		scanId,
 		websiteType: detection.type,
 		requiresAuth: detection.requiresAuth,
 		pagesToTest,
+		selectedPages,
 		...(detection.requiresAuth && {
 			auth: {
 				notes: detection.notes,

@@ -1,15 +1,33 @@
 import * as cheerio from 'cheerio';
 import type { WebsiteType, ScanPackage } from '@/types/zod';
-import {
-	extractHrefs,
-	resolveUrl,
-	isPublicPage,
-	dedupe,
-} from '@/lib/utils/detect';
+import { resolveUrl, isPublicPage, dedupe } from '@/lib/utils/detect';
 
-// ─────────────────────────────────────────────
-// LINK COLLECTION + NORMALIZATION
-// ─────────────────────────────────────────────
+export type PageRole =
+	| 'homepage'
+	| 'pricing'
+	| 'features'
+	| 'product'
+	| 'cart'
+	| 'checkout'
+	| 'about'
+	| 'contact'
+	| 'docs'
+	| 'blog'
+	| 'legal'
+	| 'other';
+
+export type SelectedScanPage = {
+	url: string;
+	role: PageRole;
+};
+
+type LinkCandidate = {
+	url: string;
+	text: string;
+	isNav: boolean;
+	role: PageRole;
+	score: number;
+};
 
 const AUTH_KEYWORDS = [
 	'login',
@@ -28,9 +46,95 @@ const AUTH_KEYWORDS = [
 	'my-account',
 ];
 
+const ROLE_PATTERNS: Record<PageRole, string[]> = {
+	homepage: [],
+	pricing: ['pricing', 'plans', 'packages'],
+	features: ['features', 'solutions', 'platform', 'use-cases', 'storage'],
+	product: [
+		'product',
+		'products',
+		'item',
+		'shop',
+		'store',
+		'collections',
+		'catalog',
+	],
+	cart: ['cart', 'basket'],
+	checkout: ['checkout'],
+	about: ['about', 'company', 'team', 'who-we-are', 'customers'],
+	contact: ['contact', 'demo', 'quote', 'book', 'get-in-touch', 'sales'],
+	docs: ['docs', 'documentation', 'help', 'faq', 'support'],
+	blog: ['blog', 'posts', 'articles', 'resources', 'news', 'insights'],
+	legal: ['privacy', 'terms', 'security', 'compliance'],
+	other: [],
+};
+
+const ROLE_PRIORITY: Record<WebsiteType, PageRole[]> = {
+	ecommerce: [
+		'homepage',
+		'product',
+		'cart',
+		'checkout',
+		'about',
+		'contact',
+		'docs',
+		'blog',
+		'legal',
+		'other',
+	],
+	saas: [
+		'homepage',
+		'features',
+		'pricing',
+		'contact',
+		'docs',
+		'blog',
+		'legal',
+		'about',
+		'other',
+	],
+	webapp: [
+		'homepage',
+		'features',
+		'pricing',
+		'docs',
+		'contact',
+		'legal',
+		'about',
+		'blog',
+		'other',
+	],
+	business: [
+		'homepage',
+		'about',
+		'contact',
+		'pricing',
+		'features',
+		'blog',
+		'docs',
+		'legal',
+		'other',
+	],
+	blog: ['homepage', 'blog', 'about', 'contact', 'docs', 'legal', 'other'],
+	portfolio: ['homepage', 'features', 'about', 'contact', 'blog', 'other'],
+	landing: ['homepage', 'features', 'pricing', 'contact', 'about', 'other'],
+	unknown: [
+		'homepage',
+		'pricing',
+		'features',
+		'product',
+		'about',
+		'contact',
+		'docs',
+		'blog',
+		'legal',
+		'other',
+	],
+};
+
 function hasAuthKeyword(url: URL): boolean {
 	const haystack = `${url.pathname}${url.search}${url.hash}`.toLowerCase();
-	return AUTH_KEYWORDS.some((k) => haystack.includes(k));
+	return AUTH_KEYWORDS.some((keyword) => haystack.includes(keyword));
 }
 
 function normalizeInternalPublicUrl(
@@ -41,343 +145,284 @@ function normalizeInternalPublicUrl(
 	if (!resolved) return undefined;
 
 	const base = new URL(baseUrl);
-	const u = new URL(resolved);
+	const url = new URL(resolved);
 
-	if (u.origin !== base.origin) return undefined;
-	if (!isPublicPage(u.toString())) return undefined;
-	if (hasAuthKeyword(u)) return undefined;
+	if (url.origin !== base.origin) return undefined;
+	if (!isPublicPage(url.toString())) return undefined;
+	if (hasAuthKeyword(url)) return undefined;
 
-	u.hash = '';
+	url.hash = '';
 
-	let out = u.toString();
-	if (u.pathname !== '/' && out.endsWith('/')) {
-		out = out.slice(0, -1);
+	let normalized = url.toString();
+	if (url.pathname !== '/' && normalized.endsWith('/')) {
+		normalized = normalized.slice(0, -1);
 	}
-	return out;
+
+	return normalized;
 }
 
-/**
- * Collect internal, public links from nav/header first.
- * Fallback to all anchors if nav is too sparse.
- */
-function collectNavLinks($: cheerio.CheerioAPI, baseUrl: string): string[] {
-	const navHrefs = extractHrefs($, 'nav a[href], header a[href]');
-	const navLinks = dedupe(
-		navHrefs.map((href) => normalizeInternalPublicUrl(href, baseUrl)),
-	);
-
-	if (navLinks.length >= 3) return navLinks;
-
-	const allHrefs = extractHrefs($, 'a[href]');
-	return dedupe(
-		allHrefs.map((href) => normalizeInternalPublicUrl(href, baseUrl)),
-	);
+function includesPattern(haystack: string, role: PageRole): boolean {
+	return ROLE_PATTERNS[role].some((pattern) => haystack.includes(pattern));
 }
 
-function collectAllPublicLinks(
+export function inferPageRole(
+	pageUrl: string,
+	baseUrl: string,
+	linkText = '',
+): PageRole {
+	const url = new URL(pageUrl);
+	const homepage = new URL('/', baseUrl).toString();
+	const path = url.pathname.toLowerCase();
+	const haystack = `${path} ${linkText}`.toLowerCase();
+
+	if (pageUrl === homepage || path === '/') return 'homepage';
+	if (includesPattern(haystack, 'checkout')) return 'checkout';
+	if (includesPattern(haystack, 'cart')) return 'cart';
+	if (includesPattern(haystack, 'pricing')) return 'pricing';
+
+	if (
+		/\/products?\//i.test(path) ||
+		/\/item\//i.test(path) ||
+		/\/shop(\/|$)/i.test(path) ||
+		/\/store(\/|$)/i.test(path) ||
+		/\/collections?\//i.test(path) ||
+		includesPattern(haystack, 'product')
+	) {
+		return 'product';
+	}
+
+	if (includesPattern(haystack, 'features')) return 'features';
+	if (includesPattern(haystack, 'about')) return 'about';
+	if (includesPattern(haystack, 'contact')) return 'contact';
+	if (includesPattern(haystack, 'docs')) return 'docs';
+	if (includesPattern(haystack, 'blog')) return 'blog';
+	if (includesPattern(haystack, 'legal')) return 'legal';
+
+	return 'other';
+}
+
+function collectLinkCandidates(
 	$: cheerio.CheerioAPI,
 	baseUrl: string,
-): string[] {
-	const hrefs = extractHrefs($, 'a[href]');
-	return dedupe(hrefs.map((href) => normalizeInternalPublicUrl(href, baseUrl)));
+): LinkCandidate[] {
+	const candidates = new Map<string, LinkCandidate>();
+
+	$('a[href]').each((_index, element) => {
+		const url = normalizeInternalPublicUrl($(element).attr('href'), baseUrl);
+		if (!url) return;
+
+		const text = $(element).text().replace(/\s+/g, ' ').trim().toLowerCase();
+		const isNav = $(element).parents('nav, header').length > 0;
+		const existing = candidates.get(url);
+
+		if (existing && (!isNav || existing.isNav)) return;
+
+		candidates.set(url, {
+			url,
+			text,
+			isNav,
+			role: inferPageRole(url, baseUrl, text),
+			score: 0,
+		});
+	});
+
+	return Array.from(candidates.values());
 }
 
-// ─────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────
-
-function findFirst(links: string[], patterns: string[]): string | undefined {
-	return links.find((l) => patterns.some((p) => l.toLowerCase().includes(p)));
+function getPageLimit(pkg: ScanPackage): number {
+	switch (pkg) {
+		case 'free':
+		case 'basic':
+			return 1;
+		case 'standard':
+			return 5;
+		case 'premium':
+			return 10;
+		case 'enterprise':
+			return 0;
+		default:
+			return 1;
+	}
 }
 
-function findProductPages(
-	$: cheerio.CheerioAPI,
-	baseUrl: string,
-	limit = 3,
-): string[] {
-	const origin = new URL(baseUrl).origin;
-	return extractHrefs($, 'a[href]').reduce<string[]>((acc, href) => {
-		if (acc.length >= limit) return acc;
+function resolveSelectionType(
+	websiteType: WebsiteType,
+	candidates: LinkCandidate[],
+): WebsiteType {
+	const roles = new Set(candidates.map((candidate) => candidate.role));
 
-		const normalized = normalizeInternalPublicUrl(href, baseUrl);
-		if (!normalized) return acc;
-		if (!normalized.startsWith(origin)) return acc;
+	const hasCommercePages =
+		roles.has('product') || roles.has('cart') || roles.has('checkout');
 
-		if (
-			/\/products?\/|\/item\/|\/collections\/|\/shop\//i.test(normalized) &&
-			!acc.includes(normalized)
-		) {
-			acc.push(normalized);
-		}
-		return acc;
-	}, []);
+	const hasSaasPages =
+		roles.has('features') || roles.has('pricing') || roles.has('docs');
+
+	if (websiteType === 'ecommerce' && !hasCommercePages && hasSaasPages) {
+		return 'saas';
+	}
+
+	if (
+		(websiteType === 'saas' || websiteType === 'webapp') &&
+		hasCommercePages &&
+		!hasSaasPages
+	) {
+		return 'ecommerce';
+	}
+
+	return websiteType;
 }
 
-function findFirstArticle(
-	$: cheerio.CheerioAPI,
-	baseUrl: string,
-): string | undefined {
-	return extractHrefs($, 'article a[href], .post a[href], .blog a[href]')
-		.map((href) => normalizeInternalPublicUrl(href, baseUrl))
-		.find((url): url is string => Boolean(url));
+function roleWeight(role: PageRole, websiteType: WebsiteType): number {
+	const priority = ROLE_PRIORITY[websiteType] ?? ROLE_PRIORITY.unknown;
+	const index = priority.indexOf(role);
+
+	return index === -1 ? 0 : 100 - index * 8;
 }
 
-function scoreUrl(url: string): number {
-	const l = url.toLowerCase();
-	let score = 0;
-
-	if (l.includes('/pricing')) score += 100;
-	if (
-		l.includes('/product') ||
-		l.includes('/features') ||
-		l.includes('/solutions')
-	)
-		score += 90;
-	if (
-		l.includes('/docs') ||
-		l.includes('/documentation') ||
-		l.includes('/help') ||
-		l.includes('/faq')
-	)
-		score += 80;
-	if (
-		l.includes('/security') ||
-		l.includes('/privacy') ||
-		l.includes('/compliance')
-	)
-		score += 70;
-	if (
-		l.includes('/about') ||
-		l.includes('/company') ||
-		l.includes('/team') ||
-		l.includes('/services')
-	)
-		score += 60;
-	if (
-		l.includes('/blog') ||
-		l.includes('/resources') ||
-		l.includes('/news') ||
-		l.includes('/insights') ||
-		l.includes('/changelog')
-	)
-		score += 50;
-	if (l.includes('/contact') || l.includes('/demo')) score += 40;
-
+function depthPenalty(url: string): number {
 	const depth = new URL(url).pathname.split('/').filter(Boolean).length;
-	score -= Math.max(0, depth - 2) * 5;
-
-	return score;
+	return Math.max(0, depth - 2) * 5;
 }
 
-function rankLinks(links: string[]): string[] {
-	return [...links].sort((a, b) => scoreUrl(b) - scoreUrl(a));
+function scoreCandidate(
+	candidate: LinkCandidate,
+	websiteType: WebsiteType,
+): number {
+	let score = roleWeight(candidate.role, websiteType);
+
+	if (candidate.isNav) score += 12;
+
+	if (websiteType === 'ecommerce') {
+		if (candidate.role === 'product') score += 22;
+		if (candidate.role === 'cart') score += 10;
+		if (candidate.role === 'checkout') score += 8;
+		if (candidate.role === 'features') score -= 12;
+	}
+
+	if (websiteType === 'saas' || websiteType === 'webapp') {
+		if (candidate.role === 'features') score += 20;
+		if (candidate.role === 'pricing') score += 18;
+		if (candidate.role === 'docs') score += 8;
+		if (candidate.role === 'cart' || candidate.role === 'checkout') score -= 30;
+	}
+
+	if (candidate.role === 'other') score -= 30;
+
+	return score - depthPenalty(candidate.url);
 }
 
-function mergeUnique(
-	base: (string | undefined)[],
-	extras: string[],
+function rankCandidates(
+	candidates: LinkCandidate[],
+	websiteType: WebsiteType,
+): LinkCandidate[] {
+	return candidates
+		.map((candidate) => ({
+			...candidate,
+			score: scoreCandidate(candidate, websiteType),
+		}))
+		.sort((a, b) => b.score - a.score);
+}
+
+function homepagePage(baseUrl: string): SelectedScanPage {
+	return {
+		url: new URL('/', baseUrl).toString(),
+		role: 'homepage',
+	};
+}
+
+function addUniquePage(
+	pages: SelectedScanPage[],
+	page: SelectedScanPage | undefined,
 	maxCount: number,
-): string[] {
-	const merged = dedupe(base).filter(Boolean);
-	for (const link of extras) {
-		if (merged.length >= maxCount) break;
-		if (!merged.includes(link)) merged.push(link);
-	}
-	return merged.slice(0, maxCount);
+): void {
+	if (!page) return;
+	if (pages.length >= maxCount) return;
+	if (pages.some((existing) => existing.url === page.url)) return;
+
+	pages.push(page);
 }
 
-// ─────────────────────────────────────────────
-// TYPE-BASED STANDARD (2–5)
-// ─────────────────────────────────────────────
+function bestPageForRole(
+	candidates: LinkCandidate[],
+	role: PageRole,
+): SelectedScanPage | undefined {
+	const candidate = candidates.find((item) => item.role === role);
+	if (!candidate) return undefined;
 
-function selectStandardPages(
+	return {
+		url: candidate.url,
+		role: candidate.role,
+	};
+}
+
+function fillWithBestPages(
+	pages: SelectedScanPage[],
+	candidates: LinkCandidate[],
+	maxCount: number,
+): void {
+	for (const candidate of candidates) {
+		addUniquePage(
+			pages,
+			{
+				url: candidate.url,
+				role: candidate.role,
+			},
+			maxCount,
+		);
+
+		if (pages.length >= maxCount) break;
+	}
+}
+
+function roleOrderForPackage(
+	websiteType: WebsiteType,
+	pkg: ScanPackage,
+): PageRole[] {
+	const priority = ROLE_PRIORITY[websiteType] ?? ROLE_PRIORITY.unknown;
+
+	if (pkg === 'premium') return priority;
+
+	return priority.filter((role) => role !== 'legal' && role !== 'other');
+}
+
+export function selectPagesToTestWithRoles(
 	homepageHtml: string,
 	baseUrl: string,
-	type: WebsiteType,
-): string[] {
+	websiteType: WebsiteType,
+	pkg: ScanPackage,
+): SelectedScanPage[] {
+	const maxCount = getPageLimit(pkg);
+	if (maxCount === 0) return [];
+
+	const homepage = homepagePage(baseUrl);
+	if (maxCount === 1) return [homepage];
+
 	const $ = cheerio.load(homepageHtml);
-	const navLinks = collectNavLinks($, baseUrl);
-	const allPublic = collectAllPublicLinks($, baseUrl);
-	const homepage = new URL('/', baseUrl).toString();
+	const rawCandidates = collectLinkCandidates($, baseUrl);
+	const selectionType = resolveSelectionType(websiteType, rawCandidates);
+	const candidates = rankCandidates(rawCandidates, selectionType);
 
-	const curated: (string | undefined)[] = [homepage];
+	const pages: SelectedScanPage[] = [homepage];
 
-	switch (type) {
-		case 'saas':
-		case 'webapp':
-			curated.push(
-				findFirst(navLinks, ['/features', '/product', '/solutions']),
-			);
-			curated.push(findFirst(navLinks, ['/pricing']));
-			curated.push(findFirst(navLinks, ['/about', '/company']));
-			curated.push(findFirst(navLinks, ['/contact', '/demo']));
-			break;
-
-		case 'ecommerce':
-			curated.push(
-				findFirst(navLinks, ['/shop', '/products', '/collections', '/store']),
-			);
-			curated.push(...findProductPages($, baseUrl, 1));
-			curated.push(findFirst(navLinks, ['/cart', '/basket']));
-			curated.push(findFirst(navLinks, ['/checkout']));
-			break;
-
-		case 'business':
-			curated.push(findFirst(navLinks, ['/about', '/company']));
-			curated.push(findFirst(navLinks, ['/services', '/what-we-do']));
-			curated.push(findFirst(navLinks, ['/pricing']));
-			curated.push(findFirst(navLinks, ['/contact', '/get-quote', '/book']));
-			break;
-
-		case 'blog':
-			curated.push(findFirst(navLinks, ['/blog', '/posts', '/articles']));
-			curated.push(findFirstArticle($, baseUrl));
-			curated.push(findFirst(navLinks, ['/about']));
-			curated.push(findFirst(navLinks, ['/contact']));
-			break;
-
-		case 'portfolio':
-			curated.push(
-				findFirst(navLinks, [
-					'/work',
-					'/portfolio',
-					'/projects',
-					'/case-studies',
-				]),
-			);
-			curated.push(findFirst(navLinks, ['/about', '/team']));
-			curated.push(findFirst(navLinks, ['/contact']));
-			curated.push(findFirst(navLinks, ['/services']));
-			break;
-
-		default:
-			curated.push(...navLinks.slice(0, 4));
+	for (const role of roleOrderForPackage(selectionType, pkg)) {
+		if (role === 'homepage') continue;
+		addUniquePage(pages, bestPageForRole(candidates, role), maxCount);
 	}
 
-	const fallbackPool = rankLinks(
-		allPublic.filter((u) => u !== homepage && !dedupe(curated).includes(u)),
-	);
+	fillWithBestPages(pages, candidates, maxCount);
 
-	return mergeUnique(curated, fallbackPool, 5);
+	return pages.slice(0, maxCount);
 }
 
-// ─────────────────────────────────────────────
-// TYPE-BASED PREMIUM (6–10)
-// ─────────────────────────────────────────────
-
-function selectPremiumPages(
-	homepageHtml: string,
-	baseUrl: string,
-	type: WebsiteType,
-): string[] {
-	const $ = cheerio.load(homepageHtml);
-	const navLinks = collectNavLinks($, baseUrl);
-	const allPublic = collectAllPublicLinks($, baseUrl);
-	const homepage = new URL('/', baseUrl).toString();
-
-	const curated: (string | undefined)[] = [homepage];
-
-	switch (type) {
-		case 'saas':
-		case 'webapp':
-			curated.push(
-				findFirst(navLinks, ['/features', '/product', '/solutions']),
-			);
-			curated.push(findFirst(navLinks, ['/pricing']));
-			curated.push(findFirst(navLinks, ['/about', '/company']));
-			curated.push(findFirst(navLinks, ['/contact', '/demo']));
-			curated.push(findFirst(navLinks, ['/docs', '/help', '/resources']));
-			curated.push(findFirst(navLinks, ['/blog', '/changelog']));
-			curated.push(
-				findFirst(navLinks, ['/security', '/privacy', '/compliance']),
-			);
-			break;
-
-		case 'ecommerce':
-			curated.push(
-				findFirst(navLinks, ['/shop', '/products', '/collections', '/store']),
-			);
-			// Premium: 2-3 product pages
-			curated.push(...findProductPages($, baseUrl, 3));
-			curated.push(findFirst(navLinks, ['/cart', '/basket']));
-			curated.push(findFirst(navLinks, ['/checkout']));
-			curated.push(findFirst(navLinks, ['/about']));
-			curated.push(findFirst(navLinks, ['/contact', '/faq', '/help']));
-			break;
-
-		case 'business':
-			curated.push(findFirst(navLinks, ['/about', '/company']));
-			curated.push(findFirst(navLinks, ['/services', '/what-we-do']));
-			curated.push(findFirst(navLinks, ['/pricing']));
-			curated.push(findFirst(navLinks, ['/contact', '/get-quote', '/book']));
-			// Premium additions requested by spec
-			curated.push(findFirst(navLinks, ['/team', '/our-team']));
-			curated.push(findFirst(navLinks, ['/faq']));
-			curated.push(findFirst(navLinks, ['/blog', '/news', '/insights']));
-			break;
-
-		case 'blog':
-			curated.push(findFirst(navLinks, ['/blog', '/posts', '/articles']));
-			curated.push(findFirstArticle($, baseUrl));
-			curated.push(findFirst(navLinks, ['/about']));
-			curated.push(findFirst(navLinks, ['/contact']));
-			curated.push(findFirst(navLinks, ['/categories', '/tags', '/topics']));
-			curated.push(...navLinks.slice(0, 3));
-			break;
-
-		case 'portfolio':
-			curated.push(findFirst(navLinks, ['/work', '/portfolio', '/projects']));
-			curated.push(findFirst(navLinks, ['/about', '/team']));
-			curated.push(findFirst(navLinks, ['/contact']));
-			curated.push(findFirst(navLinks, ['/services']));
-			curated.push(findFirst(navLinks, ['/case-studies', '/testimonials']));
-			curated.push(...navLinks.slice(0, 4));
-			break;
-
-		default:
-			curated.push(...navLinks.slice(0, 9));
-	}
-
-	const fallbackPool = rankLinks(
-		allPublic.filter((u) => u !== homepage && !dedupe(curated).includes(u)),
-	);
-
-	return mergeUnique(curated, fallbackPool, 10);
-}
-
-// ─────────────────────────────────────────────
-// MAIN EXPORT
-// ─────────────────────────────────────────────
-
-/**
- * free/basic   => homepage only
- * standard     => 2-5 pages, type-based + fallback fill
- * premium      => 6-10 pages, wider type-based + fallback fill
- * enterprise   => [] (manual QA team selection)
- */
 export function selectPagesToTest(
 	homepageHtml: string,
 	baseUrl: string,
 	websiteType: WebsiteType,
 	pkg: ScanPackage,
 ): string[] {
-	const homepage = new URL('/', baseUrl).toString();
-
-	switch (pkg) {
-		case 'free':
-		case 'basic':
-			return [homepage];
-
-		case 'standard':
-			return selectStandardPages(homepageHtml, baseUrl, websiteType);
-
-		case 'premium':
-			return selectPremiumPages(homepageHtml, baseUrl, websiteType);
-
-		case 'enterprise':
-			return [];
-
-		default:
-			return [homepage];
-	}
+	return dedupe(
+		selectPagesToTestWithRoles(homepageHtml, baseUrl, websiteType, pkg).map(
+			(page) => page.url,
+		),
+	);
 }

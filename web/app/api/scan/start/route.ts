@@ -52,11 +52,14 @@ export const POST = asyncHandler(async (req: Request) => {
 		}
 
 		if (existing?.length) {
-			throw new AppError(
-				409,
-				'free_preview_used',
-				'This website has already used the free preview. Choose a paid package to continue.',
-				{ showPricing: true },
+			return NextResponse.json(
+				{
+					ok: false,
+					code: 'free_preview_used',
+					message:
+						'You have already used your free preview for this website. To continue, please select a paid package.',
+				},
+				{ status: 409 },
 			);
 		}
 	}
@@ -83,11 +86,11 @@ export const POST = asyncHandler(async (req: Request) => {
 			'Could not create scan record. Please try again.',
 		);
 	}
- // TODO: The following endpoint triggers the scan processing.
- // In the future, replace this direct call with QStash or another queue-based messaging system
-// to decouple and asynchronously handle scan processing.
+	// TODO: The following endpoint triggers the scan processing.
+	// In the future, replace this direct call with QStash or another queue-based messaging system
+	// to decouple and asynchronously handle scan processing.
 
-await fetch('http://localhost:3000/api/scan/process', {
+	await fetch('http://localhost:3000/api/scan/process', {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
@@ -98,7 +101,6 @@ await fetch('http://localhost:3000/api/scan/process', {
 			package: pkg,
 		}),
 	});
-
 
 	return NextResponse.json(
 		{
