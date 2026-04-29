@@ -1,19 +1,17 @@
 import { NextResponse } from 'next/server';
+import { verifySignatureAppRouter } from '@upstash/qstash/nextjs';
 import { getServiceSupabase } from '@/lib/db/supabase';
-import { fetchHomepageHtml } from '@/lib/api/pagespeed';
+import { fetchHomepageHtml } from '@/lib/api/fetchHomePageHtml';
 import { AppError, asyncHandler } from '@/lib/api/error';
 import { detectWebsiteType } from '@/lib/utils/detect';
 import { selectPagesToTestWithRoles } from '@/lib/utils/page-selection';
 import type { ProcessPayload } from '@/types/api/process';
+import { collectPageSpeedForPages } from '@/lib/utils/savePageSpeedForPage';
 
 export const runtime = 'nodejs';
 
 const SCAN_SERVICE_URL = process.env.SCAN_SERVICE_URL;
 const SCAN_API_TOKEN = process.env.SCAN_API_TOKEN;
-
-
-
-
 
 function validateProcessPayload(payload: ProcessPayload): ProcessPayload {
 	const { scanId, targetUrl, package: pkg } = payload;
@@ -21,11 +19,9 @@ function validateProcessPayload(payload: ProcessPayload): ProcessPayload {
 	if (!scanId) {
 		throw new AppError(400, 'missing_scan_id', 'scanId is required.');
 	}
-
 	if (!targetUrl) {
 		throw new AppError(400, 'missing_target_url', 'targetUrl is required.');
 	}
-
 	if (!pkg) {
 		throw new AppError(400, 'missing_package', 'package is required.');
 	}
@@ -41,7 +37,6 @@ async function callScanner(scanId: string, urls: string[]): Promise<void> {
 			'SCAN_SERVICE_URL is missing in environment.',
 		);
 	}
-
 	if (!SCAN_API_TOKEN) {
 		throw new AppError(
 			500,
@@ -49,23 +44,27 @@ async function callScanner(scanId: string, urls: string[]): Promise<void> {
 			'SCAN_API_TOKEN is missing in environment.',
 		);
 	}
-	const abortController = new AbortController();
-	const timeout = setTimeout(() => {
-		abortController.abort();
-	}, 900000); // 15 minutes
 
 	try {
-		
-		await fetch(`${SCAN_SERVICE_URL}/scan`, {
+		const response = await fetch(`${SCAN_SERVICE_URL}/scan`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 				Authorization: `Bearer ${SCAN_API_TOKEN}`,
 			},
 			body: JSON.stringify({ scanId, urls }),
-			signal: abortController.signal,
 		});
+
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			throw new AppError(
+				502,
+				'scanner_error_response',
+				`Scanner returned ${response.status}${text ? `: ${text}` : ''}`,
+			);
+		}
 	} catch (err) {
+		if (err instanceof AppError) throw err;
 		console.error('[process] scanner fetch failed', err);
 		throw new AppError(
 			503,
@@ -75,7 +74,7 @@ async function callScanner(scanId: string, urls: string[]): Promise<void> {
 	}
 }
 
-export const POST = asyncHandler(async (req: Request) => {
+const processHandler = asyncHandler(async (req: Request) => {
 	const payload = validateProcessPayload((await req.json()) as ProcessPayload);
 	const { scanId, targetUrl, package: pkg } = payload;
 
@@ -95,17 +94,8 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
-	const homepageHtml = await fetchHomepageHtml(targetUrl).catch((err) => {
-		console.error('[process] homepage fetch failed', { targetUrl, err });
-		throw new AppError(
-			502,
-			'homepage_fetch_failed',
-			'Could not access the target website homepage. Please check URL and try again.',
-		);
-	});
-
+	const homepageHtml = await fetchHomepageHtml(targetUrl);
 	const detection = detectWebsiteType(homepageHtml, targetUrl);
-
 	const selectedPages = selectPagesToTestWithRoles(
 		homepageHtml,
 		targetUrl,
@@ -148,8 +138,6 @@ export const POST = asyncHandler(async (req: Request) => {
 		page_role: page.role,
 	}));
 
-
-
 	const { error: upsertPagesError } = await supabase
 		.from('scan_pages')
 		.upsert(pageRows, { onConflict: 'scan_id,page_url' });
@@ -163,10 +151,11 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
-   await callScanner(scanId, pagesToTest);
+	await collectPageSpeedForPages(supabase, scanId, pagesToTest);
+	await callScanner(scanId, pagesToTest);
 
-	return NextResponse.json({
-		ok: true,
+	// TODO: will be add the db column and add the data in db (auth detection)
+	console.log('auth detection', {
 		scanId,
 		websiteType: detection.type,
 		requiresAuth: detection.requiresAuth,
@@ -180,4 +169,10 @@ export const POST = asyncHandler(async (req: Request) => {
 			},
 		}),
 	});
+
+	return NextResponse.json({
+		ok: true,
+	});
 });
+
+export const POST = verifySignatureAppRouter(processHandler);

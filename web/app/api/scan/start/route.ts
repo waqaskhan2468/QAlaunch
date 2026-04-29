@@ -3,6 +3,7 @@ import { normalizeUrl, urlHash, isPrivateUrl } from '@/lib/utils/url';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { scanStartSchema } from '@/types/zod';
 import { AppError, asyncHandler } from '@/lib/api/error';
+import { queueScanJob } from '@/lib/api/qstash';
 
 export const runtime = 'nodejs';
 
@@ -86,20 +87,14 @@ export const POST = asyncHandler(async (req: Request) => {
 			'Could not create scan record. Please try again.',
 		);
 	}
-	// TODO: The following endpoint triggers the scan processing.
-	// In the future, replace this direct call with QStash or another queue-based messaging system
-	// to decouple and asynchronously handle scan processing.
 
-	await fetch('http://localhost:3000/api/scan/process', {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			scanId: scan.id,
-			targetUrl: normalized,
-			package: pkg,
-		}),
+
+   
+	await queueScanJob({
+		scanId: scan.id,
+		targetUrl: normalized,
+		package: pkg,
+		userEmail: email ?? null,
 	});
 
 	return NextResponse.json(

@@ -316,6 +316,7 @@ async function processScanResult(
 	await updateScanPage(scanId, result.url, {
 		screenshot_desktop_url: desktopUpload.url,
 		screenshot_mobile_url: mobileUpload.url,
+		raw_html: result.rawHtml ?? null,
 		axe_violations: result.axe ?? null,
 		playwright_data: buildPlaywrightPayload(
 			resultWithUploadWarnings,

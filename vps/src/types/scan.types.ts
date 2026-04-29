@@ -100,11 +100,12 @@ export type ScanResult = {
 	};
 	axe?: any[];
 	responsive?: ResponsiveResult[];
+	rawHtml?: string;
 };
 
-type ScanStatus = 'pending' | 'crawling' | 'analyzing' | 'done' | 'failed';
+export type ScanStatus = 'pending' | 'crawling' | 'analyzing' | 'done' | 'failed';
 
-type ScreenshotUploadResult = {
+export type ScreenshotUploadResult = {
 	url: string | null;
 	warning?: string;
 };

@@ -8,6 +8,7 @@ import { collectLinks } from './links';
 import { collectResponsive, MOBILE_VIEWPORT_NAME } from './responsive';
 import { withRetry } from './retry';
 import { captureDesktopScreenshot } from './screenshots';
+import { RAW_HTML_MAX_BYTES, truncateUtf8Bytes } from '../utils/html';
 
 const DEFAULT_PAGE_CONCURRENCY = 1;
 const PAGE_SCAN_ATTEMPTS = 2;
@@ -87,6 +88,16 @@ async function scanSingleUrl(
 		attachPageDiagnostics(page, result);
 
 		await navigatePage(page, url, result);
+
+		// Serialized DOM for scan_pages.raw_html (UTF-8 capped in utils/html).
+		const rawHtml = await runStep(result.steps, 'raw_html', async () => {
+			const html = await page.content();
+			return truncateUtf8Bytes(html, RAW_HTML_MAX_BYTES);
+		});
+
+		if (rawHtml !== undefined) {
+			result.rawHtml = rawHtml;
+		}
 
 		result.screenshots = {};
 

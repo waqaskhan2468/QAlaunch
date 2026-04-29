@@ -1,468 +1,448 @@
-# QA Launch — HTTP API reference
+# QA Launch API
 
-This document describes the **Next.js App Router** routes under `web/app/api`, the **Express scanner** service under `vps`, and how they touch **Supabase**. Use it for integration, debugging, and onboarding.
+This document explains the scan API in simple English.
 
----
+The scan starts in the Next.js app, is queued with QStash, then is processed by the VPS scanner. Data is saved in Supabase.
 
-## Base URLs
+## Scan Flow
 
-| Environment | Next.js app | Scanner (VPS) |
-|-------------|-------------|-----------------|
-| Local | `http://localhost:3000` | `http://localhost:3000` (default `PORT`) — **change one port** if both run on the same machine |
-| Production | Your deployed origin (e.g. `https://app.example.com`) | `SCAN_SERVICE_URL` (no path suffix) |
+1. The browser calls `POST /api/scan/start`.
+2. The start route creates a `scans` row in Supabase.
+3. The start route sends a job to QStash.
+4. QStash calls `POST /api/scan/process`.
+5. The process route chooses the pages to test.
+6. The process route runs PageSpeed Insights for each selected page.
+7. The process route calls the VPS scanner.
+8. The VPS scanner runs Playwright and saves the final page data.
 
-All Next routes below are rooted at the app origin, e.g. `POST https://<origin>/api/scan/start`.
+## Start A Scan
 
----
+Endpoint:
 
-## End-to-end flow
-
-```mermaid
-sequenceDiagram
-  participant Client
-  participant Next as Next.js API
-  participant DB as Supabase
-  participant VPS as Scanner VPS
-
-  Client->>Next: POST /api/scan/start
-  Next->>DB: insert scans
-  Next->>Next: POST /api/scan/process
-  Next->>DB: update scans, upsert scan_pages
-  Next->>VPS: POST /scan (Bearer)
-  VPS->>DB: update scans, scan_pages
-  Client->>Next: GET /api/scan/status/:scanId
-  Next->>DB: select scans, scan_pages, issues
+```http
+POST /api/scan/start
+Content-Type: application/json
 ```
 
-**Paid path:** Paddle → `POST /api/webhooks/paddle` → updates `scans` → queues work that eventually hits `/api/scan/process` (see [Webhooks](#post-apiwebhookspaddle)).
-
----
-
-## Error response shapes
-
-Two patterns exist in the codebase:
-
-### A. `AppError` (used by `asyncHandler` on `/api/scan/start` and `/api/scan/process`)
-
-JSON body:
+Request body:
 
 ```json
 {
-  "ok": false,
-  "code": "machine_readable_code",
-  "message": "Human-readable message.",
-  "details": null
+  "url": "https://supabase.com/",
+  "email": "haseebsajjad@gmail.com",
+  "package": "premium"
 }
 ```
 
-`details` may contain validation output (e.g. Zod `flatten()`) for `invalid_request`.
+What this route does:
 
-### B. Legacy / minimal
+- Checks that the request body is valid.
+- Normalizes the URL.
+- Blocks private and local URLs.
+- Creates one row in the `scans` table.
+- Sets the scan status to `pending`.
+- Sends a QStash job to `/api/scan/process`.
 
-- **`GET /api/scan/status/[scanId]`** — `{ "error": "not_found" }` or `{ "error": "<message>" }`
-- **`POST /api/webhooks/paddle`** — `401` returns plain text `Invalid signature`; some errors use `{ "error": "..." }`
-
----
-
-## Next.js routes
-
-### `POST /api/scan/start`
-
-Starts a scan: validates input, creates a `scans` row, then triggers processing (see **Implementation note**).
-
-| | |
-|--|--|
-| **Auth** | None (public). |
-| **Content-Type** | `application/json` |
-
-#### Request body
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `url` | string | yes | Site URL (non-empty). Normalized server-side. |
-| `package` | string | yes | One of: `free`, `basic`, `standard`, `premium`, `enterprise`. |
-| `email` | string | no | Valid email, or omit / empty string. |
-
-#### Example request
-
-```http
-POST /api/scan/start HTTP/1.1
-Host: localhost:3000
-Content-Type: application/json
-
-{
-  "url": "https://example.com",
-  "package": "free",
-  "email": "user@example.com"
-}
-```
-
-```bash
-curl -sS -X POST "$ORIGIN/api/scan/start" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com","package":"free","email":"user@example.com"}'
-```
-
-#### Success response — `201 Created`
+Response (`201 Created` on success):
 
 ```json
 {
   "ok": true,
-  "scanId": "550e8400-e29b-41d4-a716-446655440000",
+  "scanId": "b699aa99-0e61-4ee7-ba3f-00e461e30566",
   "status": "pending",
   "message": "Scan started successfully."
 }
 ```
 
-#### Database effects
+Why the response is `pending`:
 
-| Table | Action |
-|-------|--------|
-| `scans` | **INSERT** one row: `url`, `url_hash`, `package`, `status: "pending"`, `user_email`, `payment_status` (`"free"` if package is free else `"pending"`), `free_preview_used: false`. |
+- `POST /api/scan/start` only creates the scan row and queues work.
+- The long work runs asynchronously through QStash and the VPS scanner.
+- Use `scanId` with the status endpoint to read final `done` or `failed` state.
 
-**Does not** write `scan_pages` or `issues` — that happens in `/api/scan/process` and downstream services.
+Free package rule:
 
-**Free tier:** Before insert, if `package === "free"`, the API checks for an existing free scan for the same `url_hash` with `free_preview_used === true`. If found, **no new row** is inserted.
+- A free scan can only be used once for the same website.
+- If the free preview was already used, the route returns `409`.
 
-#### Error responses (selection)
+Paid package rule:
 
-| HTTP | Body (shape) | When |
-|------|----------------|------|
-| 400 | `AppError` — `code: "invalid_request"` | Zod validation failed |
-| 400 | `AppError` — `code: "private_url_not_allowed"` | URL blocked as private/local |
-| 409 | `{ "ok": false, "code": "free_preview_used", "message": "..." }` | Free preview already used for this site |
-| 500 | `AppError` — e.g. `free_check_failed`, `scan_create_failed` | Database or server errors |
+- Paid scans start with `payment_status = pending`.
+- After Paddle confirms payment, the webhook can queue the scan again with QStash.
 
-#### Implementation note (operators)
+## QStash Job
 
-After insert, the handler calls **`POST http://localhost:3000/api/scan/process`** with a fixed host. That matches **local dev** where the Next app listens on port 3000. For **staging/production**, this URL must be aligned with your deployment (env-based base URL), or processing will not run from this path alone.
+The app uses QStash so the scan does not depend on one long browser request.
 
----
-
-### `POST /api/scan/process`
-
-Orchestration: marks crawl state, fetches homepage HTML, detects site type, selects pages, persists `scan_pages`, then calls the remote scanner.
-
-| | |
-|--|--|
-| **Auth** | **None in code** — treat as internal; protect at the edge in production. |
-| **Content-Type** | `application/json` |
-
-#### Request body
-
-| Field | Type | Required |
-|-------|------|----------|
-| `scanId` | string (UUID) | yes |
-| `targetUrl` | string | yes |
-| `package` | same enum as start | yes |
-| `userEmail` | string \| null | no |
-
-#### Example request
+The queued job calls:
 
 ```http
-POST /api/scan/process HTTP/1.1
-Host: localhost:3000
+POST /api/scan/process
+```
+
+QStash sends this body:
+
+```json
+{
+  "scanId": "1423ace4-bb8b-4d33-836d-bc60a5aeb415",
+  "targetUrl": "https://supabase.com",
+  "package": "premium",
+  "userEmail": "user@example.com"
+}
+```
+
+The process route uses `verifySignatureAppRouter` from `@upstash/qstash/nextjs`. This means normal users should not call `/api/scan/process` directly. QStash must sign the request.
+
+Required QStash environment variables:
+
+- `QSTASH_TOKEN`
+- `QSTASH_CURRENT_SIGNING_KEY`
+- `QSTASH_NEXT_SIGNING_KEY`
+- `NEXT_PUBLIC_APP_URL`
+
+## Process A Scan
+
+Endpoint:
+
+```http
+POST /api/scan/process
 Content-Type: application/json
-
-{
-  "scanId": "550e8400-e29b-41d4-a716-446655440000",
-  "targetUrl": "https://example.com",
-  "package": "standard"
-}
 ```
 
-#### Success response — `200 OK`
+This endpoint is called by QStash.
+
+What this route does:
+
+- Marks the scan as `crawling`.
+- Fetches the homepage HTML.
+- Detects the website type.
+- Selects public pages to test.
+- Saves the selected page URLs in `scans.pages_to_test`.
+- Creates or updates one `scan_pages` row for each selected page.
+- Runs PageSpeed Insights for each selected page.
+- Calls the VPS scanner with the selected URLs.
+
+If no public pages are found, the route returns `422`.
+
+## Website Type Detection
+
+The process route fetches the homepage HTML and passes it to `detectWebsiteType`.
+The detector parses the HTML with Cheerio and normalizes:
+
+- Full HTML.
+- `nav` and `header` text.
+- `body` text.
+- Page title.
+
+It then checks website type signals in this order:
+
+1. `ecommerce`
+  - Cart or checkout links.
+  - Cart forms.
+  - Buy buttons such as `add to cart`, `buy now`, or `checkout`.
+  - Shopify, WooCommerce, or product metadata.
+  - Shop, cart, or checkout navigation text.
+2. `saas`
+  - Navigation text such as pricing, features, solutions, login, sign in, sign up, get started, or start for free.
+  - Page text such as free trial, per month, per seat, per user, subscription, dashboard, or `/month`.
+  - Hostnames that start with `app.`.
+3. `business`
+  - Navigation text such as services, about, contact, or what we do.
+  - Page text such as get a quote, book a call, book a demo, or request a quote.
+  - Any form on the page.
+4. `blog`
+  - Article elements.
+  - RSS markup.
+  - Recent posts text.
+  - Article schema markup.
+  - Blog URLs in the HTML.
+5. `portfolio`
+  - Navigation text such as portfolio, work, projects, or case studies.
+  - Page text such as case studies, our team, or selected work.
+6. `landing`
+  - Small navigation with many hash links.
+  - No navigation with several hash links.
+  - Repeated CTA text such as get started, book demo, start free trial, or contact us.
+
+If none of these signals match, the detector returns `unknown`.
+
+The first matching type is saved in `scans.website_type`.
+
+The same detector also checks whether the site appears to have authentication. It looks for auth subdomains, auth paths, password fields, login or signup links/forms, auth-related text, dashboard/workspace signals, and auth-related meta tags.
+
+For now, auth detection only sets `requiresAuth` and logs the auth note, banner, and contact URL in the process route. It does not stop or change the public page scan. If this needs to be stored later, add a database column for the auth detection result and save it with the scan metadata.
+
+## Page Selection
+
+The process route finds links from the homepage.
+
+It keeps only useful public pages:
+
+- Same website only.
+- No hash-only links.
+- No private pages like login, signup, dashboard, account, settings, logout, or profile.
+- No duplicate URLs.
+
+Each page gets a role. Example roles are:
+
+- `homepage`
+- `pricing`
+- `features`
+- `product`
+- `cart`
+- `checkout`
+- `about`
+- `contact`
+- `docs`
+- `blog`
+- `legal`
+- `other`
+
+Package limits:
+
+- `free`: 1 page
+- `basic`: 1 page
+- `standard`: 5 pages
+- `premium`: 10 pages
+- `enterprise`: no automatic limit from the selector
+
+The homepage is always selected first when at least one page is allowed.
+
+For a SaaS website, important pages like homepage, features, pricing, contact, docs, blog, legal, and about are ranked higher.
+
+Example selected pages for a premium SaaS scan:
 
 ```json
-{
-  "ok": true,
-  "scanId": "550e8400-e29b-41d4-a716-446655440000",
-  "websiteType": "business",
-  "requiresAuth": false,
-  "pagesToTest": [
-    "https://example.com/",
-    "https://example.com/contact"
-  ],
-  "selectedPages": [
-    { "url": "https://example.com/", "role": "home" },
-    { "url": "https://example.com/contact", "role": "contact" }
-  ]
-}
+[
+  "https://supabase.com/",
+  "https://supabase.com/solutions/ai-builders",
+  "https://supabase.com/pricing",
+  "https://supabase.com/contact/sales",
+  "https://supabase.com/docs",
+  "https://supabase.com/blog",
+  "https://supabase.com/security",
+  "https://supabase.com/customers",
+  "https://supabase.com/state-of-startups",
+  "https://supabase.com/solutions/no-code"
+]
 ```
 
-If authentication is detected on the site, optional `auth` may appear:
+## PageSpeed Insights
 
-```json
-{
-  "ok": true,
-  "scanId": "...",
-  "websiteType": "saas",
-  "requiresAuth": true,
-  "pagesToTest": ["..."],
-  "selectedPages": [],
-  "auth": {
-    "notes": "...",
-    "banner": "...",
-    "contactUrl": "..."
-  }
-}
-```
+After pages are selected, the process route runs PageSpeed Insights for each page.
 
-#### Database effects
+For each page, it runs:
 
-| Table | Action |
-|-------|--------|
-| `scans` | **UPDATE** — `status` set to `crawling`, `error_message` cleared; then **UPDATE** with `website_type`, `pages_to_test`, etc. |
-| `scan_pages` | **UPSERT** rows per selected page (`scan_id`, `page_url`, `page_role`; conflict on `scan_id,page_url`). |
+- Mobile PageSpeed
+- Desktop PageSpeed
 
-Then the handler issues an outbound HTTP request (see Scanner service).
+The PageSpeed request includes these categories:
 
-#### Error responses (selection)
+- Performance
+- SEO
+- Accessibility
+- Best practices
 
-| HTTP | `code` (AppError) | When |
-|------|-------------------|------|
-| 400 | `missing_scan_id`, `missing_target_url`, `missing_package` | Validation |
-| 422 | `no_testable_pages` | No pages selected |
-| 500 | `config_missing` | `SCAN_SERVICE_URL` or `SCAN_API_TOKEN` unset |
-| 500 | `scan_status_update_failed`, `scan_update_failed`, `scan_pages_prepare_failed` | Supabase errors |
-| 502 | `homepage_fetch_failed` | Could not fetch homepage HTML |
-| 503 | `scanner_unreachable` | Outbound fetch to scanner failed / timeout (15 minutes) |
+The saved result includes:
 
-#### Downstream call
+- `performance`
+- `seo`
+- `accessibility`
+- `bestPractices`
+- `lcpMs`
+- `fcpMs`
+- `cls`
+- `ttiMs`
+- Any mobile or desktop strategy error
+
+The result is saved in `scan_pages.page_speed_data`.
+
+If one strategy fails and the other succeeds, the successful result is still saved. If both fail, the error is saved in the PageSpeed data.
+
+Required PageSpeed environment variable:
+
+- `GOOGLE_PAGESPEED_API_KEY`
+
+## VPS Scanner
+
+After PageSpeed data is saved, the process route calls the VPS scanner.
+
+Endpoint:
 
 ```http
 POST ${SCAN_SERVICE_URL}/scan
 Authorization: Bearer ${SCAN_API_TOKEN}
 Content-Type: application/json
-
-{ "scanId": "<same>", "urls": ["..."] }
 ```
 
----
-
-### `GET /api/scan/status/[scanId]`
-
-Returns the scan row, related pages, and issues for polling or UI.
-
-| | |
-|--|--|
-| **Auth** | None in route — locking down who can read which `scanId` is an application concern. |
-
-#### Example request
-
-```http
-GET /api/scan/status/550e8400-e29b-41d4-a716-446655440000 HTTP/1.1
-Host: localhost:3000
-```
-
-```bash
-curl -sS "$ORIGIN/api/scan/status/550e8400-e29b-41d4-a716-446655440000"
-```
-
-#### Success response — `200 OK`
+Request body:
 
 ```json
 {
-  "scan": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "url": "https://example.com",
-    "status": "done",
-    "package": "standard",
-    "website_type": "business",
-    "pages_to_test": ["https://example.com/"],
-    "error_message": null,
-    "completed_at": "2026-04-28T12:00:00.000Z"
-  },
-  "pages": [
-    {
-      "scan_id": "550e8400-e29b-41d4-a716-446655440000",
-      "page_url": "https://example.com/",
-      "page_role": "home",
-      "screenshot_desktop_url": "https://...",
-      "screenshot_mobile_url": "https://..."
-    }
-  ],
-  "issues": []
-}
-```
-
-Exact column set matches your Supabase schema (`select *`). Issues are ordered by `severity` descending, then `display_order` ascending.
-
-#### Database effects
-
-**Read-only** — `SELECT` on `scans`, `scan_pages`, `issues`.
-
-#### Error responses
-
-| HTTP | Body |
-|------|------|
-| 404 | `{ "error": "not_found" }` |
-| 500 | `{ "error": "<Supabase message>" }` if the issues query fails |
-
----
-
-### `POST /api/webhooks/paddle`
-
-Handles Paddle server notifications after payment.
-
-| | |
-|--|--|
-| **Auth** | Webhook signature: header **`paddle-signature`** + raw body verification. |
-| **Content-Type** | Raw body (JSON string); use the **exact** bytes Paddle sent for signature verification. |
-
-#### Example request (illustrative)
-
-```http
-POST /api/webhooks/paddle HTTP/1.1
-Host: localhost:3000
-Content-Type: application/json
-paddle-signature: <signature>
-
-{"event_type":"transaction.completed","data":{"id":"txn_...","custom_data":{"scanId":"...","package":"basic","targetUrl":"https://example.com","userEmail":"user@example.com"}}}
-```
-
-#### Success response — `200 OK`
-
-```json
-{ "ok": true }
-```
-
-Non-Paddle callers should not invoke this endpoint without a valid signature.
-
-#### Handled events
-
-- **`transaction.completed`** — Requires `event.data.custom_data`: `scanId`, `targetUrl`, `package` (and optionally `userEmail`). Updates the scan and queues processing via `queueScanJob` (see `web/lib/api/qstash.ts`). In development, that may call `/api/scan/process` directly; production behavior depends on QStash configuration.
-
-#### Database effects (on `transaction.completed`)
-
-| Table | Action |
-|-------|--------|
-| `scans` | **UPDATE** — `package`, `payment_id`, `payment_status: "paid"`, `status: "pending"` |
-
-#### Error responses
-
-| HTTP | Body |
-|------|------|
-| 401 | Plain text: `Invalid signature` |
-| 400 | `{ "error": "missing_custom_data" }` if required custom data is missing |
-
----
-
-## Scanner service (Express, `vps`)
-
-Mounted under **`/scan`** with JSON body parsing. Global error middleware runs last.
-
-### `GET /health`
-
-**Auth:** none.
-
-#### Example
-
-If `SCAN_SERVICE_URL` is `https://scanner.example.com` (no path), the health endpoint is **`GET https://scanner.example.com/health`** — same origin as `/scan`, different path.
-
-```bash
-# Replace with your scanner origin (scheme + host + port)
-curl -sS "https://scanner.example.com/health"
-```
-
-#### Response — `200 OK`
-
-```json
-{
-  "status": "ok",
-  "ts": "2026-04-28T12:00:00.000Z"
-}
-```
-
----
-
-### `POST /scan`
-
-Runs the Playwright pipeline for the given URLs.
-
-| | |
-|--|--|
-| **Auth** | `Authorization: Bearer <SCAN_API_TOKEN>` |
-
-#### Request body
-
-```json
-{
-  "scanId": "550e8400-e29b-41d4-a716-446655440000",
+  "scanId": "1423ace4-bb8b-4d33-836d-bc60a5aeb415",
   "urls": [
-    "https://example.com/",
-    "https://example.com/contact"
+    "https://supabase.com/",
+    "https://supabase.com/pricing"
   ]
 }
 ```
 
-| Field | Required |
-|-------|----------|
-| `scanId` | yes (non-empty string) |
-| `urls` | yes (non-empty array of strings) |
+Required scanner environment variables:
 
-#### Example
+- `SCAN_SERVICE_URL`
+- `SCAN_API_TOKEN`
 
-```bash
-curl -sS -X POST "$SCAN_SERVICE_URL/scan" \
-  -H "Authorization: Bearer $SCAN_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"scanId":"550e8400-e29b-41d4-a716-446655440000","urls":["https://example.com/"]}'
-```
+## VPS Scan Work
 
-#### Success response — `200 OK`
+The VPS scanner uses Playwright.
+
+For each selected page, it collects:
+
+- Raw HTML
+- Desktop screenshot
+- Mobile screenshot
+- Responsive screenshots
+- Links and broken links
+- Buttons and forms
+- SEO data
+- Accessibility issues from axe
+- Console messages
+- Failed requests
+- HTTP errors
+
+The scanner opens a fresh browser context for each page. This keeps cookies and page state separate between URLs.
+
+The scanner uses `SCAN_PAGE_CONCURRENCY`. If it is not set, it scans one page at a time.
+
+## Accessibility
+
+Accessibility is checked with `@axe-core/playwright`.
+
+The scanner uses these axe tags:
+
+- `wcag2a`
+- `wcag2aa`
+- `wcag21aa`
+
+A page is only marked as successful when:
+
+- Navigation works.
+- Axe returns a valid list of violations.
+
+If important data is missing, the scanner retries the page once. If data is still missing, it saves warnings in `playwright_data.warnings`.
+
+## Screenshots And Storage
+
+Screenshots are uploaded to Supabase Storage.
+
+The file path uses:
+
+- The `scanId`
+- A cleaned version of the page URL
+- The screenshot type
+
+The public screenshot URLs are saved in `scan_pages`.
+
+Saved screenshot fields:
+
+- `screenshot_desktop_url`
+- `screenshot_mobile_url`
+- Responsive screenshot URLs inside `playwright_data.responsive`
+
+## Database Updates
+
+This section explains exactly what changes in Supabase from start to finish.
+
+### 1) `POST /api/scan/start` inserts one parent row in `scans`
+
+Initial values include:
+
+- `status = pending`
+- `payment_status = pending` for paid packages (`free` package uses `free`)
+- `url`, `url_hash`, `package`, `user_email`
+- `free_preview_used = false`
+
+This is why the API immediately returns:
 
 ```json
 {
-  "success": true,
-  "scanId": "550e8400-e29b-41d4-a716-446655440000",
-  "finalStatus": "done",
-  "processedPages": 2
+  "ok": true,
+  "scanId": "b699aa99-0e61-4ee7-ba3f-00e461e30566",
+  "status": "pending",
+  "message": "Scan started successfully."
 }
 ```
 
-`finalStatus` is `done` if at least one page succeeded, otherwise `failed`.
+### 2) `POST /api/scan/process` updates the same `scans` row
 
-#### Database & storage effects (scanner)
+The process route sets/updates:
 
-| Store | Action |
-|-------|--------|
-| `scans` | **UPDATE** — e.g. `status: analyzing` during run; then `done` or `failed`, `completed_at`, optional `error_message` |
-| `scan_pages` | **UPDATE** per URL — screenshots URLs, `axe_violations`, `playwright_data`, etc. |
-| Supabase Storage | Screenshot uploads (bucket from env, default `scan-screenshots`) |
+- `status = crawling`
+- `website_type` (example: `saas`)
+- `pages_to_test` (selected public URLs)
+- `error_message = null` while processing
 
-#### Auth errors
+### 3) Process route prepares child rows in `scan_pages`
 
-| HTTP | Body |
-|------|------|
-| 401 | `{ "error": "Missing Authorization header" }` or `{ "error": "Invalid Authorization format" }` |
-| 403 | `{ "error": "Invalid token" }` |
-| 500 | `{ "error": "SCAN_API_TOKEN not configured" }` |
+- One row per selected page is upserted (`scan_id + page_url`).
+- `page_role` is saved at this step (`homepage`, `pricing`, `docs`, etc.).
 
----
+### 4) PageSpeed writes into `scan_pages`
 
-## Environment variables (quick reference)
+- `page_speed_data` is saved for each page (mobile + desktop metrics).
 
-| Variable | Used by |
-|----------|---------|
-| `SCAN_SERVICE_URL`, `SCAN_API_TOKEN` | Next `/api/scan/process` → calls VPS |
-| `SCAN_API_TOKEN` | VPS `POST /scan` — must match token sent by Next |
-| `SUPABASE_*` / service role | Next and VPS DB access |
-| `NEXT_PUBLIC_APP_URL` | QStash / dev queue calling `/api/scan/process` |
-| `QSTASH_TOKEN`, `QSTASH_*` signing keys | Queue and verification helpers |
-| Paddle webhook secrets | `verifyPaddleWebhook` |
+### 5) VPS scanner writes final page artifacts and final status
 
----
+- Scan status moves to `analyzing`.
+- For each page, scanner updates `scan_pages` with:
+  - `screenshot_desktop_url`
+  - `screenshot_mobile_url`
+  - `raw_html`
+  - `axe_violations`
+  - `playwright_data` (links, forms, responsive screenshots, diagnostics)
+- Final `scans.status` becomes:
+  - `done` when at least one page succeeds
+  - `failed` when all pages fail
+- `completed_at` is set when finished.
 
-## Security checklist for production
+### `scans` table (parent scan)
 
-1. **Protect `/api/scan/process`** — internal secret, firewall, or queue-only invocation.
-2. **Replace hardcoded `localhost`** in `scan/start` with a configurable app URL for non-local deployments.
-3. **Rotate `SCAN_API_TOKEN`** and align Next + VPS.
-4. **Webhook:** keep Paddle signing secret server-side only; verify raw body.
+Important `scans` fields:
 
----
+- `id`
+- `url`
+- `url_hash`
+- `package`
+- `status`
+- `payment_status`
+- `user_email`
+- `website_type`
+- `pages_to_test`
+- `error_message`
+- `completed_at`
 
-## Changelog
+### `scan_pages` table (one row per selected page)
 
-Document changes to request/response shapes or DB behavior here when you ship API updates.
+Important `scan_pages` fields:
+
+- `scan_id`
+- `page_url`
+- `page_role`
+- `page_speed_data`
+- `screenshot_desktop_url`
+- `screenshot_mobile_url`
+- `raw_html`
+- `axe_violations`
+- `playwright_data`
+
+Status flow:
+
+```text
+pending -> crawling -> analyzing -> done
+```
+
+Failure path:
+
+```text
+pending -> crawling/analyzing -> failed
+```
