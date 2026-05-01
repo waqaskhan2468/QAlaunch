@@ -7,6 +7,7 @@ import { detectWebsiteType } from '@/lib/utils/detect';
 import { selectPagesToTestWithRoles } from '@/lib/utils/page-selection';
 import type { ProcessPayload } from '@/types/api/process';
 import { collectPageSpeedForPages } from '@/lib/utils/savePageSpeedForPage';
+import { runAiAnalysisForScan } from '@/lib/scan/runAiAnalysisForScan';
 
 export const runtime = 'nodejs';
 
@@ -151,8 +152,85 @@ const processHandler = asyncHandler(async (req: Request) => {
 		);
 	}
 
-	await collectPageSpeedForPages(supabase, scanId, pagesToTest);
-	await callScanner(scanId, pagesToTest);
+
+		await Promise.all([
+			collectPageSpeedForPages(supabase, scanId, pagesToTest),
+			callScanner(scanId, pagesToTest),
+		]);
+
+		const { data: scanAfter, error: scanAfterError } = await supabase
+			.from('scans')
+			.select('status, website_type, pages_to_test, package')
+			.eq('id', scanId)
+			.single();
+
+		if (scanAfterError) {
+			console.error('[process] reload scan failed', scanAfterError);
+			throw new AppError(
+				500,
+				'scan_reload_failed',
+				'Could not reload scan after collection.',
+			);
+		}
+
+		if (scanAfter?.status === 'failed') {
+			return NextResponse.json({ ok: true, skipped: 'scan_failed' });
+		}
+
+		if (!process.env.ANTHROPIC_API_KEY) {
+			await supabase
+				.from('scans')
+				.update({
+					status: 'failed',
+					error_message: 'ANTHROPIC_API_KEY is not configured.',
+				})
+				.eq('id', scanId);
+			throw new AppError(
+				500,
+				'config_missing',
+				'ANTHROPIC_API_KEY is missing in environment.',
+			);
+		}
+
+		await runAiAnalysisForScan(
+			supabase,
+			scanId,
+			scanAfter?.website_type ?? null,
+			(scanAfter?.pages_to_test as string[] | null) ?? pagesToTest,
+			pkg,
+		).catch(async (err: unknown) => {
+			const message =
+				err instanceof Error ? err.message : 'AI analysis failed unexpectedly.';
+			await supabase
+				.from('scans')
+				.update({
+					status: 'failed',
+					error_message: message.slice(0, 500),
+				})
+				.eq('id', scanId);
+			throw err instanceof AppError ? err : (
+					new AppError(500, 'ai_analysis_failed', message)
+				);
+		});
+
+		const { error: doneError } = await supabase
+			.from('scans')
+			.update({
+				status: 'done',
+				completed_at: new Date().toISOString(),
+				error_message: null,
+				...(pkg === 'free' ? { free_preview_used: true } : {}),
+			})
+			.eq('id', scanId);
+
+		if (doneError) {
+			console.error('[process] mark scan done failed', doneError);
+			throw new AppError(
+				500,
+				'scan_finalize_failed',
+				'Analysis finished but could not mark the scan complete.',
+			);
+		}
 
 	// TODO: will be add the db column and add the data in db (auth detection)
 	console.log('auth detection', {

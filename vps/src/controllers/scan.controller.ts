@@ -330,11 +330,11 @@ async function finalizeScan(
 	results: ScanResult[],
 ): Promise<ScanStatus> {
 	const hasSuccessfulPage = results.some((result) => result.ok);
-	const status: ScanStatus = hasSuccessfulPage ? 'done' : 'failed';
+	const status: ScanStatus = hasSuccessfulPage ? 'analyzing' : 'failed';
 
 	await updateScanStatus(scanId, {
 		status,
-		completed_at: nowIso(),
+		completed_at: status === 'failed' ? nowIso() : null,
 		error_message: status === 'failed' ? 'All pages failed to scan.' : null,
 	});
 
