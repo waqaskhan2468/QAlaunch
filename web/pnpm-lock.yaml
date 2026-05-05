@@ -17,6 +17,9 @@ importers:
       '@paddle/paddle-js':
         specifier: ^1.6.2
         version: 1.6.2
+      '@paddle/paddle-node-sdk':
+        specifier: ^3.8.0
+        version: 3.8.0
       '@supabase/ssr':
         specifier: ^0.10.2
         version: 0.10.2(@supabase/supabase-js@2.103.3)
@@ -26,6 +29,9 @@ importers:
       '@upstash/qstash':
         specifier: ^2.10.1
         version: 2.10.1
+      '@upstash/workflow':
+        specifier: ^1.2.0
+        version: 1.2.0(zod@3.25.76)
       cheerio:
         specifier: ^1.2.0
         version: 1.2.0
@@ -642,6 +648,10 @@ packages:
   '@paddle/paddle-js@1.6.2':
     resolution: {integrity: sha512-nx1NXCzwWUWjf0iaRDiXZlfWgFjNZ6996RFcTDk0G0ggzrh514Zsc6jGTPOUGdLB1sYJXVQiKKoNLoKoXhH+sA==}
 
+  '@paddle/paddle-node-sdk@3.8.0':
+    resolution: {integrity: sha512-4RS6AhZisloYaT2jiFgx9hwm22qwLRUx4EgIVb1gS3bS96lhDBQWq8BC1/Zow2i3CuxMkehXQUc3qKSBS77ozA==}
+    engines: {node: '>=20'}
+
   '@puppeteer/browsers@2.13.0':
     resolution: {integrity: sha512-46BZJYJjc/WwmKjsvDFykHtXrtomsCIrwYQPOP7VfMJoZY2bsDF9oROBABR3paDjDcmkUye1Pb1BqdcdiipaWA==}
     engines: {node: '>=18'}
@@ -1120,6 +1130,11 @@ packages:
 
   '@upstash/qstash@2.10.1':
     resolution: {integrity: sha512-LsTAPxPk0dFvhlEnRqwObRS94b8mmDHYaBlF3IaONUL+Scq6i9cZraA6936KSUVe+Vq3eNQle3CjOZkStPUFTw==}
+
+  '@upstash/workflow@1.2.0':
+    resolution: {integrity: sha512-91aOAnh5JsWzVajO+isU9BHdzQmWhOY++qSPeZcwEgvGIlhhIjH/IuKnLXLJhm4UIk0ntvY/w9rXUvD7UWDQvw==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@vitest/expect@3.2.4':
     resolution: {integrity: sha512-Io0yyORnB6sikFlt8QW5K7slY4OjqNX9jmJQ02QDda8lyM6B5oNgVWoSoKPac8/kgnCUzuHQKrSLtu/uOqqrig==}
@@ -3445,6 +3460,8 @@ snapshots:
 
   '@paddle/paddle-js@1.6.2': {}
 
+  '@paddle/paddle-node-sdk@3.8.0': {}
+
   '@puppeteer/browsers@2.13.0':
     dependencies:
       debug: 4.4.3
@@ -3853,6 +3870,11 @@ snapshots:
       crypto-js: 4.2.0
       jose: 5.10.0
       neverthrow: 7.2.0
+
+  '@upstash/workflow@1.2.0(zod@3.25.76)':
+    dependencies:
+      '@upstash/qstash': 2.10.1
+      zod: 3.25.76
 
   '@vitest/expect@3.2.4':
     dependencies:

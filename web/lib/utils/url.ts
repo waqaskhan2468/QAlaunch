@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 
 export function normalizeUrl(input: string) {
-	let url = input.trim();
+	let url = input.trim().toLowerCase();
 	if (!/^https?:\/\//i.test(url)) {
 		url = `https://${url}`;
 	}
@@ -10,12 +10,9 @@ export function normalizeUrl(input: string) {
 	let host = parsed.host.toLowerCase();
 	if (host.startsWith('www.')) host = host.slice(4);
 
-	const pathname =
-		parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/$/, '');
-	const search =
-		parsed.searchParams.toString() ? `?${parsed.searchParams.toString()}` : '';
+	const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/$/, '');
 
-	return `https://${host}${pathname}${search}`;
+	return `https://${host}${pathname}`;
 }
 
 export function urlHash(normalizedUrl: string) {

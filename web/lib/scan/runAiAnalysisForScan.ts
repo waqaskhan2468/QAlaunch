@@ -34,6 +34,14 @@ type SupabaseStorageObjectRef = {
 	path: string;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+function getErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : 'Unknown error';
+}
+
 function getScreenshotSignedUrlTtlSec(): number {
 	const raw = Number.parseInt(
 		process.env.SCREENSHOT_SIGNED_URL_TTL_SEC ??
@@ -165,14 +173,23 @@ function buildAnalysisPrompt(input: {
 	const pd = input.playwrightData as Record<string, unknown> | null;
 	const links = pd?.links as Record<string, unknown> | undefined;
 	const brokenLinks = links?.brokenLinks;
+	const allLinks = Array.isArray(links?.links) ? links.links : [];
+	const externalLinksSameTab = allLinks.filter((link) => {
+		if (!isRecord(link)) {
+			return false;
+		}
+
+		return link.isExternal === true && link.target !== '_blank';
+	});
 
 	const scanData = {
 		consoleMessages: pd?.consoleMessages ?? [],
 		brokenLinks: brokenLinks ?? [],
+		externalLinksSameTab,
 		forms:
 			(pd?.interactive as Record<string, unknown> | undefined)?.forms ?? null,
 		seoData: pd?.seoData ?? null,
-		responsive: pd?.responsive ?? null,
+		responsiveResults: pd?.responsive ?? null,
 		httpErrors: pd?.httpErrors ?? [],
 		failedRequests: pd?.failedRequests ?? [],
 		scanOk: pd?.scanOk,
@@ -180,21 +197,53 @@ function buildAnalysisPrompt(input: {
 	};
 
 	return [
-		'Analyze this page using the desktop, mobile, and responsive screenshots plus the JSON data below.',
-		'Return JSON only in the shape described in the system prompt.',
+		'Analyze this webpage and identify all quality issues.',
 		'',
+		'CONTEXT:',
+		`- Page URL: ${input.pageUrl}`,
+		`- Page role: ${input.pageRole ?? 'unknown'}`,
+		`- Website type: ${input.websiteType ?? 'unknown'}`,
+		'',
+		'PERFORMANCE METRICS (from Google PageSpeed):',
+		JSON.stringify(input.pageSpeedData, null, 2),
+		'',
+		'JAVASCRIPT CONSOLE ERRORS:',
+		JSON.stringify(scanData.consoleMessages, null, 2),
+		'',
+		'BROKEN/FAILED LINKS (HTTP 4xx/5xx):',
+		JSON.stringify(scanData.brokenLinks, null, 2),
+		'',
+		'EXTERNAL LINKS WITHOUT target="_blank":',
+		JSON.stringify(scanData.externalLinksSameTab, null, 2),
+		'',
+		'FORMS DETECTED:',
+		JSON.stringify(scanData.forms, null, 2),
+		'',
+		'SEO ELEMENTS:',
+		JSON.stringify(scanData.seoData, null, 2),
+		'',
+		'ACCESSIBILITY VIOLATIONS (axe-core):',
+		JSON.stringify(input.axeViolations, null, 2),
+		'',
+		'RESPONSIVENESS ISSUES:',
+		JSON.stringify(scanData.responsiveResults, null, 2),
+		'',
+		'NETWORK FAILURES:',
 		JSON.stringify(
 			{
-				pageUrl: input.pageUrl,
-				pageRole: input.pageRole,
-				websiteType: input.websiteType,
-				pageSpeed: input.pageSpeedData,
-				scanData,
-				axeViolations: input.axeViolations,
+				httpErrors: scanData.httpErrors,
+				failedRequests: scanData.failedRequests,
+				scanOk: scanData.scanOk,
+				error: scanData.error,
 			},
 			null,
 			2,
 		),
+		'',
+		'SCREENSHOTS: Desktop, mobile, and any responsive screenshots are provided above.',
+		'Analyze them visually for UI bugs, alignment issues, color contrast, text visibility, broken images, and layout problems.',
+		'',
+		'Return JSON only in the exact shape described in the system prompt.',
 	].join('\n');
 }
 
@@ -213,6 +262,56 @@ type IssueInsert = {
 	display_order: number;
 };
 
+function pickFirstMatching(
+	issues: IssueInsert[],
+	predicate: (issue: IssueInsert) => boolean,
+): IssueInsert | null {
+	const index = issues.findIndex(predicate);
+	if (index === -1) {
+		return null;
+	}
+
+	const [picked] = issues.splice(index, 1);
+	return picked ?? null;
+}
+
+function selectBalancedPreview(issues: IssueInsert[], count: number): IssueInsert[] {
+	const remaining = [...issues];
+	const selected: IssueInsert[] = [];
+
+	const criticalFunctionality = pickFirstMatching(
+		remaining,
+		(issue) => issue.category === 'functionality' && issue.severity === 'critical',
+	);
+	if (criticalFunctionality) selected.push(criticalFunctionality);
+
+	const strongUsability = pickFirstMatching(
+		remaining,
+		(issue) =>
+			issue.category === 'usability_ux' &&
+			(issue.severity === 'critical' || issue.severity === 'high'),
+	);
+	if (strongUsability) selected.push(strongUsability);
+
+	const strongResponsiveness = pickFirstMatching(
+		remaining,
+		(issue) =>
+			issue.category === 'responsiveness' &&
+			(issue.severity === 'critical' || issue.severity === 'high'),
+	);
+	if (strongResponsiveness) selected.push(strongResponsiveness);
+
+	while (selected.length < count && remaining.length > 0) {
+		const next = remaining.shift();
+		if (!next) {
+			break;
+		}
+		selected.push(next);
+	}
+
+	return selected.slice(0, count);
+}
+
 export async function runAiAnalysisForScan(
 	supabase: ServiceSupabase,
 	scanId: string,
@@ -230,6 +329,19 @@ export async function runAiAnalysisForScan(
 		throw new Error(deleteError.message);
 	}
 
+	const { error: clearAiAnalysisError } = await supabase
+		.from('scan_pages')
+		.update({ ai_analysis: null })
+		.eq('scan_id', scanId);
+
+	if (clearAiAnalysisError) {
+		console.error(
+			'[runAiAnalysisForScan] clear scan_pages.ai_analysis failed',
+			clearAiAnalysisError,
+		);
+		throw new Error(clearAiAnalysisError.message);
+	}
+
 	const { data: pages, error: pagesError } = await supabase
 		.from('scan_pages')
 		.select(
@@ -243,6 +355,9 @@ export async function runAiAnalysisForScan(
 
 	const ordered = orderPages(pages as ScanPageRow[], pagesToTest);
 	const pending: IssueInsert[] = [];
+	const analysisFailures: string[] = [];
+	let attemptedAnalysisCount = 0;
+	let successfulAnalysisCount = 0;
 
 	for (const page of ordered) {
 		const desktop = page.screenshot_desktop_url;
@@ -256,60 +371,133 @@ export async function runAiAnalysisForScan(
 			continue;
 		}
 
-		const responsiveScreenshotUrls = getResponsiveScreenshotUrls(
-			page.playwright_data,
-		);
+		attemptedAnalysisCount += 1;
 
-		const [signedDesktop, signedMobile, signedResponsiveScreenshotUrls] =
-			await Promise.all([
-				createSignedScreenshotUrl(supabase, desktop),
-				createSignedScreenshotUrl(supabase, mobile),
-				Promise.all(
-					responsiveScreenshotUrls.map((url) =>
-						createSignedScreenshotUrl(supabase, url),
+		try {
+			const responsiveScreenshotUrls = getResponsiveScreenshotUrls(
+				page.playwright_data,
+			);
+
+			const [signedDesktop, signedMobile, signedResponsiveScreenshotUrls] =
+				await Promise.all([
+					createSignedScreenshotUrl(supabase, desktop),
+					createSignedScreenshotUrl(supabase, mobile),
+					Promise.all(
+						responsiveScreenshotUrls.map((url) =>
+							createSignedScreenshotUrl(supabase, url),
+						),
 					),
-				),
-			]);
+				]);
 
-		const prompt = buildAnalysisPrompt({
-			pageUrl: page.page_url,
-			pageRole: page.page_role,
-			websiteType,
-			pageSpeedData: page.page_speed_data,
-			playwrightData: page.playwright_data,
-			axeViolations: page.axe_violations,
-		});
+			const prompt = buildAnalysisPrompt({
+				pageUrl: page.page_url,
+				pageRole: page.page_role,
+				websiteType,
+				pageSpeedData: page.page_speed_data,
+				playwrightData: page.playwright_data,
+				axeViolations: page.axe_violations,
+			});
 
-		const raw = await analyzeWithClaude({
-			desktopScreenshotUrl: signedDesktop,
-			mobileScreenshotUrl: signedMobile,
-			responsiveScreenshotUrls: signedResponsiveScreenshotUrls,
-			prompt,
-		});
+			const raw = await analyzeWithClaude({
+				desktopScreenshotUrl: signedDesktop,
+				mobileScreenshotUrl: signedMobile,
+				responsiveScreenshotUrls: signedResponsiveScreenshotUrls,
+				prompt,
+				scanId,
+				pageUrl: page.page_url,
+			});
 
-		const issues = parseClaudeIssues(raw);
+			const issues = parseClaudeIssues(raw);
 
-		for (const issue of issues) {
-			const pageSection =
-				issue.page_section && issue.page_section.length > 0 ?
-					issue.page_section
-				:	null;
+			const { error: aiAnalysisUpdateError } = await supabase
+				.from('scan_pages')
+				.update({
+					ai_analysis: {
+						issues,
+					},
+				})
+				.eq('id', page.id);
 
-			pending.push({
-				scan_id: scanId,
-				scan_page_id: page.id,
-				category: issue.category,
-				severity: issue.severity,
-				title: issue.title,
-				description: issue.description,
-				impact: issue.impact,
-				page_section: pageSection,
-				fix_instructions: issue.fix_instructions,
-				screenshot_url: desktop,
-				is_in_free_preview: false,
-				display_order: 0,
+			if (aiAnalysisUpdateError) {
+				throw new Error(
+					`Failed to save ai_analysis for page ${page.page_url}: ${aiAnalysisUpdateError.message}`,
+				);
+			}
+
+			successfulAnalysisCount += 1;
+
+			for (const issue of issues) {
+				const pageSection =
+					issue.page_section && issue.page_section.length > 0 ?
+						issue.page_section
+					:	null;
+
+				pending.push({
+					scan_id: scanId,
+					scan_page_id: page.id,
+					category: issue.category,
+					severity: issue.severity,
+					title: issue.title,
+					description: issue.description,
+					impact: issue.impact,
+					page_section: pageSection,
+					fix_instructions: issue.fix_instructions,
+					screenshot_url: desktop,
+					is_in_free_preview: false,
+					display_order: 0,
+				});
+			}
+		} catch (error) {
+			const message = getErrorMessage(error);
+			analysisFailures.push(`${page.page_url}: ${message}`);
+
+			const { error: aiAnalysisFailureUpdateError } = await supabase
+				.from('scan_pages')
+				.update({
+					ai_analysis: {
+						status: 'failed',
+						analyzed_at: new Date().toISOString(),
+						error: message,
+					},
+				})
+				.eq('id', page.id);
+
+			if (aiAnalysisFailureUpdateError) {
+				console.error(
+					'[runAiAnalysisForScan] failed saving ai_analysis failure payload',
+					{
+						scanId,
+						pageId: page.id,
+						pageUrl: page.page_url,
+						error: aiAnalysisFailureUpdateError.message,
+					},
+				);
+			}
+
+			console.error('[runAiAnalysisForScan] page analysis failed', {
+				scanId,
+				pageId: page.id,
+				pageUrl: page.page_url,
+				error: message,
 			});
 		}
+	}
+
+	if (attemptedAnalysisCount > 0 && successfulAnalysisCount === 0) {
+		throw new Error(
+			`AI analysis failed for all ${attemptedAnalysisCount} page(s): ${analysisFailures
+				.slice(0, 3)
+				.join(' | ')}`,
+		);
+	}
+
+	if (analysisFailures.length > 0) {
+		console.warn('[runAiAnalysisForScan] completed with partial AI failures', {
+			scanId,
+			attemptedAnalysisCount,
+			successfulAnalysisCount,
+			failedAnalysisCount: analysisFailures.length,
+		});
 	}
 
 	pending.sort((a, b) => {
@@ -324,11 +512,15 @@ export async function runAiAnalysisForScan(
 	});
 
 	const isFree = pkg === 'free';
+	const freePreviewIssues = new Set(
+		isFree ?
+			selectBalancedPreview(pending, FREE_PREVIEW_ISSUE_COUNT)
+		:	[],
+	);
 
 	pending.forEach((row, index) => {
 		row.display_order = index;
-		row.is_in_free_preview =
-			isFree && index < FREE_PREVIEW_ISSUE_COUNT ? true : false;
+		row.is_in_free_preview = isFree && freePreviewIssues.has(row);
 	});
 
 	const chunkSize = 50;

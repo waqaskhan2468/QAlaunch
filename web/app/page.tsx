@@ -1,6 +1,8 @@
-
-export default function Home() {
+"use client";
+export default function Hello() {
   return (
-  <h1>Hello World</h1>
+    <main>
+      <h1>Welcome to the homepage</h1>
+    </main>
   );
 }

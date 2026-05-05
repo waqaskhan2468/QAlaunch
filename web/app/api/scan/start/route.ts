@@ -79,6 +79,18 @@ export const POST = asyncHandler(async (req: Request) => {
 		.select('*')
 		.single();
 
+	if (pkg === 'free' && (insertError as { code?: string } | null)?.code === '23505') {
+		return NextResponse.json(
+			{
+				ok: false,
+				code: 'free_preview_used',
+				message:
+					'You have already used your free preview for this website. To continue, please select a paid package.',
+			},
+			{ status: 409 },
+		);
+	}
+
 	if (insertError || !scan) {
 		console.error('[scan/start] failed creating scan', insertError);
 		throw new AppError(
@@ -88,8 +100,20 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
+	// if (pkg !== 'free') {
+	// 	return NextResponse.json(
+	// 		{
+	// 			ok: true,
+	// 			scanId: scan.id,
+	// 			status: scan.status,
+	// 			paymentRequired: true,
+	// 			message: 'Scan created. Complete payment to start processing.',
+	// 		},
+	// 		{ status: 201 },
+	// 	);
+	// }
 
-   
+
 	await queueScanJob({
 		scanId: scan.id,
 		targetUrl: normalized,

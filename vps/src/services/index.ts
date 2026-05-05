@@ -26,6 +26,7 @@ function createEmptyScanResult(scanId: string, url: string): ScanResult {
 	};
 }
 
+
 function hasSuccessfulNavigation(steps: ScanStep[]): boolean {
 	return steps.some((step) => step.name.startsWith('navigate') && step.ok);
 }
@@ -110,6 +111,11 @@ async function scanSingleUrl(
 					delayMs: 1_000,
 				}),
 		);
+
+		console.log('[scan] desktop screenshot:', {
+			captured: !!desktopScreenshot,
+			size: desktopScreenshot?.length,
+		});
 
 		if (desktopScreenshot) {
 			result.screenshots.desktop = desktopScreenshot;
@@ -242,7 +248,7 @@ export async function runPlaywrightScan(
 
 			results.push(...chunkResults);
 		}
-
+		
 		return results;
 	} finally {
 		await browser.close();

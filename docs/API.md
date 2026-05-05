@@ -28,9 +28,9 @@ Request body:
 
 ```json
 {
-  "url": "https://supabase.com/",
-  "email": "haseebsajjad@gmail.com",
-  "package": "premium"
+	"url": "https://supabase.com/",
+	"email": "haseebsajjad@gmail.com",
+	"package": "premium"
 }
 ```
 
@@ -47,10 +47,10 @@ Response (`201 Created` on success):
 
 ```json
 {
-  "ok": true,
-  "scanId": "b699aa99-0e61-4ee7-ba3f-00e461e30566",
-  "status": "pending",
-  "message": "Scan started successfully."
+	"ok": true,
+	"scanId": "b699aa99-0e61-4ee7-ba3f-00e461e30566",
+	"status": "pending",
+	"message": "Scan started successfully."
 }
 ```
 
@@ -84,10 +84,10 @@ QStash sends this body:
 
 ```json
 {
-  "scanId": "1423ace4-bb8b-4d33-836d-bc60a5aeb415",
-  "targetUrl": "https://supabase.com",
-  "package": "premium",
-  "userEmail": "user@example.com"
+	"scanId": "1423ace4-bb8b-4d33-836d-bc60a5aeb415",
+	"targetUrl": "https://supabase.com",
+	"package": "premium",
+	"userEmail": "user@example.com"
 }
 ```
 
@@ -137,32 +137,43 @@ The detector parses the HTML with Cheerio and normalizes:
 It then checks website type signals in this order:
 
 1. `ecommerce`
-  - Cart or checkout links.
-  - Cart forms.
-  - Buy buttons such as `add to cart`, `buy now`, or `checkout`.
-  - Shopify, WooCommerce, or product metadata.
-  - Shop, cart, or checkout navigation text.
+
+- Cart or checkout links.
+- Cart forms.
+- Buy buttons such as `add to cart`, `buy now`, or `checkout`.
+- Shopify, WooCommerce, or product metadata.
+- Shop, cart, or checkout navigation text.
+
 2. `saas`
-  - Navigation text such as pricing, features, solutions, login, sign in, sign up, get started, or start for free.
-  - Page text such as free trial, per month, per seat, per user, subscription, dashboard, or `/month`.
-  - Hostnames that start with `app.`.
+
+- Navigation text such as pricing, features, solutions, login, sign in, sign up, get started, or start for free.
+- Page text such as free trial, per month, per seat, per user, subscription, dashboard, or `/month`.
+- Hostnames that start with `app.`.
+
 3. `business`
-  - Navigation text such as services, about, contact, or what we do.
-  - Page text such as get a quote, book a call, book a demo, or request a quote.
-  - Any form on the page.
+
+- Navigation text such as services, about, contact, or what we do.
+- Page text such as get a quote, book a call, book a demo, or request a quote.
+- Any form on the page.
+
 4. `blog`
-  - Article elements.
-  - RSS markup.
-  - Recent posts text.
-  - Article schema markup.
-  - Blog URLs in the HTML.
+
+- Article elements.
+- RSS markup.
+- Recent posts text.
+- Article schema markup.
+- Blog URLs in the HTML.
+
 5. `portfolio`
-  - Navigation text such as portfolio, work, projects, or case studies.
-  - Page text such as case studies, our team, or selected work.
+
+- Navigation text such as portfolio, work, projects, or case studies.
+- Page text such as case studies, our team, or selected work.
+
 6. `landing`
-  - Small navigation with many hash links.
-  - No navigation with several hash links.
-  - Repeated CTA text such as get started, book demo, start free trial, or contact us.
+
+- Small navigation with many hash links.
+- No navigation with several hash links.
+- Repeated CTA text such as get started, book demo, start free trial, or contact us.
 
 If none of these signals match, the detector returns `unknown`.
 
@@ -214,16 +225,16 @@ Example selected pages for a premium SaaS scan:
 
 ```json
 [
-  "https://supabase.com/",
-  "https://supabase.com/solutions/ai-builders",
-  "https://supabase.com/pricing",
-  "https://supabase.com/contact/sales",
-  "https://supabase.com/docs",
-  "https://supabase.com/blog",
-  "https://supabase.com/security",
-  "https://supabase.com/customers",
-  "https://supabase.com/state-of-startups",
-  "https://supabase.com/solutions/no-code"
+	"https://supabase.com/",
+	"https://supabase.com/solutions/ai-builders",
+	"https://supabase.com/pricing",
+	"https://supabase.com/contact/sales",
+	"https://supabase.com/docs",
+	"https://supabase.com/blog",
+	"https://supabase.com/security",
+	"https://supabase.com/customers",
+	"https://supabase.com/state-of-startups",
+	"https://supabase.com/solutions/no-code"
 ]
 ```
 
@@ -279,11 +290,8 @@ Request body:
 
 ```json
 {
-  "scanId": "1423ace4-bb8b-4d33-836d-bc60a5aeb415",
-  "urls": [
-    "https://supabase.com/",
-    "https://supabase.com/pricing"
-  ]
+	"scanId": "1423ace4-bb8b-4d33-836d-bc60a5aeb415",
+	"urls": ["https://supabase.com/", "https://supabase.com/pricing"]
 }
 ```
 
@@ -366,10 +374,10 @@ This is why the API immediately returns:
 
 ```json
 {
-  "ok": true,
-  "scanId": "b699aa99-0e61-4ee7-ba3f-00e461e30566",
-  "status": "pending",
-  "message": "Scan started successfully."
+	"ok": true,
+	"scanId": "b699aa99-0e61-4ee7-ba3f-00e461e30566",
+	"status": "pending",
+	"message": "Scan started successfully."
 }
 ```
 
