@@ -34,6 +34,11 @@ type SupabaseStorageObjectRef = {
 	path: string;
 };
 
+type ClaudeBase64Image = {
+	mediaType: string;
+	data: string;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null;
 }
@@ -83,6 +88,27 @@ function parseSupabasePublicStorageUrl(
 	};
 }
 
+function normalizeImageMediaType(value: string | null, path: string): string {
+	const raw = (value ?? '').split(';')[0]?.trim().toLowerCase();
+	if (raw.startsWith('image/')) {
+		return raw;
+	}
+
+	const extension = path.split('.').pop()?.toLowerCase();
+	switch (extension) {
+		case 'jpg':
+		case 'jpeg':
+			return 'image/jpeg';
+		case 'webp':
+			return 'image/webp';
+		case 'gif':
+			return 'image/gif';
+		case 'png':
+		default:
+			return 'image/png';
+	}
+}
+
 async function createSignedScreenshotUrl(
 	supabase: ServiceSupabase,
 	publicUrl: string,
@@ -109,7 +135,35 @@ async function createSignedScreenshotUrl(
 	return data.signedUrl;
 }
 
-function getResponsiveScreenshotUrls(playwrightData: unknown): string[] {
+async function getScreenshotAsBase64(
+	supabase: ServiceSupabase,
+	publicUrl: string,
+): Promise<ClaudeBase64Image> {
+	const { path } = parseSupabasePublicStorageUrl(publicUrl);
+	const signedUrl = await createSignedScreenshotUrl(supabase, publicUrl);
+	const response = await fetch(signedUrl);
+
+	if (!response.ok) {
+		throw new Error(
+			`Failed to download screenshot for Claude (${response.status}).`,
+		);
+	}
+
+	const buffer = Buffer.from(await response.arrayBuffer());
+	const mediaType = normalizeImageMediaType(
+		response.headers.get('content-type'),
+		path,
+	);
+
+	return {
+		mediaType,
+		data: buffer.toString('base64'),
+	};
+}
+
+function getResponsiveScreenshotUrls(
+	playwrightData: unknown,
+): string[] {
 	const pd = playwrightData as Record<string, unknown> | null;
 	const responsive = pd?.responsive;
 
@@ -117,17 +171,27 @@ function getResponsiveScreenshotUrls(playwrightData: unknown): string[] {
 		return [];
 	}
 
+	const seen = new Set<string>();
+
 	return responsive
 		.map((item) => {
 			if (!item || typeof item !== 'object') {
 				return null;
 			}
 
-			const screenshotUrl = (item as Record<string, unknown>).screenshot_url;
+			const row = item as Record<string, unknown>;
+			const screenshotUrl = row.screenshot_url;
 
-			return typeof screenshotUrl === 'string' && screenshotUrl.length > 0 ?
-					screenshotUrl
-				:	null;
+			if (typeof screenshotUrl !== 'string' || screenshotUrl.length === 0) {
+				return null;
+			}
+
+			if (seen.has(screenshotUrl)) {
+				return null;
+			}
+
+			seen.add(screenshotUrl);
+			return screenshotUrl;
 		})
 		.filter((url): url is string => Boolean(url));
 }
@@ -275,13 +339,17 @@ function pickFirstMatching(
 	return picked ?? null;
 }
 
-function selectBalancedPreview(issues: IssueInsert[], count: number): IssueInsert[] {
+function selectBalancedPreview(
+	issues: IssueInsert[],
+	count: number,
+): IssueInsert[] {
 	const remaining = [...issues];
 	const selected: IssueInsert[] = [];
 
 	const criticalFunctionality = pickFirstMatching(
 		remaining,
-		(issue) => issue.category === 'functionality' && issue.severity === 'critical',
+		(issue) =>
+			issue.category === 'functionality' && issue.severity === 'critical',
 	);
 	if (criticalFunctionality) selected.push(criticalFunctionality);
 
@@ -377,14 +445,18 @@ export async function runAiAnalysisForScan(
 			const responsiveScreenshotUrls = getResponsiveScreenshotUrls(
 				page.playwright_data,
 			);
+			const mobileHandledByResponsive =
+				Boolean(mobile) && responsiveScreenshotUrls.includes(mobile);
 
-			const [signedDesktop, signedMobile, signedResponsiveScreenshotUrls] =
+			const [desktopBase64, mobileBase64, responsiveBase64Screenshots] =
 				await Promise.all([
-					createSignedScreenshotUrl(supabase, desktop),
-					createSignedScreenshotUrl(supabase, mobile),
+					getScreenshotAsBase64(supabase, desktop),
+					!mobileHandledByResponsive && mobile ?
+						getScreenshotAsBase64(supabase, mobile)
+					:	Promise.resolve(null),
 					Promise.all(
 						responsiveScreenshotUrls.map((url) =>
-							createSignedScreenshotUrl(supabase, url),
+							getScreenshotAsBase64(supabase, url),
 						),
 					),
 				]);
@@ -399,9 +471,9 @@ export async function runAiAnalysisForScan(
 			});
 
 			const raw = await analyzeWithClaude({
-				desktopScreenshotUrl: signedDesktop,
-				mobileScreenshotUrl: signedMobile,
-				responsiveScreenshotUrls: signedResponsiveScreenshotUrls,
+				desktopScreenshot: desktopBase64,
+				mobileScreenshot: mobileBase64 ?? undefined,
+				responsiveScreenshots: responsiveBase64Screenshots,
 				prompt,
 				scanId,
 				pageUrl: page.page_url,
@@ -513,9 +585,7 @@ export async function runAiAnalysisForScan(
 
 	const isFree = pkg === 'free';
 	const freePreviewIssues = new Set(
-		isFree ?
-			selectBalancedPreview(pending, FREE_PREVIEW_ISSUE_COUNT)
-		:	[],
+		isFree ? selectBalancedPreview(pending, FREE_PREVIEW_ISSUE_COUNT) : [],
 	);
 
 	pending.forEach((row, index) => {

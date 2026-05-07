@@ -8,6 +8,7 @@ import type {
 import { asyncHandler } from '../utils/asyncHandler';
 import { AppError } from '../utils/AppError';
 import { runPlaywrightScan } from '../services/index';
+import { MOBILE_VIEWPORT_NAME } from '../services/responsive';
 import type { ScanStatus, ScreenshotUploadResult } from '../types/scan.types';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -116,15 +117,23 @@ function validateScanRequest(body: Partial<ScanRequest>): ScanRequest {
 }
 
 async function uploadScreenshotBuffer(
-	screenshot: Buffer | undefined,
+	screenshot: Buffer | undefined | null,
 	scanId: string,
 	pageUrl: string,
 	fileName: string,
 	label: string,
 ): Promise<ScreenshotUploadResult> {
-	if (!screenshot) return { url: null };
+	// ── Guard: reject missing or empty buffers before attempting upload ──
+	// screenshots.ts throws on empty desktop buffers, but captureMobileScreenshot
+	// returns null for non-fatal failures. Both cases must be caught here so we
+	// never attempt to upload an empty file or write null to the DB.
+	if (!screenshot || screenshot.length === 0) {
+		const reason = !screenshot ? 'no buffer' : 'empty buffer (0 bytes)';
+		console.warn(`[screenshot:${label}] skipped — ${reason}`, { pageUrl });
+		return { url: null, warning: `Screenshot skipped (${label}): ${reason}` };
+	}
 
-	const filePath = `${scanId}/${sanitizeForPath(pageUrl)}-${fileName}.jpg`;
+	const filePath = `${scanId}/${sanitizeForPath(pageUrl)}-${fileName}.png`;
 	let lastError = 'unknown_error';
 
 	console.log(
@@ -136,7 +145,7 @@ async function uploadScreenshotBuffer(
 			const { error } = await supabase.storage
 				.from(SCREENSHOT_BUCKET)
 				.upload(filePath, screenshot, {
-					contentType: 'image/jpeg',
+					contentType: 'image/png',
 					upsert: true,
 				});
 
@@ -154,13 +163,21 @@ async function uploadScreenshotBuffer(
 		}
 
 		if (attempt < SCREENSHOT_UPLOAD_RETRIES) {
+			console.warn(
+				`[screenshot:${label}] upload attempt ${attempt} failed: ${lastError} — retrying in ${SCREENSHOT_UPLOAD_RETRY_DELAY_MS * attempt}ms`,
+			);
 			await sleep(SCREENSHOT_UPLOAD_RETRY_DELAY_MS * attempt);
 		}
 	}
 
+	console.error(
+		`[screenshot:${label}] all ${SCREENSHOT_UPLOAD_RETRIES} upload attempts failed`,
+		{ pageUrl, lastError },
+	);
+
 	return {
 		url: null,
-		warning: `Screenshot upload failed (${label}): ${lastError}`,
+		warning: `Screenshot upload failed after ${SCREENSHOT_UPLOAD_RETRIES} attempts (${label}): ${lastError}`,
 	};
 }
 
@@ -276,13 +293,29 @@ async function uploadResponsiveScreenshots(
 	return responsivePayload;
 }
 
+function getMobileScreenshotUrlFromResponsive(
+	responsivePayload: ResponsivePayload[] | null,
+): string | null {
+	if (!responsivePayload) return null;
+	const iPhone14Url =
+		responsivePayload.find((item) => item.viewport === MOBILE_VIEWPORT_NAME)
+			?.screenshot_url ?? null;
+	if (iPhone14Url) return iPhone14Url;
+
+	// Fallback so AI analysis is not skipped when iPhone 14 upload fails.
+	return (
+		responsivePayload.find((item) => item.viewport === 'iPhone SE')
+			?.screenshot_url ?? null
+	);
+}
+
 async function processScanResult(
 	scanId: string,
 	result: ScanResult,
 ): Promise<void> {
 	const uploadWarnings: string[] = [];
 
-	const [desktopUpload, mobileUpload, responsivePayload] = await Promise.all([
+	const [desktopUpload, responsivePayload] = await Promise.all([
 		uploadScreenshotBuffer(
 			result.screenshots?.desktop,
 			scanId,
@@ -290,20 +323,22 @@ async function processScanResult(
 			'desktop',
 			'desktop',
 		),
-		uploadScreenshotBuffer(
-			result.screenshots?.mobile,
-			scanId,
-			result.url,
-			'mobile',
-			'mobile',
-		),
 		uploadResponsiveScreenshots(scanId, result.url, result, uploadWarnings),
 	]);
 
-	for (const upload of [desktopUpload, mobileUpload]) {
+	for (const upload of [desktopUpload]) {
 		if (upload.warning) {
 			uploadWarnings.push(upload.warning);
 		}
+	}
+
+	const mobileScreenshotUrl = getMobileScreenshotUrlFromResponsive(
+		responsivePayload,
+	);
+	if (!mobileScreenshotUrl) {
+		uploadWarnings.push(
+			`Screenshot missing (mobile): ${MOBILE_VIEWPORT_NAME} responsive screenshot URL not available`,
+		);
 	}
 
 	logAxeGateFailure(scanId, result);
@@ -313,9 +348,28 @@ async function processScanResult(
 		warnings: [...(result.warnings ?? []), ...uploadWarnings],
 	};
 
+	// ── Build the DB patch conditionally ────────────────────────────────────
+	// Only include screenshot URL columns when we actually have a URL.
+	// Writing `null` to a non-nullable column (or one the UI expects to be set)
+	// was causing silent DB errors. Screenshots are non-fatal — a missing URL
+	// is surfaced via warnings[] instead.
+	const screenshotPatch: Record<string, unknown> = {};
+
+	if (desktopUpload.url) {
+		screenshotPatch.screenshot_desktop_url = desktopUpload.url;
+	} else {
+		// Explicitly null so any previous value is cleared rather than left stale
+		screenshotPatch.screenshot_desktop_url = null;
+	}
+
+	if (mobileScreenshotUrl) {
+		screenshotPatch.screenshot_mobile_url = mobileScreenshotUrl;
+	} else {
+		screenshotPatch.screenshot_mobile_url = null;
+	}
+
 	await updateScanPage(scanId, result.url, {
-		screenshot_desktop_url: desktopUpload.url,
-		screenshot_mobile_url: mobileUpload.url,
+		...screenshotPatch,
 		raw_html: result.rawHtml ?? null,
 		axe_violations: result.axe ?? null,
 		playwright_data: buildPlaywrightPayload(

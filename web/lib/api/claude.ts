@@ -21,6 +21,10 @@ RULES:
 8. Be concise but specific
 9. Reference exact pages and sections
 10. Do NOT report generic improvements; only real, observable problems
+11. Use this category mapping strictly:
+    - responsiveness: viewport-specific layout breaks (overlap, clipping, horizontal scroll, content off-screen, broken wrapping, elements disappearing only on some screen sizes)
+    - ui_bugs: visual defects not tied to viewport size (color, contrast, icon/image glitches, spacing inconsistencies visible across sizes)
+    - usability_ux: interaction/confusion issues (unclear CTAs, poor flow, discoverability), not raw layout breakage
 
 FIELD LENGTHS (required for database storage; responses outside these bounds are rejected):
 - title: 20-80 characters (after trimming whitespace)
@@ -54,10 +58,7 @@ function getClaudeConfig() {
 	return {
 		model: process.env.ANTHROPIC_MODEL ?? DEFAULT_CLAUDE_MODEL,
 		timeoutMs: getPositiveIntEnv('ANTHROPIC_TIMEOUT_MS', DEFAULT_TIMEOUT_MS),
-		maxRetries: getPositiveIntEnv(
-			'ANTHROPIC_MAX_RETRIES',
-			DEFAULT_MAX_RETRIES,
-		),
+		maxRetries: getPositiveIntEnv('ANTHROPIC_MAX_RETRIES', DEFAULT_MAX_RETRIES),
 	};
 }
 
@@ -70,7 +71,9 @@ function getBackoffMs(attempt: number): number {
 }
 
 function getErrorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : 'Unknown Claude request error.';
+	return error instanceof Error ?
+			error.message
+		:	'Unknown Claude request error.';
 }
 
 function isAbortError(error: unknown): boolean {
@@ -86,16 +89,25 @@ function isRetryableClaudeError(error: unknown): boolean {
 }
 
 export async function analyzeWithClaude(input: {
-	desktopScreenshotUrl: string;
-	mobileScreenshotUrl: string;
-	responsiveScreenshotUrls?: string[];
+	desktopScreenshot: {
+		mediaType: string;
+		data: string;
+	};
+	mobileScreenshot?: {
+		mediaType: string;
+		data: string;
+	};
+	responsiveScreenshots?: Array<{
+		mediaType: string;
+		data: string;
+	}>;
 	prompt: string;
 	scanId?: string;
 	pageUrl?: string;
 }) {
 	const config = getClaudeConfig();
-	const responsiveImageBlocks = (input.responsiveScreenshotUrls ?? []).flatMap(
-		(url, index) => [
+	const responsiveImageBlocks = (input.responsiveScreenshots ?? []).flatMap(
+		(image, index) => [
 			{
 				type: 'text' as const,
 				text: `Responsive screenshot ${index + 1}:`,
@@ -103,12 +115,31 @@ export async function analyzeWithClaude(input: {
 			{
 				type: 'image' as const,
 				source: {
-					type: 'url' as const,
-					url,
+					type: 'base64' as const,
+					media_type: image.mediaType,
+					data: image.data,
 				},
 			},
 		],
 	);
+
+	const mobileImageBlocks =
+		input.mobileScreenshot ?
+			[
+				{
+					type: 'text' as const,
+					text: 'Mobile screenshot:',
+				},
+				{
+					type: 'image' as const,
+					source: {
+						type: 'base64' as const,
+						media_type: input.mobileScreenshot.mediaType,
+						data: input.mobileScreenshot.data,
+					},
+				},
+			]
+		:	[];
 
 	const body = JSON.stringify({
 		model: config.model,
@@ -131,21 +162,12 @@ export async function analyzeWithClaude(input: {
 					{
 						type: 'image',
 						source: {
-							type: 'url',
-							url: input.desktopScreenshotUrl,
+							type: 'base64',
+							media_type: input.desktopScreenshot.mediaType,
+							data: input.desktopScreenshot.data,
 						},
 					},
-					{
-						type: 'text',
-						text: 'Mobile screenshot:',
-					},
-					{
-						type: 'image',
-						source: {
-							type: 'url',
-							url: input.mobileScreenshotUrl,
-						},
-					},
+					...mobileImageBlocks,
 					...responsiveImageBlocks,
 					{ type: 'text', text: input.prompt },
 				],
@@ -175,7 +197,10 @@ export async function analyzeWithClaude(input: {
 
 			if (!res.ok) {
 				const responseText = await res.text().catch(() => '');
-				const responsePreview = responseText.slice(0, MAX_RESPONSE_PREVIEW_LENGTH);
+				const responsePreview = responseText.slice(
+					0,
+					MAX_RESPONSE_PREVIEW_LENGTH,
+				);
 				const retryable = RETRYABLE_STATUS_CODES.has(res.status);
 
 				console.warn('[claude] request failed', {

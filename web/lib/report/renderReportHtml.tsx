@@ -1,18 +1,56 @@
 import type { IssueCategory, IssueSeverity } from '@/types/claude';
 import type { ReportIssue, ReportScan, ReportScanPage } from './report.types';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Page-break budget
+// Puppeteer A4 @ 96dpi = 794 × 1122px.
+// Margins top:16mm + bottom:16mm (~61px each) → usable ~1000px.
+// PAGE_H = 920px conservative budget.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PAGE_H = 920;
+const SEC_HEAD_H = 44;
+const ISSUES_PAD = 28;
+const ISSUE_BASE_H = 168;
+const ISSUE_TAG_H = 30;
+const ISSUE_GAP = 10;
+const CHARS_PER_LINE = 82;
+
+function extraLines(text: string): number {
+	return Math.max(0, Math.floor(text.length / CHARS_PER_LINE) - 1);
+}
+
+function estimateIssueHeight(issue: ReportIssue): number {
+	const tagCount = 2 + (issue.page_section ? 1 : 0);
+	const titleLines = 1 + extraLines(issue.title);
+	const descLines = 1 + extraLines(issue.description);
+	const impactLines = 1 + extraLines(issue.impact);
+	const fixLines = 1 + extraLines(issue.fix_instructions);
+	return (
+		ISSUE_BASE_H +
+		titleLines * 18 +
+		descLines * 16 +
+		tagCount * ISSUE_TAG_H +
+		impactLines * 16 +
+		fixLines * 16
+	);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const CATEGORY_ORDER: Array<{
 	key: IssueCategory;
 	title: string;
 	num: string;
+	icon: string;
 }> = [
-	{ key: 'functionality', title: 'Functionality issues', num: '01' },
-	{ key: 'ui_bugs', title: 'UI / Visual bugs', num: '02' },
-	{ key: 'usability_ux', title: 'Usability & UX issues', num: '03' },
-	{ key: 'responsiveness', title: 'Responsiveness issues', num: '04' },
-	{ key: 'performance', title: 'Performance issues', num: '05' },
-	{ key: 'seo', title: 'SEO fundamentals', num: '06' },
-	{ key: 'accessibility', title: 'Accessibility issues', num: '07' },
+	{ key: 'functionality', title: 'Functionality', num: '01', icon: '⚙' },
+	{ key: 'ui_bugs', title: 'UI / Visual Bugs', num: '02', icon: '◈' },
+	{ key: 'usability_ux', title: 'Usability & UX', num: '03', icon: '◎' },
+	{ key: 'responsiveness', title: 'Responsiveness', num: '04', icon: '⊡' },
+	{ key: 'performance', title: 'Performance', num: '05', icon: '▲' },
+	{ key: 'seo', title: 'SEO Fundamentals', num: '06', icon: '◉' },
+	{ key: 'accessibility', title: 'Accessibility', num: '07', icon: '◷' },
 ];
 
 const SEVERITY_ORDER: Record<IssueSeverity, number> = {
@@ -22,17 +60,31 @@ const SEVERITY_ORDER: Record<IssueSeverity, number> = {
 	low: 3,
 };
 
-/** Returns inline styles for each severity pill */
-function severityPillStyle(severity: IssueSeverity): string {
+function severityConfig(severity: IssueSeverity): {
+	bg: string;
+	color: string;
+	dot: string;
+	label: string;
+} {
 	switch (severity) {
 		case 'critical':
-			return 'background:#fee2e2;color:#991b1b;';
+			return {
+				bg: '#fff1f2',
+				color: '#be123c',
+				dot: '#f43f5e',
+				label: 'Critical',
+			};
 		case 'high':
-			return 'background:#ffedd5;color:#9a3412;';
+			return { bg: '#fff7ed', color: '#c2410c', dot: '#f97316', label: 'High' };
 		case 'medium':
-			return 'background:#fef9c3;color:#854d0e;';
+			return {
+				bg: '#fefce8',
+				color: '#a16207',
+				dot: '#eab308',
+				label: 'Medium',
+			};
 		case 'low':
-			return 'background:#dbeafe;color:#1e40af;';
+			return { bg: '#eff6ff', color: '#1d4ed8', dot: '#3b82f6', label: 'Low' };
 	}
 }
 
@@ -43,54 +95,63 @@ function safeNum(value: unknown): number | null {
 function getPerformanceMetrics(pages: ReportScanPage[]) {
 	const perfScores: number[] = [];
 	const lcpValues: number[] = [];
-
 	for (const page of pages) {
 		const pageSpeed = page.page_speed_data as Record<string, unknown> | null;
 		const mobile = pageSpeed?.mobile as Record<string, unknown> | undefined;
-		const perf = mobile?.performance;
-		const lcp = mobile?.lcpMs;
-		const perfNum = safeNum(perf);
+		const perfNum = safeNum(mobile?.performance);
+		const lcpNum = safeNum(mobile?.lcpMs);
 		if (perfNum !== null) perfScores.push(perfNum);
-		const lcpNum = safeNum(lcp);
 		if (lcpNum !== null) lcpValues.push(lcpNum);
 	}
-
-	const avgPerf =
-		perfScores.length > 0 ?
-			Math.round(perfScores.reduce((a, b) => a + b, 0) / perfScores.length)
+	const avg = (arr: number[]) =>
+		arr.length > 0 ?
+			Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
 		:	null;
-
-	const avgLcp =
-		lcpValues.length > 0 ?
-			Math.round(lcpValues.reduce((a, b) => a + b, 0) / lcpValues.length)
-		:	null;
-
-	return { avgPerf, avgLcp };
+	return { avgPerf: avg(perfScores), avgLcp: avg(lcpValues) };
 }
 
 function healthScore(issues: ReportIssue[]): number {
 	let score = 100;
-	for (const issue of issues) {
-		if (issue.severity === 'critical') score -= 12;
-		else if (issue.severity === 'high') score -= 7;
-		else if (issue.severity === 'medium') score -= 4;
+	for (const i of issues) {
+		if (i.severity === 'critical') score -= 12;
+		else if (i.severity === 'high') score -= 7;
+		else if (i.severity === 'medium') score -= 4;
 		else score -= 2;
 	}
 	return Math.max(0, score);
 }
 
-/** SVG circle circumference for r=28 → 2π×28 ≈ 175.9 */
-const RING_CIRCUMFERENCE = 175.9;
-
-function scoreRingOffset(score: number): number {
-	// dashoffset = circumference × (1 − score/100)
-	return Math.round(RING_CIRCUMFERENCE * (1 - score / 100));
+const RING_C = 163.4;
+function scoreRingOffset(score: number) {
+	return Math.round(RING_C * (1 - score / 100));
 }
-
-function scoreRingColor(score: number): string {
-	if (score >= 80) return '#22c55e';
-	if (score >= 60) return '#f59e0b';
-	return '#ef4444';
+function scoreRingColor(score: number) {
+	return (
+		score >= 80 ? '#10b981'
+		: score >= 60 ? '#f59e0b'
+		: '#f43f5e'
+	);
+}
+function scoreGradientId(score: number) {
+	return (
+		score >= 80 ? 'grad-green'
+		: score >= 60 ? 'grad-amber'
+		: 'grad-red'
+	);
+}
+function perfBarColor(score: number) {
+	return (
+		score >= 90 ? '#10b981'
+		: score >= 50 ? '#f59e0b'
+		: '#f43f5e'
+	);
+}
+function lcpBarColor(ms: number) {
+	return (
+		ms <= 2500 ? '#10b981'
+		: ms <= 4000 ? '#f59e0b'
+		: '#f43f5e'
+	);
 }
 
 function escapeHtml(value: string): string {
@@ -103,38 +164,89 @@ function escapeHtml(value: string): string {
 }
 
 function issueToHtml(issue: ReportIssue): string {
-	const sectionRow =
-		issue.page_section ?
-			`<div class="issue-tag"><strong>Section:</strong> ${escapeHtml(issue.page_section)}</div>`
-		:	'';
-
+	const sev = severityConfig(issue.severity);
 	return `
-  <div class="issue">
-    <div class="issue-top">
-      <div class="sev-pill" style="${severityPillStyle(issue.severity)}">${escapeHtml(issue.severity)}</div>
-      <div class="issue-title">${escapeHtml(issue.title)}</div>
+<div class="issue">
+  <div class="issue-header">
+    <div class="sev-badge" style="background:${sev.bg};color:${sev.color};">
+      <span class="sev-dot" style="background:${sev.dot};"></span>
+      ${sev.label}
     </div>
-    <div class="issue-meta">${escapeHtml(issue.page_url)}${issue.page_section ? ` &mdash; ${escapeHtml(issue.page_section)}` : ''}</div>
-    <div class="issue-desc">${escapeHtml(issue.description)}</div>
-    <div class="issue-rows">
-      ${sectionRow}
-      <div class="issue-tag"><strong>Impact:</strong> ${escapeHtml(issue.impact)}</div>
-      <div class="issue-tag"><strong>Fix:</strong> ${escapeHtml(issue.fix_instructions)}</div>
-    </div>
-  </div>`;
+    <div class="issue-title">${escapeHtml(issue.title)}</div>
+  </div>
+  <div class="issue-url">${escapeHtml(issue.page_url)}${issue.page_section ? ` <span class="url-sep">›</span> ${escapeHtml(issue.page_section)}` : ''}</div>
+  <div class="issue-desc">${escapeHtml(issue.description)}</div>
+  <div class="issue-fields">
+    ${issue.page_section ? `<div class="field-row"><span class="field-key">Section</span><span class="field-val">${escapeHtml(issue.page_section)}</span></div>` : ''}
+    <div class="field-row"><span class="field-key">Impact</span><span class="field-val">${escapeHtml(issue.impact)}</span></div>
+    <div class="field-row"><span class="field-key">Fix</span><span class="field-val">${escapeHtml(issue.fix_instructions)}</span></div>
+  </div>
+</div>`;
 }
 
-function perfBarColor(score: number): string {
-	if (score >= 90) return '#22c55e';
-	if (score >= 50) return '#f59e0b';
-	return '#ef4444';
+function buildSectionHtml(
+	section: (typeof CATEGORY_ORDER)[number],
+	sectionIssues: ReportIssue[],
+	perfExtra: string,
+): string {
+	if (sectionIssues.length === 0) {
+		return `
+<div class="page">
+  <div class="sec-head">
+    <div class="sec-left">
+      <span class="sec-num">${section.num}</span>
+      <span class="sec-icon">${section.icon}</span>
+      <span class="sec-title">${escapeHtml(section.title)}</span>
+    </div>
+    <span class="sec-pill sec-pill--clean">No issues</span>
+  </div>
+  <div class="issues-body"><p class="empty-state">✓ No issues detected in this category.</p></div>
+</div>`;
+	}
+
+	const buckets: ReportIssue[][] = [];
+	let bucket: ReportIssue[] = [];
+	const perfExtraH = perfExtra ? 110 : 0;
+	let usedH = SEC_HEAD_H + ISSUES_PAD + perfExtraH;
+
+	for (const issue of sectionIssues) {
+		const h = estimateIssueHeight(issue) + ISSUE_GAP;
+		if (usedH + h > PAGE_H && bucket.length > 0) {
+			buckets.push(bucket);
+			bucket = [];
+			usedH = SEC_HEAD_H + ISSUES_PAD;
+		}
+		bucket.push(issue);
+		usedH += h;
+	}
+	if (bucket.length > 0) buckets.push(bucket);
+
+	const total = sectionIssues.length;
+
+	return buckets
+		.map((pageIssues, idx) => {
+			const isFirst = idx === 0;
+			const contLabel = isFirst ? '' : `<span class="sec-cont">cont.</span>`;
+			return `
+<div class="page">
+  <div class="sec-head">
+    <div class="sec-left">
+      <span class="sec-num">${section.num}</span>
+      <span class="sec-icon">${section.icon}</span>
+      <span class="sec-title">${escapeHtml(section.title)} ${contLabel}</span>
+    </div>
+    <span class="sec-pill">${total} issue${total !== 1 ? 's' : ''}</span>
+  </div>
+  <div class="issues-body">
+    ${isFirst ? perfExtra : ''}
+    ${pageIssues.map(issueToHtml).join('')}
+  </div>
+</div>`;
+		})
+		.join('');
 }
 
-function lcpBarColor(ms: number): string {
-	if (ms <= 2500) return '#22c55e';
-	if (ms <= 4000) return '#f59e0b';
-	return '#ef4444';
-}
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function renderReportHtml(input: {
 	scan: ReportScan;
@@ -147,6 +259,7 @@ export function renderReportHtml(input: {
 	const score = healthScore(issues);
 	const offset = scoreRingOffset(score);
 	const ringColor = scoreRingColor(score);
+	const gradId = scoreGradientId(score);
 
 	const severityCounts = {
 		critical: issues.filter((i) => i.severity === 'critical').length,
@@ -156,7 +269,6 @@ export function renderReportHtml(input: {
 	};
 
 	const { avgPerf, avgLcp } = getPerformanceMetrics(pages);
-
 	const perfBarWidth = avgPerf !== null ? `${avgPerf}%` : '0%';
 	const perfBarClr = avgPerf !== null ? perfBarColor(avgPerf) : '#e5e7eb';
 	const lcpBarWidth =
@@ -166,311 +278,714 @@ export function renderReportHtml(input: {
 	const lcpBarClr = avgLcp !== null ? lcpBarColor(avgLcp) : '#e5e7eb';
 
 	const sorted = [...issues].sort((a, b) => {
-		const sa = SEVERITY_ORDER[a.severity];
-		const sb = SEVERITY_ORDER[b.severity];
-		if (sa !== sb) return sa - sb;
-		return a.display_order - b.display_order;
+		const diff = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+		return diff !== 0 ? diff : a.display_order - b.display_order;
 	});
 
-	// ── Sections HTML ────────────────────────────────────────────────────────
-	const sectionsHtml = CATEGORY_ORDER.map((section) => {
-		const sectionIssues = sorted.filter((i) => i.category === section.key);
-		const issuesHtml =
-			sectionIssues.length === 0 ?
-				'<p class="empty">No issues detected in this section.</p>'
-			:	sectionIssues.map(issueToHtml).join('');
-
-		const perfExtra =
-			section.key === 'performance' && (avgPerf !== null || avgLcp !== null) ?
-				`<div class="perf-grid">
-              <div class="perf-card">
-                <div class="perf-label">Mobile performance score</div>
-                <div class="perf-val">${avgPerf ?? 'N/A'}<span class="perf-unit"> / 100</span></div>
-                <div class="perf-bar"><div style="width:${perfBarWidth};background:${perfBarClr};"></div></div>
-              </div>
-              <div class="perf-card">
-                <div class="perf-label">Average LCP (mobile)</div>
-                <div class="perf-val">${avgLcp !== null ? avgLcp.toLocaleString() : 'N/A'}<span class="perf-unit"> ms</span></div>
-                <div class="perf-bar"><div style="width:${lcpBarWidth};background:${lcpBarClr};"></div></div>
-              </div>
-            </div>`
-			:	'';
-
-		return `
-  <div class="page">
-    <div class="section-head">
-      <span class="section-num">${section.num}</span>
-      <span class="section-title">${escapeHtml(section.title)}</span>
-      <span class="section-count">${sectionIssues.length} issue${sectionIssues.length !== 1 ? 's' : ''}</span>
-    </div>
-    ${perfExtra}
-    <div class="section-body">${issuesHtml}</div>
-  </div>`;
-	}).join('');
-
-	// ── Category breakdown rows ──────────────────────────────────────────────
-	const breakdownHtml = CATEGORY_ORDER.map((section) => {
-		const count = issues.filter((i) => i.category === section.key).length;
+	const breakdownHtml = CATEGORY_ORDER.map((s) => {
+		const count = issues.filter((i) => i.category === s.key).length;
 		const pct =
 			issues.length > 0 ? Math.round((count / issues.length) * 100) : 0;
+		const hasCritical = sorted.some(
+			(i) => i.category === s.key && i.severity === 'critical',
+		);
+		const hasHigh = sorted.some(
+			(i) => i.category === s.key && i.severity === 'high',
+		);
+		const dotColor =
+			hasCritical ? '#f43f5e'
+			: hasHigh ? '#f97316'
+			: count > 0 ? '#a78bfa'
+			: '#d1d5db';
 		return `
-  <div class="breakdown-row">
-    <span class="breakdown-label">${escapeHtml(section.title)}</span>
-    <div class="breakdown-bar-wrap">
-      <div class="breakdown-bar-fill" style="width:${pct}%;"></div>
-    </div>
-    <span class="breakdown-count">${count}</span>
-  </div>`;
+<div class="breakdown-row">
+  <div class="breakdown-left">
+    <span class="breakdown-dot" style="background:${dotColor};"></span>
+    <span class="breakdown-lbl">${escapeHtml(s.title)}</span>
+  </div>
+  <div class="breakdown-track">
+    <div class="breakdown-fill" style="width:${pct}%;background:${dotColor};"></div>
+  </div>
+  <span class="breakdown-n">${count}</span>
+</div>`;
 	}).join('');
 
-	// ────────────────────────────────────────────────────────────────────────
+	// Severity stat cards config
+	const statCards = [
+		{ num: issues.length, lbl: 'Total', accent: '#6366f1', bg: '#f5f3ff' },
+		{
+			num: severityCounts.critical,
+			lbl: 'Critical',
+			accent: '#f43f5e',
+			bg: '#fff1f2',
+		},
+		{ num: severityCounts.high, lbl: 'High', accent: '#f97316', bg: '#fff7ed' },
+		{
+			num: severityCounts.medium + severityCounts.low,
+			lbl: 'Med / Low',
+			accent: '#eab308',
+			bg: '#fefce8',
+		},
+	];
+
+	const statCardsHtml = statCards
+		.map(
+			(c) => `
+<div class="stat-card" style="background:${c.bg};">
+  <div class="stat-num" style="color:${c.accent};">${c.num}</div>
+  <div class="stat-lbl">${c.lbl}</div>
+</div>`,
+		)
+		.join('');
+
+	const sectionsHtml = CATEGORY_ORDER.map((s) => {
+		const sectionIssues = sorted.filter((i) => i.category === s.key);
+		const perfExtra =
+			s.key === 'performance' && (avgPerf !== null || avgLcp !== null) ?
+				`
+<div class="perf-grid">
+  <div class="perf-card">
+    <div class="perf-label">Mobile Performance</div>
+    <div class="perf-value">${avgPerf ?? 'N/A'}<span class="perf-unit"> / 100</span></div>
+    <div class="perf-track"><div class="perf-fill" style="width:${perfBarWidth};background:${perfBarClr};"></div></div>
+  </div>
+  <div class="perf-card">
+    <div class="perf-label">Avg LCP (mobile)</div>
+    <div class="perf-value">${avgLcp !== null ? avgLcp.toLocaleString() : 'N/A'}<span class="perf-unit"> ms</span></div>
+    <div class="perf-track"><div class="perf-fill" style="width:${lcpBarWidth};background:${lcpBarClr};"></div></div>
+  </div>
+</div>`
+			:	'';
+		return buildSectionHtml(s, sectionIssues, perfExtra);
+	}).join('');
+
+	// Format date nicely
+	const formattedDate = new Date(generatedAt).toLocaleDateString('en-US', {
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric',
+	});
+
 	return `<!doctype html>
-  <html>
-  <head>
-  <meta charset="utf-8"/>
-  <title>QAlaunch Audit Report &mdash; ${escapeHtml(scan.url)}</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&family=DM+Mono:wght@400&display=swap');
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>QAlaunch Audit — ${escapeHtml(scan.url)}</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap');
 
-    *, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: 'DM Sans', Arial, sans-serif;
-      color: #111827;
-      margin: 0;
-      font-size: 12px;
-      line-height: 1.55;
-      background: #fff;
-    }
+:root {
+  --ink: #0f172a;
+  --ink-2: #374151;
+  --ink-3: #6b7280;
+  --ink-4: #9ca3af;
+  --line: #e5e7eb;
+  --line-2: #f3f4f6;
+  --surface: #f9fafb;
+  --white: #ffffff;
+  --brand: #6366f1;
+  --brand-light: #ede9fe;
+  --radius: 10px;
+  --radius-sm: 6px;
+}
 
-    /* ── Page breaks ───────────────────────────────────── */
-    .page { page-break-after: always; padding: 32px 28px; }
-    .no-break { page-break-inside: avoid; }
+body {
+  font-family: 'Geist', -apple-system, 'Helvetica Neue', sans-serif;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: var(--white);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
 
-    /* ── Cover page ────────────────────────────────────── */
-    .cover {
-      background: #0f172a;
-      color: #f8fafc;
-      padding: 40px 36px 36px;
-      border-radius: 14px;
-      position: relative;
-      overflow: hidden;
-      margin-bottom: 0;
-    }
-    .cover-ring-1 {
-      position: absolute; top: -70px; right: -70px;
-      width: 240px; height: 240px; border-radius: 50%;
-      border: 48px solid rgba(255,255,255,0.04);
-    }
-    .cover-ring-2 {
-      position: absolute; bottom: -50px; right: 80px;
-      width: 140px; height: 140px; border-radius: 50%;
-      border: 28px solid rgba(255,255,255,0.03);
-    }
-    .logo-row {
-      display: flex; align-items: center; gap: 10px;
-      margin-bottom: 32px;
-    }
-    .logo-icon {
-      width: 30px; height: 30px; border-radius: 7px;
-      background: #6366f1;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .logo-icon svg { width: 17px; height: 17px; }
-    .logo-text { font-size: 14px; font-weight: 500; color: #e2e8f0; letter-spacing: -0.01em; }
+/* ── Page wrapper ──────────────────────────────────────────── */
+.page {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  page-break-after: always;
+  break-inside: avoid;
+  margin-bottom: 0;
+}
 
-    .cover-title { font-size: 26px; font-weight: 500; margin: 0 0 6px; color: #f1f5f9; letter-spacing: -0.02em; }
-    .cover-url {
-      font-family: 'DM Mono', monospace;
-      font-size: 12px; color: #94a3b8;
-      margin-bottom: 28px; word-break: break-all;
-    }
-    .cover-meta { display: flex; gap: 28px; flex-wrap: wrap; }
-    .cover-meta-item { font-size: 11px; color: #94a3b8; }
-    .cover-meta-item span { display: block; font-size: 13px; font-weight: 500; color: #e2e8f0; margin-top: 2px; }
+/* ── Cover ─────────────────────────────────────────────────── */
+.cover {
+  background: #0a0f1e;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+  min-height: 320px;
+}
+.cover-noise {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity: 0.5;
+}
+.cover-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(99,102,241,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99,102,241,0.06) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.cover-glow {
+  position: absolute;
+  top: -80px;
+  right: -60px;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(99,102,241,0.18) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.cover-inner {
+  position: relative;
+  z-index: 1;
+  padding: 32px 32px 28px;
+}
+.cover-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 36px;
+}
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  background: var(--brand);
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.brand-mark svg { display: block; }
+.brand-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  letter-spacing: -0.01em;
+}
+.cover-eyebrow {
+  font-size: 10px;
+  font-weight: 500;
+  color: #6366f1;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 10px;
+}
+.cover-heading {
+  font-size: 26px;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin-bottom: 10px;
+}
+.cover-url {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: #475569;
+  margin-bottom: 32px;
+  word-break: break-all;
+}
+.cover-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(99,102,241,0.4), transparent);
+  margin-bottom: 24px;
+}
+.cover-meta {
+  display: flex;
+  gap: 32px;
+}
+.cover-meta-item {}
+.cover-meta-label {
+  font-size: 10px;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+.cover-meta-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+.cover-score {
+  position: absolute;
+  top: 32px;
+  right: 32px;
+  z-index: 2;
+  text-align: center;
+}
+.score-ring-wrap { position: relative; width: 72px; height: 72px; }
+.score-ring-wrap svg { transform: rotate(-90deg); }
+.score-val {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: -0.02em;
+}
+.score-label {
+  font-size: 9.5px;
+  font-weight: 500;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 6px;
+}
 
-    .score-badge { position: absolute; top: 38px; right: 38px; text-align: center; }
-    .score-ring { position: relative; width: 76px; height: 76px; }
-    .score-ring svg { transform: rotate(-90deg); }
-    .score-val {
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 20px; font-weight: 500; color: #f1f5f9; line-height: 1;
-    }
-    .score-lbl { font-size: 10px; color: #94a3b8; margin-top: 5px; letter-spacing: 0.05em; text-transform: uppercase; }
+/* ── Summary page inner ────────────────────────────────────── */
+.page-inner {
+  padding: 22px 24px 24px;
+}
+.section-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-2);
+  margin-bottom: 14px;
+}
 
-    /* ── Summary stats ─────────────────────────────────── */
-    .section-label {
-      font-size: 10px; font-weight: 500; color: #6b7280;
-      text-transform: uppercase; letter-spacing: 0.06em;
-      margin: 28px 0 10px; padding-bottom: 7px;
-      border-bottom: 1px solid #f3f4f6;
-    }
-    .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 8px; }
-    .stat-card { background: #f9fafb; border-radius: 10px; padding: 14px 12px; text-align: center; }
-    .stat-num { font-size: 24px; font-weight: 500; line-height: 1; }
-    .stat-lbl { font-size: 11px; color: #6b7280; margin-top: 4px; }
+/* ── Stat cards ────────────────────────────────────────────── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.stat-card {
+  border-radius: var(--radius-sm);
+  padding: 14px 12px 12px;
+  text-align: center;
+}
+.stat-num {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.stat-lbl {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  margin-top: 4px;
+  font-weight: 500;
+}
 
-    /* ── Performance cards ─────────────────────────────── */
-    .perf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
-    .perf-card { background: #f9fafb; border-radius: 10px; padding: 14px; }
-    .perf-label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 7px; }
-    .perf-val { font-size: 26px; font-weight: 500; color: #111827; line-height: 1; }
-    .perf-unit { font-size: 13px; color: #6b7280; }
-    .perf-bar { height: 5px; border-radius: 99px; background: #e5e7eb; margin-top: 10px; overflow: hidden; }
-    .perf-bar div { height: 100%; border-radius: 99px; }
+/* ── Breakdown ─────────────────────────────────────────────── */
+.breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.breakdown-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 164px;
+}
+.breakdown-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.breakdown-lbl {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.breakdown-track {
+  flex: 1;
+  height: 3px;
+  background: var(--line-2);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.breakdown-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0s;
+}
+.breakdown-n {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-3);
+  min-width: 18px;
+  text-align: right;
+}
 
-    /* ── Category breakdown ────────────────────────────── */
-    .breakdown-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
-    .breakdown-label { font-size: 11px; color: #374151; min-width: 160px; }
-    .breakdown-bar-wrap { flex: 1; height: 5px; background: #f3f4f6; border-radius: 99px; overflow: hidden; }
-    .breakdown-bar-fill { height: 100%; background: #6366f1; border-radius: 99px; }
-    .breakdown-count { font-size: 11px; color: #6b7280; min-width: 18px; text-align: right; }
+/* ── Section header ────────────────────────────────────────── */
+.sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-2);
+  break-after: avoid;
+}
+.sec-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sec-num {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-4);
+  font-weight: 500;
+}
+.sec-icon {
+  font-size: 13px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+.sec-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.sec-cont {
+  font-size: 10px;
+  color: var(--ink-4);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.sec-pill {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--brand);
+  background: var(--brand-light);
+  border-radius: 99px;
+  padding: 2px 11px;
+}
+.sec-pill--clean {
+  color: var(--ink-4);
+  background: var(--line-2);
+}
 
-    /* ── Section heading ───────────────────────────────── */
-    .section-head {
-      display: flex; align-items: center; gap: 10px;
-      padding: 11px 14px;
-      background: #f9fafb;
-      border-radius: 10px;
-      border: 1px solid #f3f4f6;
-      margin-bottom: 10px;
-      page-break-inside: avoid;
-    }
-    .section-num { font-family: 'DM Mono', monospace; font-size: 11px; color: #9ca3af; min-width: 22px; }
-    .section-title { font-size: 13px; font-weight: 500; flex: 1; }
-    .section-count {
-      font-size: 11px; color: #6b7280;
-      background: #fff; border: 1px solid #e5e7eb;
-      border-radius: 99px; padding: 2px 10px;
-    }
-    .section-body { display: flex; flex-direction: column; gap: 8px; }
-    .empty { color: #9ca3af; font-size: 12px; padding: 8px 2px; }
+/* ── Issue list ────────────────────────────────────────────── */
+.issues-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.empty-state {
+  font-size: 12px;
+  color: var(--ink-4);
+  padding: 8px 0;
+}
 
-    /* ── Issue card ────────────────────────────────────── */
-    .issue {
-      border: 1px solid #f3f4f6;
-      border-radius: 10px;
-      padding: 13px 15px;
-      page-break-inside: avoid;
-      background: #fff;
-    }
-    .issue-top { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
-    .sev-pill {
-      font-size: 10px; font-weight: 500;
-      padding: 2px 9px; border-radius: 99px;
-      text-transform: uppercase; letter-spacing: 0.04em;
-      white-space: nowrap; flex-shrink: 0; margin-top: 2px;
-    }
-    .issue-title { font-size: 13px; font-weight: 500; line-height: 1.4; color: #111827; }
-    .issue-meta {
-      font-family: 'DM Mono', monospace;
-      font-size: 11px; color: #9ca3af;
-      margin-bottom: 6px; word-break: break-all;
-    }
-    .issue-desc { font-size: 12px; color: #4b5563; margin-bottom: 8px; }
-    .issue-rows { display: flex; flex-direction: column; gap: 5px; }
-    .issue-tag {
-      font-size: 11px; color: #4b5563;
-      background: #f9fafb;
-      border: 1px solid #f3f4f6;
-      border-radius: 7px;
-      padding: 4px 10px;
-    }
-    .issue-tag strong { color: #111827; font-weight: 500; }
+/* ── Issue card ────────────────────────────────────────────── */
+.issue {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 13px 14px;
+  background: var(--white);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.issue-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 5px;
+}
+.sev-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px 2px 6px;
+  border-radius: 99px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.sev-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.issue-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+.issue-url {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-4);
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+.url-sep {
+  color: var(--ink-4);
+  margin: 0 3px;
+}
+.issue-desc {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  line-height: 1.55;
+  margin-bottom: 9px;
+}
+.issue-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-row {
+  display: flex;
+  gap: 8px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 11px;
+}
+.field-key {
+  font-weight: 600;
+  color: var(--ink-2);
+  min-width: 44px;
+  flex-shrink: 0;
+}
+.field-val {
+  color: var(--ink-3);
+  line-height: 1.5;
+}
 
-    /* ── Footer ────────────────────────────────────────── */
-    .report-footer {
-      margin-top: 28px; padding: 16px;
-      background: #f9fafb;
-      border-radius: 10px;
-      border: 1px solid #f3f4f6;
-    }
-    .report-footer p { margin: 0 0 4px; font-size: 12px; color: #6b7280; }
-  </style>
-  </head>
-  <body>
+/* ── Performance cards ─────────────────────────────────────── */
+.perf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+  break-inside: avoid;
+}
+.perf-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+.perf-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 6px;
+}
+.perf-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.perf-unit {
+  font-size: 13px;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.perf-track {
+  height: 3px;
+  background: var(--line);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+.perf-fill {
+  height: 100%;
+  border-radius: 99px;
+}
 
-  <!-- ── Cover ───────────────────────────────────────────────── -->
-  <div class="page">
-    <div class="cover">
-      <div class="cover-ring-1"></div>
-      <div class="cover-ring-2"></div>
-      <div class="logo-row">
-        <div class="logo-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+/* ── Footer ────────────────────────────────────────────────── */
+.report-footer {
+  margin-top: 24px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  break-inside: avoid;
+}
+.footer-heading {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 3px;
+}
+.footer-text {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.footer-contact {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+/* ── Checklist ─────────────────────────────────────────────── */
+.checklist {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 0;
+}
+.checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.check-icon {
+  width: 16px;
+  height: 16px;
+  background: #dcfce7;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-size: 9px;
+  color: #16a34a;
+  font-weight: 700;
+}
+
+@media print {
+  .page { page-break-after: always; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     COVER
+════════════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="cover">
+    <div class="cover-noise"></div>
+    <div class="cover-grid"></div>
+    <div class="cover-glow"></div>
+    <div class="cover-inner">
+      <div class="cover-brand">
+        <div class="brand-mark">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
           </svg>
         </div>
-        <div class="logo-text">QAlaunch</div>
+        <span class="brand-name">QAlaunch</span>
       </div>
-      <div class="cover-title">Website Audit Report</div>
+      <div class="cover-eyebrow">Website Audit Report</div>
+      <div class="cover-heading">Quality Assurance<br>Analysis</div>
       <div class="cover-url">${escapeHtml(scan.url)}</div>
+      <div class="cover-divider"></div>
       <div class="cover-meta">
-        <div class="cover-meta-item">Generated<span>${new Date(generatedAt).toUTCString()}</span></div>
-        <div class="cover-meta-item">Pages scanned<span>${pages.length}</span></div>
-        <div class="cover-meta-item">Total issues<span>${issues.length}</span></div>
-      </div>
-      <div class="score-badge">
-        <div class="score-ring">
-          <svg width="76" height="76" viewBox="0 0 76 76">
-            <circle cx="38" cy="38" r="28" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="7"/>
-            <circle cx="38" cy="38" r="28" fill="none"
-              stroke="${ringColor}" stroke-width="7"
-              stroke-dasharray="${RING_CIRCUMFERENCE}"
-              stroke-dashoffset="${offset}"
-              stroke-linecap="round"/>
-          </svg>
-          <div class="score-val">${score}</div>
+        <div class="cover-meta-item">
+          <div class="cover-meta-label">Generated</div>
+          <div class="cover-meta-value">${formattedDate}</div>
         </div>
-        <div class="score-lbl">Health score</div>
+        <div class="cover-meta-item">
+          <div class="cover-meta-label">Pages scanned</div>
+          <div class="cover-meta-value">${pages.length}</div>
+        </div>
+        <div class="cover-meta-item">
+          <div class="cover-meta-label">Total issues</div>
+          <div class="cover-meta-value">${issues.length}</div>
+        </div>
       </div>
+    </div>
+    <div class="cover-score">
+      <div class="score-ring-wrap">
+        <svg width="72" height="72" viewBox="0 0 72 72">
+          <defs>
+            <linearGradient id="grad-green" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#34d399"/>
+              <stop offset="100%" stop-color="#10b981"/>
+            </linearGradient>
+            <linearGradient id="grad-amber" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#fcd34d"/>
+              <stop offset="100%" stop-color="#f59e0b"/>
+            </linearGradient>
+            <linearGradient id="grad-red" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#fb7185"/>
+              <stop offset="100%" stop-color="#f43f5e"/>
+            </linearGradient>
+          </defs>
+          <circle cx="36" cy="36" r="26" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="6"/>
+          <circle cx="36" cy="36" r="26" fill="none" stroke="url(#${gradId})" stroke-width="6"
+            stroke-dasharray="${RING_C}" stroke-dashoffset="${offset}" stroke-linecap="round"/>
+        </svg>
+        <div class="score-val">${score}</div>
+      </div>
+      <div class="score-label">Health Score</div>
     </div>
   </div>
+</div>
 
-  <!-- ── Executive summary ────────────────────────────────────── -->
-  <div class="page">
-    <div class="section-label">Severity breakdown</div>
+<!-- ═══════════════════════════════════════════════════════════════
+     SUMMARY
+════════════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-inner">
+    <div class="section-label">Severity Breakdown</div>
     <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-num">${issues.length}</div>
-        <div class="stat-lbl">Total issues</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num" style="color:#dc2626;">${severityCounts.critical}</div>
-        <div class="stat-lbl">Critical</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num" style="color:#ea580c;">${severityCounts.high}</div>
-        <div class="stat-lbl">High</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num" style="color:#ca8a04;">${severityCounts.medium + severityCounts.low}</div>
-        <div class="stat-lbl">Med / Low</div>
-      </div>
+      ${statCardsHtml}
     </div>
-
-    <div class="section-label" style="margin-top:24px;">Issues by category</div>
+    <div class="section-label" style="margin-top:18px;">Issues by Category</div>
     ${breakdownHtml}
   </div>
+</div>
 
-  <!-- ── Issue sections ───────────────────────────────────────── -->
-  ${sectionsHtml}
+<!-- ═══════════════════════════════════════════════════════════════
+     SECTIONS
+════════════════════════════════════════════════════════════════ -->
+${sectionsHtml}
 
-  <!-- ── Closing page ─────────────────────────────────────────── -->
-  <div class="page">
-    <div class="section-label">What&rsquo;s working well</div>
-    <ul style="font-size:12px;color:#4b5563;line-height:1.8;margin:0 0 0 18px;padding:0;">
-      <li>Core website flows are accessible without private authentication pages.</li>
-      <li>Automated crawl, PageSpeed, and accessibility baselines were collected successfully.</li>
-      <li>Issues are prioritized by business impact and implementation urgency.</li>
+<!-- ═══════════════════════════════════════════════════════════════
+     CLOSING PAGE
+════════════════════════════════════════════════════════════════ -->
+<div class="page">
+  <div class="page-inner">
+    <div class="section-label">What\u2019s Working Well</div>
+    <ul class="checklist">
+      <li><span class="check-icon">✓</span>Core website flows are accessible and were successfully crawled without authentication barriers.</li>
+      <li><span class="check-icon">✓</span>PageSpeed and accessibility baselines were collected across all scanned pages.</li>
+      <li><span class="check-icon">✓</span>All issues are ranked by business impact and implementation urgency for your team.</li>
     </ul>
     <div class="report-footer">
-      <p>Need help fixing these issues? Share this report with your development team.</p>
-      <p>Contact: <strong style="color:#374151;">support@qalaunch.com</strong></p>
+      <div class="footer-heading">Next steps</div>
+      <div class="footer-text">Share this report with your development team and prioritize critical and high severity issues first. Use the Fix instructions in each card as a starting point for your sprint backlog.</div>
+      <a class="footer-contact" href="mailto:support@qalaunch.com">support@qalaunch.com</a>
     </div>
   </div>
+</div>
 
-  </body>
-  </html>`;
+</body>
+</html>`;
 }

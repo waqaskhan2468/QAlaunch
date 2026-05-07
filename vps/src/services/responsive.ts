@@ -2,7 +2,7 @@ import { devices, type Browser } from 'playwright';
 import type { ResponsiveResult } from '../types/scan.types';
 import { closeContext, safeGoto } from './navigation';
 import { withRetry } from './retry';
-import { takeScreenshot } from './screenshots';
+import { preparePageForScreenshot, takeScreenshot } from './screenshots';
 
 export const MOBILE_VIEWPORT_NAME = 'iPhone 14';
 
@@ -32,6 +32,7 @@ async function scanViewport(
 	try {
 		const page = await context.newPage();
 		await safeGoto(page, url);
+		await preparePageForScreenshot(page, { disableAnimations: false });
 
 		const hasHorizontalScroll = await page.evaluate(
 			() =>
