@@ -81,10 +81,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 function isRetryableClaudeError(error: unknown): boolean {
-	if (error instanceof ClaudeApiError) {
-		return error.retryable;
-	}
-
+	if (error instanceof ClaudeApiError) return error.retryable;
 	return isAbortError(error);
 }
 
@@ -145,10 +142,7 @@ export async function analyzeWithClaude(input: {
 			{
 				role: 'user',
 				content: [
-					{
-						type: 'text',
-						text: 'Desktop screenshot:',
-					},
+					{ type: 'text', text: 'Desktop screenshot:' },
 					{
 						type: 'image',
 						source: {
@@ -258,11 +252,7 @@ export async function analyzeWithClaude(input: {
 function extractJsonPayload(text: string): string {
 	const trimmed = text.trim();
 	const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```$/im);
-
-	if (fenced?.[1]) {
-		return fenced[1].trim();
-	}
-
+	if (fenced?.[1]) return fenced[1].trim();
 	const match = trimmed.match(/\{[\s\S]*\}/);
 	return match?.[0] ?? trimmed;
 }

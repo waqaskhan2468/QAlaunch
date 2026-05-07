@@ -1,4 +1,4 @@
-import { analyzeWithClaude, parseClaudeIssues } from '@/lib/api/claude';
+import { analyzeWithClaude, parseClaudeIssues } from '@/lib/claude-scan/claude';
 import type { getServiceSupabase } from '@/lib/db/supabase';
 import type { ClaudeIssue } from '@/types/claude';
 import type { ScanPackage } from '@/types/zod';
@@ -83,18 +83,11 @@ function parseSupabasePublicStorageUrl(
 	};
 }
 
-/** Redact query-string values from a URL for safe logging (keeps origin + pathname). */
+/** Keep only origin + pathname for safe logging; drop query params entirely. */
 function maskSignedUrl(url: string): string {
 	try {
-		const parsed = new URL(url);
-		const params = new URLSearchParams();
-
-		for (const key of parsed.searchParams.keys()) {
-			params.set(key, '[redacted]');
-		}
-
-		parsed.search = params.toString();
-		return parsed.toString();
+		const { origin, pathname } = new URL(url);
+		return `${origin}${pathname}`;
 	} catch {
 		return '[unparseable-url]';
 	}
@@ -107,7 +100,6 @@ async function createSignedScreenshotUrl(
 	const { bucket, path } = parseSupabasePublicStorageUrl(publicUrl);
 	const ttlSec = getScreenshotSignedUrlTtlSec();
 
-	// Log parsed storage ref so we can verify path resolution is correct.
 	console.log('[runAiAnalysisForScan] creating signed URL', {
 		bucket,
 		path,
@@ -139,21 +131,12 @@ function getResponsiveScreenshotUrls(playwrightData: unknown): string[] {
 
 	return responsive
 		.map((item) => {
-			if (!item || typeof item !== 'object') {
-				return null;
-			}
-
+			if (!item || typeof item !== 'object') return null;
 			const row = item as Record<string, unknown>;
 			const screenshotUrl = row.screenshot_url;
-
-			if (typeof screenshotUrl !== 'string' || screenshotUrl.length === 0) {
+			if (typeof screenshotUrl !== 'string' || screenshotUrl.length === 0)
 				return null;
-			}
-
-			if (seen.has(screenshotUrl)) {
-				return null;
-			}
-
+			if (seen.has(screenshotUrl)) return null;
 			seen.add(screenshotUrl);
 			return screenshotUrl;
 		})
@@ -174,7 +157,6 @@ function orderPages(
 
 	for (const url of pagesToTest) {
 		const p = byUrl.get(url);
-
 		if (p) {
 			ordered.push(p);
 			seen.add(p.id);
@@ -182,9 +164,7 @@ function orderPages(
 	}
 
 	for (const p of pages) {
-		if (!seen.has(p.id)) {
-			ordered.push(p);
-		}
+		if (!seen.has(p.id)) ordered.push(p);
 	}
 
 	return ordered;
@@ -203,10 +183,7 @@ function buildAnalysisPrompt(input: {
 	const brokenLinks = links?.brokenLinks;
 	const allLinks = Array.isArray(links?.links) ? links.links : [];
 	const externalLinksSameTab = allLinks.filter((link) => {
-		if (!isRecord(link)) {
-			return false;
-		}
-
+		if (!isRecord(link)) return false;
 		return link.isExternal === true && link.target !== '_blank';
 	});
 
@@ -295,10 +272,7 @@ function pickFirstMatching(
 	predicate: (issue: IssueInsert) => boolean,
 ): IssueInsert | null {
 	const index = issues.findIndex(predicate);
-	if (index === -1) {
-		return null;
-	}
-
+	if (index === -1) return null;
 	const [picked] = issues.splice(index, 1);
 	return picked ?? null;
 }
@@ -335,9 +309,7 @@ function selectBalancedPreview(
 
 	while (selected.length < count && remaining.length > 0) {
 		const next = remaining.shift();
-		if (!next) {
-			break;
-		}
+		if (!next) break;
 		selected.push(next);
 	}
 
@@ -411,7 +383,7 @@ export async function runAiAnalysisForScan(
 			);
 			const mobileHandledByResponsive = responsivePublicUrls.includes(mobile);
 
-			// Create signed URLs for all screenshots (no base64 download needed).
+			// Create signed URLs — no download needed, passed directly to Anthropic.
 			const [desktopSignedUrl, mobileSignedUrl, responsiveSignedUrls] =
 				await Promise.all([
 					createSignedScreenshotUrl(supabase, desktop),
@@ -425,14 +397,13 @@ export async function runAiAnalysisForScan(
 					),
 				]);
 
-			// Debug log: confirm resolved URLs right before the Claude request.
+			// Confirm resolved image URLs right before the Claude request.
 			console.log('[runAiAnalysisForScan] pre-claude image URLs', {
 				scanId,
 				pageUrl: page.page_url,
-				desktopSignedUrl: maskSignedUrl(desktopSignedUrl),
-				mobileSignedUrl:
-					mobileSignedUrl ? maskSignedUrl(mobileSignedUrl) : null,
-				responsiveSignedUrls: responsiveSignedUrls.map(maskSignedUrl),
+				desktop: maskSignedUrl(desktopSignedUrl),
+				mobile: mobileSignedUrl ? maskSignedUrl(mobileSignedUrl) : null,
+				responsive: responsiveSignedUrls.map(maskSignedUrl),
 			});
 
 			const prompt = buildAnalysisPrompt({
@@ -457,11 +428,7 @@ export async function runAiAnalysisForScan(
 
 			const { error: aiAnalysisUpdateError } = await supabase
 				.from('scan_pages')
-				.update({
-					ai_analysis: {
-						issues,
-					},
-				})
+				.update({ ai_analysis: { issues } })
 				.eq('id', page.id);
 
 			if (aiAnalysisUpdateError) {
@@ -549,11 +516,7 @@ export async function runAiAnalysisForScan(
 	pending.sort((a, b) => {
 		const ra = SEVERITY_RANK[a.severity] ?? 99;
 		const rb = SEVERITY_RANK[b.severity] ?? 99;
-
-		if (ra !== rb) {
-			return ra - rb;
-		}
-
+		if (ra !== rb) return ra - rb;
 		return a.scan_page_id.localeCompare(b.scan_page_id);
 	});
 
