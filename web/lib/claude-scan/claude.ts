@@ -1,6 +1,6 @@
 import { claudeIssuesResponseSchema, type ClaudeIssue } from '@/types/claude';
 
-const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_TIMEOUT_MS = 90_000;
 const DEFAULT_MAX_RETRIES = 2;
 const MAX_RESPONSE_PREVIEW_LENGTH = 500;

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Blue rounded square background -->
+  <rect width="200" height="200" rx="40" fill="#1847A8"/>
+  <!-- White ring -->
+  <circle cx="100" cy="95" r="62" fill="#ffffff"/>
+  <circle cx="100" cy="95" r="42" fill="#1847A8"/>
+  <!-- Bottom gap -->
+  <rect x="68" y="138" width="64" height="24" fill="#ffffff"/>
+  <!-- Green chevron -->
+  <polygon points="100,56 134,94 118,94 118,118 82,118 82,94 66,94" fill="#22C55E"/>
+</svg>

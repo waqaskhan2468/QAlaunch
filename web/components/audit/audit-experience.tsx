@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import {
   AlertTriangle,
@@ -14,6 +14,7 @@ import {
 
 import { cn } from "@/lib/utils"
 import { plans } from "@/components/pricing/pricing-plans"
+import { computeHealthScore, labelFromScore } from "@/lib/scoring/health"
 
 const checklistSteps = [
   "Testing usability & UI/UX patterns…",
@@ -23,34 +24,118 @@ const checklistSteps = [
   "Analysing SEO, security & trust signals…",
 ]
 
-const findings = [
+type UiState =
+  | "idle"
+  | "starting"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "free_preview_used"
+
+type ScanIssue = {
+  id: string
+  category: string
+  severity: string
+  title: string
+  description: string
+  impact: string
+}
+
+type ScanStatusResponse = {
+  scan: {
+    id: string
+    status: "pending" | "crawling" | "analyzing" | "done" | "failed"
+    error_message?: string | null
+    package?: string
+  }
+  issues: ScanIssue[]
+  lockedIssues: Array<{ id: string; category: string; severity: string; isLocked: true }>
+  totalIssueCount: number
+  visibleIssueCount: number
+  lockedIssueCount: number
+  healthScore?: number
+  healthGrade?: string
+  healthLabel?: string
+  previewHealthScore?: number
+}
+
+function scoreTone(score: number): { ring: string; label: string } {
+  if (score >= 80) return { ring: "border-accent-bright", label: "Good" }
+  if (score >= 60) return { ring: "border-warn", label: "Needs attention" }
+  return { ring: "border-danger", label: "Critical issues" }
+}
+
+function loadingCopyForStatus(status: ScanStatusResponse["scan"]["status"] | null): {
+  title: string
+  subtitle: string
+  stageLabel: string
+  stepCount: number
+} {
+  if (status === "pending") {
+    return {
+      title: "Starting your free audit…",
+      subtitle: "We queued your scan and are preparing website checks.",
+      stageLabel: "Queued",
+      stepCount: 1,
+    }
+  }
+
+  if (status === "crawling") {
+    return {
+      title: "Scanning your website…",
+      subtitle: "Collecting pages, UI states, and performance signals.",
+      stageLabel: "Crawling pages",
+      stepCount: 3,
+    }
+  }
+
+  if (status === "analyzing") {
+    return {
+      title: "Analyzing findings…",
+      subtitle: "Reviewing severity, impact, and developer fix guidance.",
+      stageLabel: "AI analysis",
+      stepCount: checklistSteps.length,
+    }
+  }
+
+  return {
+    title: "Auditing your website…",
+    subtitle: "Preparing your free preview report.",
+    stageLabel: "Initializing",
+    stepCount: 1,
+  }
+}
+
+const fallbackFindings: ScanIssue[] = [
   {
-    severity: "CRITICAL" as const,
-    category: "Functionality",
+    id: "fallback-1",
+    severity: "critical",
+    category: "functionality",
     title: "Contact form submits with no confirmation or error message",
     description:
-      "On the Homepage, in the Contact section, when the user submits the contact form the page reloads silently — no success message, no error feedback, and no email is delivered. Users have no way to know if their message was received, leading to repeated submissions and damaged trust.",
+      "On the Homepage, in the Contact section, when the user submits the contact form the page reloads silently with no success or failure feedback. Users cannot tell if their message was received, which causes repeated attempts and trust loss.",
     impact:
-      "Potential customers who tried to contact you may have given up, believing your business is unresponsive.",
+      "Potential customers may abandon contact attempts, reducing leads and conversions.",
   },
   {
-    severity: "HIGH" as const,
-    category: "Usability",
+    id: "fallback-2",
+    severity: "high",
+    category: "usability_ux",
     title: "Navigation menu disappears when user scrolls down the page",
     description:
-      "On all pages, the top navigation bar disappears once the user scrolls past the hero section. This means users must scroll all the way back to the top to navigate to a different page — creating unnecessary friction on every single visit. Standard expectation and best practice is for the navigation to remain sticky (fixed) at the top at all times.",
+      "On long pages, the top navigation disappears after scrolling and users must return to the top to access other sections. This adds friction to normal browsing behavior and hurts discoverability of key pages.",
     impact:
-      "Users experience significant navigation friction, increasing frustration and exit rate — especially on long pages and mobile.",
+      "Higher frustration and drop-off, especially for mobile visitors on long pages.",
   },
   {
-    severity: "HIGH" as const,
-    category: "Mobile",
-    title:
-      "Primary CTA button invisible on iPhone SE and small Android screens",
+    id: "fallback-3",
+    severity: "high",
+    category: "responsiveness",
+    title: "Primary CTA button is hidden on smaller mobile screens",
     description:
-      "On screen widths under 390px — which includes iPhone SE, iPhone 12 Mini, and many Android devices — the primary call-to-action button is pushed below the fold and covered by the sticky navigation bar. The action you most want users to take is invisible to a large percentage of your mobile visitors.",
+      "On narrow viewports, the main call-to-action can be pushed below fold and partially obscured by sticky UI, making it hard to discover or tap for users on smaller devices.",
     impact:
-      "Mobile visitors on smaller screens cannot convert. This is directly costing you sales across 30–40% of your traffic.",
+      "Mobile conversion intent is blocked, directly impacting sales and signups.",
   },
 ]
 
@@ -70,36 +155,127 @@ function deriveHost(raw?: string | null) {
  * teasers and a compact pricing grid.
  */
 export function AuditExperience() {
+  const router = useRouter()
   const params = useSearchParams()
   const inputUrl = params.get("url")
+  const initialScanId = params.get("scanId")
+  const freePreviewUsedParam = params.get("freePreviewUsed")
   const host = deriveHost(inputUrl)
 
+  const [uiState, setUiState] = useState<UiState>("idle")
   const [completedSteps, setCompletedSteps] = useState(0)
-  const [showResults, setShowResults] = useState(false)
+  const [statusData, setStatusData] = useState<ScanStatusResponse | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const legacyPreviewMode = false
 
   useEffect(() => {
-    const timers = checklistSteps.map((_, i) =>
-      setTimeout(() => setCompletedSteps(i + 1), (i + 1) * 680),
-    )
-    const reveal = setTimeout(() => setShowResults(true), 4000)
-    return () => {
-      timers.forEach(clearTimeout)
-      clearTimeout(reveal)
-    }
-  }, [])
+    let cancelled = false
 
-  if (!showResults) {
+    const delay = (ms: number) =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, ms)
+      })
+
+    const pollScanStatus = async (currentScanId: string) => {
+      let retryCount = 0
+      while (!cancelled) {
+        try {
+          const res = await fetch(`/api/scan/status/${currentScanId}`, {
+            method: "GET",
+            cache: "no-store",
+          })
+
+          if (!res.ok) {
+            const errorPayload = (await res.json().catch(() => null)) as
+              | { error?: string; message?: string }
+              | null
+            throw new Error(
+              errorPayload?.message ??
+                errorPayload?.error ??
+                "Could not fetch scan status.",
+            )
+          }
+
+          const data = (await res.json()) as ScanStatusResponse
+          if (cancelled) return
+
+          setStatusData(data)
+          setCompletedSteps(loadingCopyForStatus(data.scan.status).stepCount)
+          setUiState("processing")
+          retryCount = 0
+
+          if (data.scan.status === "done") {
+            setUiState("completed")
+            return
+          }
+
+          if (data.scan.status === "failed") {
+            setUiState("failed")
+            setMessage(
+              data.scan.error_message ??
+                "Scan failed before completion. Please try again.",
+            )
+            return
+          }
+        } catch (error) {
+          retryCount += 1
+          if (retryCount >= 3) {
+            setUiState("failed")
+            setMessage(
+              error instanceof Error
+                ? error.message
+                : "Could not retrieve scan status. Please retry.",
+            )
+            return
+          }
+        }
+
+        await delay(3000)
+      }
+    }
+
+    const resumeOnly = async () => {
+      if (freePreviewUsedParam === "1") {
+        setUiState("free_preview_used")
+        setMessage("You already used your free preview for this website.")
+        return
+      }
+
+      if (!inputUrl || !initialScanId) {
+        router.replace("/#audit-input")
+        return
+      }
+
+      setUiState("processing")
+      setCompletedSteps(1)
+      await pollScanStatus(initialScanId)
+    }
+
+    resumeOnly()
+
+    return () => {
+      cancelled = true
+    }
+  }, [freePreviewUsedParam, initialScanId, inputUrl, router])
+
+  const loadingStatus = statusData?.scan.status ?? null
+  const loadingCopy = loadingCopyForStatus(loadingStatus)
+
+  if (uiState === "starting" || uiState === "processing" || uiState === "idle") {
     return (
       <section className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-surface-soft px-5 py-16">
         <div className="w-full max-w-xl text-center">
-          <div className="qa-spin mx-auto mb-5 size-16 rounded-full border-[4px] border-brand-pale border-t-brand" />
+          <div className="qa-spin mx-auto mb-5 size-16 rounded-full border-4 border-brand-pale border-t-brand" />
           <h1 className="font-heading text-[22px] font-black text-ink">
-            Auditing your website…
+            {loadingCopy.title}
           </h1>
           <p className="mt-1.5 text-sm text-body">
-            Running usability, UI, functionality &amp; performance checks on{" "}
-            <span className="font-mono text-ink">{host}</span>
+            {loadingCopy.subtitle}{" "}
+            <span className="font-mono text-ink">({host})</span>
           </p>
+          <div className="mt-3 inline-flex items-center rounded-full border border-brand/20 bg-brand-pale px-3 py-1 text-xs font-semibold text-brand">
+            Current stage: {loadingCopy.stageLabel}
+          </div>
           <div className="mt-7 flex flex-col gap-2 text-left">
             {checklistSteps.map((label, i) => {
               const done = i < completedSteps
@@ -138,6 +314,87 @@ export function AuditExperience() {
     )
   }
 
+  if (uiState === "free_preview_used") {
+    return (
+      <section className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-surface-soft px-5 py-16">
+        <div className="w-full max-w-xl rounded-2xl border border-warn/30 bg-white p-7 text-center shadow-sm">
+          <h1 className="font-heading text-2xl font-black text-ink">
+            Free preview already used
+          </h1>
+          <p className="mt-2 text-sm text-body">
+            {message ??
+              "You have already used the free preview for this website."}
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            <Link
+              href="/pricing"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand-mid"
+            >
+              View paid plans
+            </Link>
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              className="inline-flex h-11 items-center justify-center rounded-xl border border-border-soft bg-white px-5 text-sm font-bold text-ink hover:border-brand hover:text-brand"
+            >
+              Try another website
+            </button>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  if (uiState === "failed") {
+    return (
+      <section className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-surface-soft px-5 py-16">
+        <div className="w-full max-w-xl rounded-2xl border border-danger/20 bg-white p-7 text-center shadow-sm">
+          <h1 className="font-heading text-2xl font-black text-ink">
+            Audit could not complete
+          </h1>
+          <p className="mt-2 text-sm text-body">
+            {message ?? "Please retry your audit in a moment."}
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand-mid"
+            >
+              Retry audit
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              className="inline-flex h-11 items-center justify-center rounded-xl border border-border-soft bg-white px-5 text-sm font-bold text-ink hover:border-brand hover:text-brand"
+            >
+              Back to home
+            </button>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  const findings = legacyPreviewMode ? fallbackFindings : (statusData?.issues ?? [])
+  const totalIssueCount = legacyPreviewMode
+    ? 12
+    : (statusData?.totalIssueCount ?? findings.length)
+  const lockedIssueCount = legacyPreviewMode
+    ? 9
+    : (statusData?.lockedIssueCount ?? 0)
+  const allKnownSeverities = legacyPreviewMode
+    ? fallbackFindings.map((item) => item.severity)
+    : [
+        ...(statusData?.issues ?? []).map((item) => item.severity),
+        ...(statusData?.lockedIssues ?? []).map((item) => item.severity),
+      ]
+  const healthScore =
+    statusData?.healthScore ?? computeHealthScore(allKnownSeverities)
+  const healthTone = scoreTone(healthScore)
+  const healthLabel = statusData?.healthLabel ?? labelFromScore(healthScore) ?? healthTone.label
+  const previewHealthScore = statusData?.previewHealthScore
+
   return (
     <section className="bg-surface-soft">
       {/* Summary bar */}
@@ -152,22 +409,34 @@ export function AuditExperience() {
                 {host}
               </div>
               <div className="mt-0.5 text-xs text-muted-ink">
-                Audited just now · 35 checks completed
+                Scan completed · {totalIssueCount} total issues found
               </div>
             </div>
           </div>
           <div className="flex items-center gap-3 rounded-2xl bg-slate-deep px-5 py-3">
-            <div className="flex size-12 flex-col items-center justify-center rounded-full border-[3px] border-warn">
+            <div
+              className={cn(
+                "flex size-12 flex-col items-center justify-center rounded-full border-[3px]",
+                healthTone.ring,
+              )}
+            >
               <span className="font-heading text-lg font-black leading-none text-white">
-                58
+                {healthScore}
               </span>
-              <span className="text-[9px] font-extrabold text-warn">C+</span>
+              <span className="text-[9px] font-extrabold text-white/80">
+                SCORE
+              </span>
             </div>
             <div>
               <div className="text-sm font-bold text-white">Health Score</div>
               <div className="mt-0.5 text-xs text-white/45">
-                Needs attention
+                {healthLabel}
               </div>
+              {!legacyPreviewMode && typeof previewHealthScore === "number" ? (
+                <div className="mt-0.5 text-[11px] text-white/60">
+                  Preview-only score: {previewHealthScore}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -176,16 +445,16 @@ export function AuditExperience() {
       {/* Main content */}
       <div className="mx-auto max-w-5xl px-5 py-12 md:px-12">
         {/* Alert */}
-        <div className="mb-7 flex items-start gap-3 rounded-2xl border border-warn/30 bg-gradient-to-br from-warn-pale to-[#FFF9E5] p-5">
+        <div className="mb-7 flex items-start gap-3 rounded-2xl border border-warn/30 bg-linear-to-br from-warn-pale to-[#FFF9E5] p-5">
           <AlertTriangle className="size-5 shrink-0 text-warn" />
           <div>
             <div className="text-[14.5px] font-extrabold text-[#92400E]">
-              12 issues found affecting your users
+              {totalIssueCount} issues found affecting your users
             </div>
             <p className="mt-1 text-[13px] leading-snug text-[#78350F]">
               3 critical user-facing issues are shown below for free. These are
               actively affecting how real visitors experience your website right
-              now. Unlock the full report to see all 12 with screenshot
+              now. Unlock the full report to see all {totalIssueCount} with screenshot
               evidence and developer fix instructions.
             </p>
           </div>
@@ -195,9 +464,15 @@ export function AuditExperience() {
           Your free preview — 3 most critical findings
         </h2>
         <p className="mt-1.5 text-sm text-body">
-          Upgrade to see all 12 issues with screenshot evidence and
+          Upgrade to see all {totalIssueCount} issues with screenshot evidence and
           step-by-step developer fix instructions.
         </p>
+        {!legacyPreviewMode ? (
+          <p className="mt-1 text-xs text-muted-ink">
+            Health score is based on full scan results. You are currently viewing
+            3 free preview issues.
+          </p>
+        ) : null}
 
         <div className="mt-5 flex flex-col gap-3">
           {findings.map((f) => (
@@ -207,7 +482,7 @@ export function AuditExperience() {
 
         {/* Locked teaser */}
         <div className="mt-9 overflow-hidden rounded-2xl border-[1.5px] border-dashed border-border-soft bg-white px-6 py-9 text-center">
-          <div className="pointer-events-none mb-5 flex flex-col gap-2.5 opacity-30 blur-[4px]">
+          <div className="pointer-events-none mb-5 flex flex-col gap-2.5 opacity-30 blur-xs">
             {[
               { dot: "bg-danger", a: "62%", b: "78%" },
               { dot: "bg-warn", a: "70%", b: "52%" },
@@ -233,7 +508,8 @@ export function AuditExperience() {
           </div>
           <div className="flex flex-col items-center gap-2">
             <div className="inline-flex items-center gap-2 font-heading text-[22px] font-black text-ink">
-              <Lock className="size-5 text-muted-ink" />9 more issues found
+              <Lock className="size-5 text-muted-ink" />
+              {lockedIssueCount} more issues found
             </div>
             <div className="text-sm text-body">
               Unlock all findings + screenshot evidence + developer fix
@@ -264,8 +540,25 @@ export function AuditExperience() {
 function FindingCard({
   finding,
 }: {
-  finding: (typeof findings)[number]
+  finding: ScanIssue
 }) {
+  const normalizeSeverity = (value: string) => value.toUpperCase()
+  const normalizeCategory = (value: string) => {
+    const map: Record<string, string> = {
+      functionality: "Functionality",
+      ui_bugs: "UI Bugs",
+      usability_ux: "Usability",
+      responsiveness: "Mobile",
+      performance: "Performance",
+      seo: "SEO",
+      accessibility: "Accessibility",
+      security: "Security",
+      content: "Content",
+    }
+    return map[value] ?? value
+  }
+
+  const severity = normalizeSeverity(finding.severity)
   const severityTone = {
     CRITICAL: {
       card: "border-l-[4px] border-l-danger",
@@ -275,7 +568,18 @@ function FindingCard({
       card: "border-l-[4px] border-l-warn",
       badge: "bg-warn-pale text-warn",
     },
-  }[finding.severity]
+    MEDIUM: {
+      card: "border-l-[4px] border-l-brand",
+      badge: "bg-brand-pale text-brand",
+    },
+    LOW: {
+      card: "border-l-[4px] border-l-muted-ink",
+      badge: "bg-surface-soft text-muted-ink",
+    },
+  }[severity] ?? {
+    card: "border-l-[4px] border-l-brand",
+    badge: "bg-brand-pale text-brand",
+  }
 
   return (
     <article
@@ -291,10 +595,10 @@ function FindingCard({
             severityTone.badge,
           )}
         >
-          ● {finding.severity}
+          ● {severity}
         </span>
         <span className="text-[11px] font-bold uppercase tracking-widest text-muted-ink">
-          {finding.category}
+          {normalizeCategory(finding.category)}
         </span>
       </div>
       <h3 className="font-heading text-base font-extrabold text-ink">
@@ -319,7 +623,7 @@ function MiniPlanCard({ plan }: { plan: (typeof plans)[number] }) {
       className={cn(
         "relative flex flex-col rounded-2xl border bg-white p-5 transition-all hover:-translate-y-1 hover:border-brand hover:shadow-xl hover:shadow-brand/10",
         plan.popular
-          ? "border-brand border-2 bg-gradient-to-b from-brand-pale to-white"
+          ? "border-brand border-2 bg-linear-to-b from-brand-pale to-white"
           : "border-border-soft",
       )}
     >

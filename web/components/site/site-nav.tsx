@@ -1,17 +1,17 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Menu, X } from "lucide-react"
 import { useState } from "react"
 
-import { Logo } from "./logo"
 import { cn } from "@/lib/utils"
 
 /**
  * Fixed top navigation with a dark, glassy treatment that matches the hero.
- * Active link state is derived from the pathname and the CTA always routes
- * back to the home hero where the audit input lives.
+ * Active link state is derived from the pathname and the CTA routes
+ * directly to the results experience.
  */
 export function SiteNav() {
   const pathname = usePathname()
@@ -24,16 +24,22 @@ export function SiteNav() {
     { href: "/contact", label: "Contact" },
   ]
 
-  const handleAuditClick = () => {
+  const focusAuditInput = () => {
+    const input = document.getElementById("audit-input") as HTMLInputElement | null
+    if (!input) return false
+
+    input.scrollIntoView({ behavior: "smooth", block: "center" })
+    window.setTimeout(() => {
+      input.focus({ preventScroll: true })
+    }, 250)
+
+    return true
+  }
+
+  const handleResultClick = () => {
     setOpen(false)
-    if (pathname === "/") {
-      // Already on home — just scroll the input into view and focus it.
-      const input = document.getElementById("audit-input")
-      input?.scrollIntoView({ behavior: "smooth", block: "center" })
-      setTimeout(() => (input as HTMLInputElement | null)?.focus(), 500)
-    } else {
-      router.push("/#audit-input")
-    }
+    if (pathname === "/" && focusAuditInput()) return
+    router.push("/#audit-input")
   }
 
   return (
@@ -45,7 +51,19 @@ export function SiteNav() {
     >
       <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-5 md:px-12">
         <Link href="/" className="flex items-center" aria-label="QAlaunch home">
-          <Logo />
+          <span className="flex items-center gap-2.5">
+            <Image
+              src="/QAlaunch_Favicon.svg"
+              alt="QAlaunch logo"
+              width={28}
+              height={28}
+              priority
+              className="size-7"
+            />
+            <span className="font-heading text-[18px] font-black tracking-tight text-white">
+              QAlaunch
+            </span>
+          </span>
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">
@@ -68,7 +86,7 @@ export function SiteNav() {
           })}
           <button
             type="button"
-            onClick={handleAuditClick}
+            onClick={handleResultClick}
             className={cn(
               "qa-press group ml-3 inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent-bright px-4 text-[13px] font-semibold text-white",
               "hover:bg-accent-emerald hover:shadow-md hover:shadow-accent-bright/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-bright/40",
@@ -119,7 +137,7 @@ export function SiteNav() {
             })}
             <button
               type="button"
-              onClick={handleAuditClick}
+              onClick={handleResultClick}
               className="qa-press mt-2 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-accent-bright px-5 text-sm font-bold text-white shadow-glow-accent hover:bg-accent-emerald focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-bright/35"
             >
               Audit My Website Free

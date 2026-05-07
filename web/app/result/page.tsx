@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: true },
 }
 
-export default function AuditPage() {
+export default function ResultPage() {
   return (
     <>
       <SiteNav />

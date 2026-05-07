@@ -8,7 +8,7 @@ import {
 	type SelectedScanPage,
 } from '@/utils/page-selection';
 import { collectPageSpeedForPages } from '@/utils/savePageSpeedForPage';
-import { runAiAnalysisForScan } from '@/lib/scan/runAiAnalysisForScan';
+import { runAiAnalysisForScan } from '@/lib/claude-scan/runAiAnalysisForScan';
 import {
 	createSignedReportDownloadUrl,
 	generateAndStorePdfReport,
@@ -196,51 +196,54 @@ export const { POST } = serve<ProcessPayload>(async (context) => {
 		);
 	});
 
-	// ── 7. Generate PDF and store in private bucket ───────────────────────────
-	const report = await context.run('generate-pdf', async () => {
-		const supabase = getServiceSupabase();
-		return generateAndStorePdfReport(supabase, scanId);
-	});
+	const isFree = pkg === 'free';
+	if (!isFree) {
+		// ── 7. Generate PDF and store in private bucket ─────────────────────────
+		const report = await context.run('generate-pdf', async () => {
+			const supabase = getServiceSupabase();
+			return generateAndStorePdfReport(supabase, scanId);
+		});
 
-	// ── 8. Email signed download URL to user ──────────────────────────────────
-	//
-	// Email failure must NOT block mark-done — the scan is complete regardless.
-	// A failed email is logged and skipped; the user can still download via
-	// the dashboard (GET /api/scans/[scanId]/report-url generates a fresh URL).
-	await context.run('send-email', async () => {
-		const supabase = getServiceSupabase();
+		// ── 8. Email signed download URL to user ────────────────────────────────
+		//
+		// Email failure must NOT block mark-done — the scan is complete regardless.
+		// A failed email is logged and skipped; the user can still download via
+		// the dashboard (GET /api/scans/[scanId]/report-url generates a fresh URL).
+		await context.run('send-email', async () => {
+			const supabase = getServiceSupabase();
 
-		const pdfUrl = await createSignedReportDownloadUrl(
-			supabase,
-			report.pdfStoragePath,
-		);
-
-		if (!pdfUrl) {
-			console.error(
-				'[workflow] signed URL generation failed — skipping email',
-				{
-					scanId,
-					pdfStoragePath: report.pdfStoragePath,
-				},
+			const pdfUrl = await createSignedReportDownloadUrl(
+				supabase,
+				report.pdfStoragePath,
 			);
-			return;
-		}
 
-		try {
-			await sendReportEmail({
-				to: report.userEmail,
-				scanId,
-				targetUrl: report.targetUrl,
-				pdfUrl,
-			});
-		} catch (err) {
-			// Non-fatal: log for Resend dashboard visibility, continue to mark-done
-			console.error('[workflow] report email failed — continuing', {
-				scanId,
-				error: err instanceof Error ? err.message : err,
-			});
-		}
-	});
+			if (!pdfUrl) {
+				console.error(
+					'[workflow] signed URL generation failed — skipping email',
+					{
+						scanId,
+						pdfStoragePath: report.pdfStoragePath,
+					},
+				);
+				return;
+			}
+
+			try {
+				await sendReportEmail({
+					to: report.userEmail,
+					scanId,
+					targetUrl: report.targetUrl,
+					pdfUrl,
+				});
+			} catch (err) {
+				// Non-fatal: log for Resend dashboard visibility, continue to mark-done
+				console.error('[workflow] report email failed — continuing', {
+					scanId,
+					error: err instanceof Error ? err.message : err,
+				});
+			}
+		});
+	}
 
 	// ── 9. Mark scan as done ──────────────────────────────────────────────────
 	await context.run('mark-done', async () => {

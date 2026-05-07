@@ -7,6 +7,7 @@ import { motion, useMotionValue, useSpring, useTransform } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { fadeUp, stagger } from "@/components/motion/primitives"
+import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
 
 /**
  * Hero split — marketing copy + URL capture on the left, an animated
@@ -17,11 +18,69 @@ import { fadeUp, stagger } from "@/components/motion/primitives"
 export function Hero() {
   const router = useRouter()
   const [url, setUrl] = useState("")
+  const [isStarting, setIsStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
 
-  const submit = () => {
+  useEffect(() => {
+    if (window.location.hash !== "#audit-input") return
+
+    const input = document.getElementById("audit-input") as HTMLInputElement | null
+    if (!input) return
+
+    const timer = window.setTimeout(() => {
+      input.focus({ preventScroll: true })
+      input.scrollIntoView({ behavior: "smooth", block: "center" })
+    }, 120)
+
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  const submit = async () => {
     const value = url.trim()
-    const target = `/audit${value ? `?url=${encodeURIComponent(value)}` : ""}`
-    router.push(target)
+    if (!value || isStarting) return
+    if (!isValidPublicWebsiteUrl(value)) {
+      setStartError("Please enter a valid public website URL.")
+      return
+    }
+
+    try {
+      setIsStarting(true)
+      setStartError(null)
+
+      const res = await fetch("/api/scan/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: value,
+          package: "free",
+        }),
+      })
+
+      const payload = (await res.json()) as
+        | { ok: true; scanId: string }
+        | { ok: false; code?: string; message?: string }
+
+      if (
+        res.status === 409 &&
+        payload.ok === false &&
+        payload.code === "free_preview_used"
+      ) {
+        const target = `/result?url=${encodeURIComponent(value)}&freePreviewUsed=1`
+        router.push(target)
+        return
+      }
+
+      if (!res.ok || payload.ok !== true || !payload.scanId) {
+        throw new Error("Could not start free audit.")
+      }
+
+      const target = `/result?url=${encodeURIComponent(value)}&scanId=${encodeURIComponent(payload.scanId)}`
+      router.push(target)
+    } catch {
+      setStartError("Could not start your free audit. Please try again.")
+    } finally {
+      setIsStarting(false)
+    }
   }
 
   return (
@@ -88,12 +147,17 @@ export function Hero() {
           {/* URL capture */}
           <motion.div
             variants={fadeUp}
-            className="mt-10 rounded-2xl border border-white/15 bg-white/[0.06] p-3 shadow-surface-dark sm:p-4"
+            className="mt-10 rounded-2xl border border-white/15 bg-white/6 p-3 shadow-surface-dark sm:p-4"
           >
             <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
               <UrlInput value={url} onChange={setUrl} onSubmit={submit} />
-              <MagneticButton onClick={submit} />
+              <MagneticButton onClick={submit} isLoading={isStarting} />
             </div>
+            {startError ? (
+              <p className="mt-3 px-1 text-xs font-semibold text-[#fca5a5]">
+                {startError}
+              </p>
+            ) : null}
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 px-1">
               <TrustItem label="No signup required" />
               <TrustItem label="Free preview in 60s" />
@@ -147,6 +211,7 @@ function UrlInput({
       </span>
       <input
         id="audit-input"
+        
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
@@ -156,6 +221,7 @@ function UrlInput({
         placeholder="yourwebsite.com"
         className={cn(
           "h-14 w-full rounded-xl border border-white/15 bg-white/10 px-5 sm:pl-20",
+          
           "font-mono text-base text-white outline-none transition-all placeholder:text-white/35",
           "focus:border-accent-bright focus:bg-accent-bright/10 focus:ring-4 focus:ring-accent-bright/15",
         )}
@@ -168,7 +234,13 @@ function UrlInput({
 /*  Magnetic CTA button — follows cursor with a spring                  */
 /* ------------------------------------------------------------------ */
 
-function MagneticButton({ onClick }: { onClick: () => void }) {
+function MagneticButton({
+  onClick,
+  isLoading,
+}: {
+  onClick: () => void
+  isLoading: boolean
+}) {
   const ref = useRef<HTMLButtonElement | null>(null)
   const x = useMotionValue(0)
   const y = useMotionValue(0)
@@ -195,6 +267,7 @@ function MagneticButton({ onClick }: { onClick: () => void }) {
       ref={ref}
       type="button"
       onClick={onClick}
+      disabled={isLoading}
       onMouseMove={onMove}
       onMouseLeave={reset}
       whileTap={{ scale: 0.96 }}
@@ -204,9 +277,10 @@ function MagneticButton({ onClick }: { onClick: () => void }) {
         "text-sm font-extrabold tracking-wide text-white shadow-glow-accent",
         "hover:bg-accent-emerald hover:shadow-glow-accent-lg",
         "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-bright/35",
+        "disabled:cursor-not-allowed disabled:opacity-80",
       )}
     >
-      Audit My Website Free
+      {isLoading ? "Starting audit..." : "Audit My Website Free"}
       <motion.span
         className="inline-flex"
         animate={{ x: [0, 3, 0] }}

@@ -38,7 +38,7 @@ export const plans: Plan[] = [
       "PDF via email + download",
     ],
     cta: {
-      label: "Start Free Audit First",
+      label: "Get Basic",
       href: "/#audit-input",
       variant: "soft",
     },
@@ -59,7 +59,7 @@ export const plans: Plan[] = [
       "PDF via email + download",
     ],
     cta: {
-      label: "Start Free Audit",
+      label: "Get Standard",
       href: "/#audit-input",
       variant: "primary",
     },
@@ -79,7 +79,7 @@ export const plans: Plan[] = [
       "Priority email support",
     ],
     cta: {
-      label: "Start Free Audit",
+      label: "Get Premium",
       href: "/#audit-input",
       variant: "soft",
     },

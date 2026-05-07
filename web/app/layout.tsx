@@ -41,7 +41,6 @@ export const metadata: Metadata = {
     "free website checker",
     "website QA",
   ],
-  generator: "v0.app",
 }
 
 export const viewport: Viewport = {

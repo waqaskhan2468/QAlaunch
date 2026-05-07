@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Outer blue circle ring (Q shape) -->
+  <circle cx="100" cy="95" r="68" fill="#1847A8"/>
+  <!-- Inner cutout to make ring -->
+  <circle cx="100" cy="95" r="46" fill="#ffffff"/>
+  <!-- Bottom gap in ring (Q tail / open bottom arc — like QAnalyz) -->
+  <rect x="62" y="142" width="76" height="28" fill="#ffffff"/>
+  <!-- Green upward chevron arrow inside ring -->
+  <polygon points="100,52 138,96 120,96 120,122 80,122 80,96 62,96" fill="#22C55E"/>
+</svg>

@@ -1,5 +1,9 @@
 import type { IssueCategory, IssueSeverity } from '@/types/claude';
 import type { ReportIssue, ReportScan, ReportScanPage } from './report.types';
+import {
+	computeHealthScore,
+	labelFromScore,
+} from '@/lib/scoring/health';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Page-break budget
@@ -110,27 +114,9 @@ function getPerformanceMetrics(pages: ReportScanPage[]) {
 	return { avgPerf: avg(perfScores), avgLcp: avg(lcpValues) };
 }
 
-function healthScore(issues: ReportIssue[]): number {
-	let score = 100;
-	for (const i of issues) {
-		if (i.severity === 'critical') score -= 12;
-		else if (i.severity === 'high') score -= 7;
-		else if (i.severity === 'medium') score -= 4;
-		else score -= 2;
-	}
-	return Math.max(0, score);
-}
-
 const RING_C = 163.4;
 function scoreRingOffset(score: number) {
 	return Math.round(RING_C * (1 - score / 100));
-}
-function scoreRingColor(score: number) {
-	return (
-		score >= 80 ? '#10b981'
-		: score >= 60 ? '#f59e0b'
-		: '#f43f5e'
-	);
 }
 function scoreGradientId(score: number) {
 	return (
@@ -256,9 +242,9 @@ export function renderReportHtml(input: {
 }): string {
 	const { scan, issues, pages } = input;
 	const generatedAt = new Date().toISOString();
-	const score = healthScore(issues);
+	const score = computeHealthScore(issues.map((issue) => issue.severity));
+	const scoreLabel = labelFromScore(score);
 	const offset = scoreRingOffset(score);
-	const ringColor = scoreRingColor(score);
 	const gradId = scoreGradientId(score);
 
 	const severityCounts = {
@@ -541,6 +527,12 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-top: 6px;
+}
+.score-grade {
+  font-size: 10px;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-top: 2px;
 }
 
 /* ── Summary page inner ────────────────────────────────────── */
@@ -944,6 +936,7 @@ body {
         <div class="score-val">${score}</div>
       </div>
       <div class="score-label">Health Score</div>
+      <div class="score-grade">${escapeHtml(scoreLabel)}</div>
     </div>
   </div>
 </div>

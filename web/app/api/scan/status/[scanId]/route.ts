@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/db/supabase';
+import {
+	computeHealthScore,
+	gradeFromScore,
+	labelFromScore,
+} from '@/lib/scoring/health';
 
 export const runtime = 'nodejs';
 
@@ -57,6 +62,9 @@ export async function GET(
 	}
 
 	const allIssues = (issues ?? []) as IssueRow[];
+	const healthScore = computeHealthScore(allIssues.map((issue) => issue.severity));
+	const healthGrade = gradeFromScore(healthScore);
+	const healthLabel = labelFromScore(healthScore);
 	const isFree = scan.package === 'free';
 
 	if (!isFree) {
@@ -68,10 +76,16 @@ export async function GET(
 			totalIssueCount: allIssues.length,
 			visibleIssueCount: allIssues.length,
 			lockedIssueCount: 0,
+			healthScore,
+			healthGrade,
+			healthLabel,
 		});
 	}
 
 	const visibleIssues = allIssues.filter((issue) => issue.is_in_free_preview);
+	const previewHealthScore = computeHealthScore(
+		visibleIssues.map((issue) => issue.severity),
+	);
 	const lockedIssues = allIssues
 		.filter((issue) => !issue.is_in_free_preview)
 		.map((issue) => ({
@@ -89,5 +103,9 @@ export async function GET(
 		totalIssueCount: allIssues.length,
 		visibleIssueCount: visibleIssues.length,
 		lockedIssueCount: lockedIssues.length,
+		healthScore,
+		healthGrade,
+		healthLabel,
+		previewHealthScore,
 	});
 }

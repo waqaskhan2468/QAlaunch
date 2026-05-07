@@ -1,9 +1,8 @@
+import Image from "next/image"
 import Link from "next/link"
 
-import { Logo } from "./logo"
-
 const productLinks = [
-  { href: "/#audit-input", label: "Free Website Audit" },
+  { href: "/result", label: "Free Website Audit" },
   { href: "/pricing", label: "Pricing" },
   { href: "/#sample-report", label: "Sample Report" },
 ]
@@ -35,7 +34,18 @@ export function SiteFooter() {
       <div className="mx-auto max-w-7xl">
         <div className="grid gap-10 pb-10 md:grid-cols-[2fr_1fr_1fr_1fr] md:gap-11">
           <div>
-            <Logo />
+            <div className="flex items-center gap-2.5">
+              <Image
+                src="/QAlaunch_Favicon.svg"
+                alt="QAlaunch logo"
+                width={28}
+                height={28}
+                className="size-7"
+              />
+              <span className="font-heading text-[18px] font-black tracking-tight text-white">
+                QAlaunch
+              </span>
+            </div>
             <p className="mt-4 max-w-sm text-[13.5px] leading-relaxed text-white/45">
               Expert website auditing backed by 9 years of professional QA
               experience. Find what&apos;s broken before your users do.
