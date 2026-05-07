@@ -2,9 +2,12 @@ import { serve } from '@upstash/workflow/nextjs';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { fetchHomepageHtml } from '@/lib/api/fetchHomePageHtml';
 import { AppError } from '@/lib/api/error';
-import { detectWebsiteType } from '@/lib/utils/detect';
-import { selectPagesToTestWithRoles } from '@/lib/utils/page-selection';
-import { collectPageSpeedForPages } from '@/lib/utils/savePageSpeedForPage';
+import { detectWebsiteType } from '@/utils/detect';
+import {
+	selectPagesToTestWithRoles,
+	type SelectedScanPage,
+} from '@/utils/page-selection';
+import { collectPageSpeedForPages } from '@/utils/savePageSpeedForPage';
 import { runAiAnalysisForScan } from '@/lib/scan/runAiAnalysisForScan';
 import {
 	createSignedReportDownloadUrl,
@@ -47,7 +50,7 @@ export const { POST } = serve<ProcessPayload>(async (context) => {
 				detection.type,
 				pkg,
 			);
-			const pagesToTest = selectedPages.map((p) => p.url);
+			const pagesToTest = selectedPages.map((p: SelectedScanPage) => p.url);
 
 			if (!pagesToTest.length) {
 				throw new AppError(
@@ -86,7 +89,7 @@ export const { POST } = serve<ProcessPayload>(async (context) => {
 		const { error: upsertPagesError } = await supabase
 			.from('scan_pages')
 			.upsert(
-				selectedPages.map((p) => ({
+				selectedPages.map((p: SelectedScanPage) => ({
 					scan_id: scanId,
 					page_url: p.url,
 					page_role: p.role,

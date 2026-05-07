@@ -89,25 +89,17 @@ function isRetryableClaudeError(error: unknown): boolean {
 }
 
 export async function analyzeWithClaude(input: {
-	desktopScreenshot: {
-		mediaType: string;
-		data: string;
-	};
-	mobileScreenshot?: {
-		mediaType: string;
-		data: string;
-	};
-	responsiveScreenshots?: Array<{
-		mediaType: string;
-		data: string;
-	}>;
+	desktopScreenshotUrl: string;
+	mobileScreenshotUrl?: string;
+	responsiveScreenshotUrls?: string[];
 	prompt: string;
 	scanId?: string;
 	pageUrl?: string;
 }) {
 	const config = getClaudeConfig();
-	const responsiveImageBlocks = (input.responsiveScreenshots ?? []).flatMap(
-		(image, index) => [
+
+	const responsiveImageBlocks = (input.responsiveScreenshotUrls ?? []).flatMap(
+		(url, index) => [
 			{
 				type: 'text' as const,
 				text: `Responsive screenshot ${index + 1}:`,
@@ -115,16 +107,15 @@ export async function analyzeWithClaude(input: {
 			{
 				type: 'image' as const,
 				source: {
-					type: 'base64' as const,
-					media_type: image.mediaType,
-					data: image.data,
+					type: 'url' as const,
+					url,
 				},
 			},
 		],
 	);
 
 	const mobileImageBlocks =
-		input.mobileScreenshot ?
+		input.mobileScreenshotUrl ?
 			[
 				{
 					type: 'text' as const,
@@ -133,9 +124,8 @@ export async function analyzeWithClaude(input: {
 				{
 					type: 'image' as const,
 					source: {
-						type: 'base64' as const,
-						media_type: input.mobileScreenshot.mediaType,
-						data: input.mobileScreenshot.data,
+						type: 'url' as const,
+						url: input.mobileScreenshotUrl,
 					},
 				},
 			]
@@ -162,9 +152,8 @@ export async function analyzeWithClaude(input: {
 					{
 						type: 'image',
 						source: {
-							type: 'base64',
-							media_type: input.desktopScreenshot.mediaType,
-							data: input.desktopScreenshot.data,
+							type: 'url',
+							url: input.desktopScreenshotUrl,
 						},
 					},
 					...mobileImageBlocks,

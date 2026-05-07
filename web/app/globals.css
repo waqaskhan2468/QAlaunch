@@ -1,26 +1,181 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
+/*
+  QAlaunch design tokens.
+  We expose the brand palette as flat CSS variables, then map them into
+  Tailwind v4 via `@theme inline` so utility classes like `bg-brand`,
+  `text-ink`, `border-border-soft` are available everywhere.
+*/
 :root {
+  /* Brand palette */
+  --brand: #1847a8;
+  --brand-dark: #0c2560;
+  --brand-mid: #2558d4;
+  --brand-pale: #eef3fd;
+
+  --accent: #16a34a;
+  --accent-bright: #22c55e;
+  --accent-pale: #ecfdf5;
+
+  --slate-deep: #09111f;
+  --ink: #18293a;
+  --body-text: #3b536b;
+  --muted-ink: #6b8aa3;
+
+  --border-soft: #dde6f0;
+  --surface-soft: #f4f8fc;
+
+  --danger: #dc2626;
+  --danger-pale: #fef2f2;
+  --warn: #d97706;
+  --warn-pale: #fffbeb;
+
+  /* Elevation + glow tokens (reusable shadow utilities) */
+  --shadow-card: 0 10px 30px -12px rgba(15, 23, 42, 0.12);
+  --shadow-card-hover: 0 24px 50px -18px rgba(24, 71, 168, 0.22);
+  --shadow-glow-accent: 0 12px 32px -10px rgba(22, 163, 74, 0.55);
+  --shadow-glow-accent-lg: 0 20px 48px -12px rgba(22, 163, 74, 0.7);
+  --shadow-glow-brand: 0 12px 36px -10px rgba(24, 71, 168, 0.35);
+  --shadow-surface-dark: 0 24px 60px -24px rgba(0, 0, 0, 0.55);
+
+  /* Base tokens — used by `@layer base` and `bg-background` on `<html>` */
   --background: #ffffff;
-  --foreground: #171717;
+  --border: var(--border-soft);
+  --ring: var(--brand-mid);
+  --radius: 0.75rem;
 }
 
 @theme inline {
+  /* Fonts wired up through next/font in layout.tsx */
+  --font-sans: var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-epilogue), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  /* Brand colors exposed as Tailwind utilities */
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-mid: var(--brand-mid);
+  --color-brand-pale: var(--brand-pale);
+
+  --color-accent-emerald: var(--accent);
+  --color-accent-bright: var(--accent-bright);
+  --color-accent-pale: var(--accent-pale);
+
+  --color-slate-deep: var(--slate-deep);
+  --color-ink: var(--ink);
+  --color-body: var(--body-text);
+  --color-muted-ink: var(--muted-ink);
+
+  --color-border-soft: var(--border-soft);
+  --color-surface-soft: var(--surface-soft);
+
+  --color-danger: var(--danger);
+  --color-danger-pale: var(--danger-pale);
+  --color-warn: var(--warn);
+  --color-warn-pale: var(--warn-pale);
+
+  /* Named shadow utilities — use as shadow-card, shadow-glow-accent, etc. */
+  --shadow-card: var(--shadow-card);
+  --shadow-card-hover: var(--shadow-card-hover);
+  --shadow-glow-accent: var(--shadow-glow-accent);
+  --shadow-glow-accent-lg: var(--shadow-glow-accent-lg);
+  --shadow-glow-brand: var(--shadow-glow-brand);
+  --shadow-surface-dark: var(--shadow-surface-dark);
+
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-ink font-sans antialiased;
+    line-height: 1.65;
+  }
+  /* Respect users who prefer reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ─────────────────────────────────────────────
+   Animations — hero mock, ticker, reveals, microinteractions
+   ───────────────────────────────────────────── */
+@keyframes qa-orb {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-24px);
+  }
+}
+@keyframes qa-ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+@keyframes qa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.qa-orb-float {
+  animation: qa-orb 8s ease-in-out infinite;
+}
+.qa-orb-float-alt {
+  animation: qa-orb 10s ease-in-out infinite reverse;
+}
+.qa-ticker {
+  animation: qa-ticker 26s linear infinite;
+}
+.qa-spin {
+  animation: qa-spin 0.9s linear infinite;
+}
+
+/* Shared press microinteraction — use on any tappable button */
+.qa-press {
+  transition-property: transform, background-color, box-shadow, border-color,
+    color;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  transition-duration: 200ms;
+}
+.qa-press:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+.qa-hero-grid {
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.06) 1px,
+    transparent 1px
+  );
+  background-size: 32px 32px;
+}
+.qa-cta-grid {
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.05) 1px,
+    transparent 1px
+  );
+  background-size: 28px 28px;
 }

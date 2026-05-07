@@ -34,11 +34,6 @@ type SupabaseStorageObjectRef = {
 	path: string;
 };
 
-type ClaudeBase64Image = {
-	mediaType: string;
-	data: string;
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null;
 }
@@ -88,24 +83,20 @@ function parseSupabasePublicStorageUrl(
 	};
 }
 
-function normalizeImageMediaType(value: string | null, path: string): string {
-	const raw = (value ?? '').split(';')[0]?.trim().toLowerCase();
-	if (raw.startsWith('image/')) {
-		return raw;
-	}
+/** Redact query-string values from a URL for safe logging (keeps origin + pathname). */
+function maskSignedUrl(url: string): string {
+	try {
+		const parsed = new URL(url);
+		const params = new URLSearchParams();
 
-	const extension = path.split('.').pop()?.toLowerCase();
-	switch (extension) {
-		case 'jpg':
-		case 'jpeg':
-			return 'image/jpeg';
-		case 'webp':
-			return 'image/webp';
-		case 'gif':
-			return 'image/gif';
-		case 'png':
-		default:
-			return 'image/png';
+		for (const key of parsed.searchParams.keys()) {
+			params.set(key, '[redacted]');
+		}
+
+		parsed.search = params.toString();
+		return parsed.toString();
+	} catch {
+		return '[unparseable-url]';
 	}
 }
 
@@ -115,6 +106,13 @@ async function createSignedScreenshotUrl(
 ): Promise<string> {
 	const { bucket, path } = parseSupabasePublicStorageUrl(publicUrl);
 	const ttlSec = getScreenshotSignedUrlTtlSec();
+
+	// Log parsed storage ref so we can verify path resolution is correct.
+	console.log('[runAiAnalysisForScan] creating signed URL', {
+		bucket,
+		path,
+		ttlSec,
+	});
 
 	const { data, error } = await supabase.storage
 		.from(bucket)
@@ -126,44 +124,10 @@ async function createSignedScreenshotUrl(
 		);
 	}
 
-	console.log('[runAiAnalysisForScan] signed screenshot URL ok', {
-		bucket,
-		path,
-		ttlSec,
-	});
-
 	return data.signedUrl;
 }
 
-async function getScreenshotAsBase64(
-	supabase: ServiceSupabase,
-	publicUrl: string,
-): Promise<ClaudeBase64Image> {
-	const { path } = parseSupabasePublicStorageUrl(publicUrl);
-	const signedUrl = await createSignedScreenshotUrl(supabase, publicUrl);
-	const response = await fetch(signedUrl);
-
-	if (!response.ok) {
-		throw new Error(
-			`Failed to download screenshot for Claude (${response.status}).`,
-		);
-	}
-
-	const buffer = Buffer.from(await response.arrayBuffer());
-	const mediaType = normalizeImageMediaType(
-		response.headers.get('content-type'),
-		path,
-	);
-
-	return {
-		mediaType,
-		data: buffer.toString('base64'),
-	};
-}
-
-function getResponsiveScreenshotUrls(
-	playwrightData: unknown,
-): string[] {
+function getResponsiveScreenshotUrls(playwrightData: unknown): string[] {
 	const pd = playwrightData as Record<string, unknown> | null;
 	const responsive = pd?.responsive;
 
@@ -442,24 +406,34 @@ export async function runAiAnalysisForScan(
 		attemptedAnalysisCount += 1;
 
 		try {
-			const responsiveScreenshotUrls = getResponsiveScreenshotUrls(
+			const responsivePublicUrls = getResponsiveScreenshotUrls(
 				page.playwright_data,
 			);
-			const mobileHandledByResponsive =
-				Boolean(mobile) && responsiveScreenshotUrls.includes(mobile);
+			const mobileHandledByResponsive = responsivePublicUrls.includes(mobile);
 
-			const [desktopBase64, mobileBase64, responsiveBase64Screenshots] =
+			// Create signed URLs for all screenshots (no base64 download needed).
+			const [desktopSignedUrl, mobileSignedUrl, responsiveSignedUrls] =
 				await Promise.all([
-					getScreenshotAsBase64(supabase, desktop),
-					!mobileHandledByResponsive && mobile ?
-						getScreenshotAsBase64(supabase, mobile)
+					createSignedScreenshotUrl(supabase, desktop),
+					!mobileHandledByResponsive ?
+						createSignedScreenshotUrl(supabase, mobile)
 					:	Promise.resolve(null),
 					Promise.all(
-						responsiveScreenshotUrls.map((url) =>
-							getScreenshotAsBase64(supabase, url),
+						responsivePublicUrls.map((url) =>
+							createSignedScreenshotUrl(supabase, url),
 						),
 					),
 				]);
+
+			// Debug log: confirm resolved URLs right before the Claude request.
+			console.log('[runAiAnalysisForScan] pre-claude image URLs', {
+				scanId,
+				pageUrl: page.page_url,
+				desktopSignedUrl: maskSignedUrl(desktopSignedUrl),
+				mobileSignedUrl:
+					mobileSignedUrl ? maskSignedUrl(mobileSignedUrl) : null,
+				responsiveSignedUrls: responsiveSignedUrls.map(maskSignedUrl),
+			});
 
 			const prompt = buildAnalysisPrompt({
 				pageUrl: page.page_url,
@@ -471,9 +445,9 @@ export async function runAiAnalysisForScan(
 			});
 
 			const raw = await analyzeWithClaude({
-				desktopScreenshot: desktopBase64,
-				mobileScreenshot: mobileBase64 ?? undefined,
-				responsiveScreenshots: responsiveBase64Screenshots,
+				desktopScreenshotUrl: desktopSignedUrl,
+				mobileScreenshotUrl: mobileSignedUrl ?? undefined,
+				responsiveScreenshotUrls: responsiveSignedUrls,
 				prompt,
 				scanId,
 				pageUrl: page.page_url,

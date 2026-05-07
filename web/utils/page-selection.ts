@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import type { WebsiteType, ScanPackage } from '@/types/zod';
-import { resolveUrl, isPublicPage, dedupe } from '@/lib/utils/detect';
+import { resolveUrl, isPublicPage, dedupe } from '@/utils/detect';
 
 export type PageRole =
 	| 'homepage'

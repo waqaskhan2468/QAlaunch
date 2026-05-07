@@ -1,5 +1,5 @@
 import { runPageSpeedForUrl } from '@/lib/api/pagespeed';
-import { getServiceSupabase } from '../db/supabase';
+import { getServiceSupabase } from '@/lib/db/supabase';
 
 const PAGESPEED_CONCURRENCY = 1;
 const PAGE_SPEED_DB_RETRIES = 2;
