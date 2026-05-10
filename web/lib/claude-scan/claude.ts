@@ -87,6 +87,8 @@ function isRetryableClaudeError(error: unknown): boolean {
 
 export async function analyzeWithClaude(input: {
 	desktopScreenshotUrl: string;
+	mobileScreenshotUrls?: string[];
+	// Backward-compatible fields (older callers / stale TS server state).
 	mobileScreenshotUrl?: string;
 	responsiveScreenshotUrls?: string[];
 	prompt: string;
@@ -95,11 +97,19 @@ export async function analyzeWithClaude(input: {
 }) {
 	const config = getClaudeConfig();
 
-	const responsiveImageBlocks = (input.responsiveScreenshotUrls ?? []).flatMap(
+	const mergedMobileUrls = Array.from(
+		new Set([
+			...(input.mobileScreenshotUrls ?? []),
+			...(input.mobileScreenshotUrl ? [input.mobileScreenshotUrl] : []),
+			...(input.responsiveScreenshotUrls ?? []),
+		]),
+	);
+
+	const mobileImageBlocks = mergedMobileUrls.flatMap(
 		(url, index) => [
 			{
 				type: 'text' as const,
-				text: `Responsive screenshot ${index + 1}:`,
+				text: `Mobile slice ${index + 1}:`,
 			},
 			{
 				type: 'image' as const,
@@ -110,23 +120,6 @@ export async function analyzeWithClaude(input: {
 			},
 		],
 	);
-
-	const mobileImageBlocks =
-		input.mobileScreenshotUrl ?
-			[
-				{
-					type: 'text' as const,
-					text: 'Mobile screenshot:',
-				},
-				{
-					type: 'image' as const,
-					source: {
-						type: 'url' as const,
-						url: input.mobileScreenshotUrl,
-					},
-				},
-			]
-		:	[];
 
 	const body = JSON.stringify({
 		model: config.model,
@@ -151,7 +144,6 @@ export async function analyzeWithClaude(input: {
 						},
 					},
 					...mobileImageBlocks,
-					...responsiveImageBlocks,
 					{ type: 'text', text: input.prompt },
 				],
 			},

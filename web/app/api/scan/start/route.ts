@@ -100,19 +100,19 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
-	// if (pkg !== 'free') {
-	// 	return NextResponse.json(
-	// 		{
-	// 			ok: true,
-	// 			scanId: scan.id,
-	// 			status: scan.status,
-	// 			paymentRequired: true,
-	// 			message: 'Scan created. Complete payment to start processing.',
-	// 		},
-	// 		{ status: 201 },
-	// 	);
-	// }
-
+	if (pkg !== 'free') {
+		return NextResponse.json(
+			{
+				ok: true,
+				scanId: scan.id,
+				status: scan.status,
+				paymentRequired: true,
+				targetUrl: normalized,
+				message: 'Complete payment to start your audit.',
+			},
+			{ status: 201 },
+		);
+	}
 
 	await queueScanJob({
 		scanId: scan.id,

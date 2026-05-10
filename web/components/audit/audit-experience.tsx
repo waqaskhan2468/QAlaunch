@@ -241,7 +241,31 @@ export function AuditExperience() {
         return
       }
 
-      if (!inputUrl || !initialScanId) {
+      if (!initialScanId) {
+        router.replace("/#audit-input")
+        return
+      }
+
+      try {
+        const res = await fetch(`/api/scan/status/${initialScanId}`, {
+          method: "GET",
+          cache: "no-store",
+        })
+        if (res.ok) {
+          const data = (await res.json()) as ScanStatusResponse
+          const pkg = data.scan?.package
+          if (pkg && pkg !== "free") {
+            router.replace(
+              `/checkout/success?scanId=${encodeURIComponent(initialScanId)}`,
+            )
+            return
+          }
+        }
+      } catch {
+        /* continue — free preview may still load */
+      }
+
+      if (!inputUrl) {
         router.replace("/#audit-input")
         return
       }
@@ -529,7 +553,11 @@ export function AuditExperience() {
 
         <div className="mt-7 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
           {plans.map((plan) => (
-            <MiniPlanCard key={plan.tier} plan={plan} />
+            <MiniPlanCard
+              key={plan.tier}
+              plan={plan}
+              prefillUrl={inputUrl}
+            />
           ))}
         </div>
       </div>
@@ -617,7 +645,22 @@ function FindingCard({
   )
 }
 
-function MiniPlanCard({ plan }: { plan: (typeof plans)[number] }) {
+function MiniPlanCard({
+  plan,
+  prefillUrl,
+}: {
+  plan: (typeof plans)[number]
+  prefillUrl: string | null
+}) {
+  const checkoutHref =
+    plan.checkoutPackage != null
+      ? `/checkout?package=${plan.checkoutPackage}${
+          prefillUrl
+            ? `&url=${encodeURIComponent(prefillUrl)}`
+            : ""
+        }`
+      : "/contact"
+
   return (
     <article
       className={cn(
@@ -658,7 +701,7 @@ function MiniPlanCard({ plan }: { plan: (typeof plans)[number] }) {
         ))}
       </ul>
       <Link
-        href={plan.tier === "Enterprise" ? "/contact" : "/pricing"}
+        href={checkoutHref}
         className={cn(
           "mt-auto inline-flex w-full items-center justify-center rounded-xl px-3 py-2.5 text-[13px] font-extrabold transition-all",
           plan.popular

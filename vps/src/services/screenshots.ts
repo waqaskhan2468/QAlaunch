@@ -10,14 +10,30 @@ import { closeContext, safeGoto } from './navigation';
 
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 
+// ─── Mobile slicing ────────────────────────────────────────────────────────
+//
+// Claude's vision engine downscales any image whose longest edge exceeds
+// 1568px (or 2576px on Opus 4.7). A typical mobile full-page screenshot
+// is 3000–5000px tall, which renders as an unreadable blob after downscale.
+//
+// Fix: capture 3–4 overlapping slices of ≤ 844px each. Every slice stays
+// well under the 1568px limit so Claude sees pixel-perfect UI.
+//
+const MOBILE_SLICE_HEIGHT = 844; // matches iPhone 14 viewport height
+const SLICE_OVERLAP_PX = 180; // larger overlap so seam content is never clipped
+const MAX_MOBILE_SLICES = 4; // 4 × 744px step = ~3000px coverage
+
 // ─── Timing ────────────────────────────────────────────────────────────────
 
-const AFTER_SCROLL_DELAY_MS = 600; // Let lazy-loaded images settle after scroll
-const AFTER_ANIMATE_DELAY_MS = 300; // Let CSS transitions finish after disabling
+const AFTER_SCROLL_DELAY_MS = 600; // let lazy-loaded images settle after scroll
+const AFTER_ANIMATE_DELAY_MS = 300; // let CSS transitions finish after disabling
+const AFTER_MEDIA_READY_DELAY_MS = 350; // final paint settle after media decode
 const NETWORK_IDLE_TIMEOUT_MS = 8_000;
 const FONTS_TIMEOUT_MS = 5_000;
 const LAYOUT_SETTLE_TIMEOUT_MS = 2_000;
 const VISIBLE_CONTENT_TIMEOUT_MS = 4_000;
+const SLICE_SCROLL_SETTLE_MS = 80; // brief pause after scrolling to each slice position
+const MEDIA_READY_TIMEOUT_MS = 6_000;
 
 // ─── CSS injected into every page before screenshot ────────────────────────
 //
@@ -141,12 +157,14 @@ async function forceRevealLikelyHiddenContent(page: Page): Promise<void> {
 				'[style*="opacity: 0"]',
 			];
 
-			document.querySelectorAll<HTMLElement>(selectors.join(',')).forEach((el) => {
-				el.style.opacity = '1';
-				el.style.visibility = 'visible';
-				el.style.transform = 'none';
-				el.style.filter = 'none';
-			});
+			document
+				.querySelectorAll<HTMLElement>(selectors.join(','))
+				.forEach((el) => {
+					el.style.opacity = '1';
+					el.style.visibility = 'visible';
+					el.style.transform = 'none';
+					el.style.filter = 'none';
+				});
 		});
 	} catch {
 		// Non-fatal
@@ -164,7 +182,9 @@ async function hasLikelyBlankMainContent(page: Page): Promise<boolean> {
 				document.querySelector('article') ??
 				document.body;
 
-			const blocks = root.querySelectorAll<HTMLElement>('section, div, article');
+			const blocks = root.querySelectorAll<HTMLElement>(
+				'section, div, article',
+			);
 			let largeEmptyBlocks = 0;
 
 			for (const el of blocks) {
@@ -246,7 +266,8 @@ async function triggerLazyLoad(page: Page): Promise<void> {
 				.forEach((el) => el.removeAttribute('loading'));
 		});
 
-		// 2. Scroll incrementally to the bottom, triggering IntersectionObservers
+		// 2. Scroll incrementally to the bottom, triggering IntersectionObservers.
+		// Then scroll back to top so first screenshot starts from stable top state.
 		await page.evaluate(async () => {
 			await new Promise<void>((resolve) => {
 				const scrollStep = Math.ceil(window.innerHeight * 0.8);
@@ -260,7 +281,7 @@ async function triggerLazyLoad(page: Page): Promise<void> {
 					if (currentY < document.body.scrollHeight) {
 						setTimeout(step, scrollDelay);
 					} else {
-						window.scrollTo(0, 0); // Return to top for the screenshot
+						window.scrollTo(0, 0); // return to top for the screenshot
 						resolve();
 					}
 				};
@@ -277,9 +298,64 @@ async function triggerLazyLoad(page: Page): Promise<void> {
 }
 
 /**
+ * Wait until most page images are fully loaded/decoded.
+ * This prevents "skeleton/blank card" captures on heavy landing pages.
+ */
+async function waitForMediaReady(page: Page): Promise<void> {
+	try {
+		await page.evaluate(
+			async ({ timeoutMs }) => {
+				const wait = (ms: number) =>
+					new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+				const isImageReady = (img: HTMLImageElement) =>
+					img.complete &&
+					img.naturalWidth > 0 &&
+					img.naturalHeight > 0;
+
+				const decodeWithTimeout = async (
+					img: HTMLImageElement,
+				): Promise<void> => {
+					if (typeof img.decode !== 'function') return;
+					try {
+						await Promise.race([img.decode(), wait(700)]);
+					} catch {
+						// non-fatal decode error
+					}
+				};
+
+				const start = Date.now();
+				while (Date.now() - start < timeoutMs) {
+					const images = Array.from(document.images);
+					if (images.length === 0) return;
+
+					for (const img of images) {
+						if (!isImageReady(img)) {
+							await decodeWithTimeout(img);
+						}
+					}
+
+					const readyCount = images.filter(isImageReady).length;
+					// Accept 90% readiness to avoid hanging on tracking pixels/broken assets.
+					if (readyCount / images.length >= 0.9) {
+						return;
+					}
+
+					await wait(160);
+				}
+			},
+			{ timeoutMs: MEDIA_READY_TIMEOUT_MS },
+		);
+	} catch {
+		// Non-fatal
+	}
+}
+
+/**
  * Full pre-screenshot preparation pipeline:
  *
  *   navigate → networkIdle → disableAnimations → fonts ready → triggerLazyLoad
+ *     → forceReveal → waitForVisibleContent → waitForLayoutStable
  *
  * Running this before `page.screenshot()` maximises the chance that the
  * captured image shows a fully-rendered, stable UI — important for accurate
@@ -297,6 +373,8 @@ export async function preparePageForScreenshot(
 	}
 	await waitForFontsReady(page);
 	await triggerLazyLoad(page);
+	await waitForMediaReady(page);
+	await page.waitForTimeout(AFTER_MEDIA_READY_DELAY_MS);
 	await forceRevealLikelyHiddenContent(page);
 	await waitForVisibleContent(page);
 	await waitForLayoutStable(page);
@@ -309,7 +387,7 @@ export async function preparePageForScreenshot(
  * Throws if Playwright returns an empty buffer (guards against silent null
  * being stored to the DB).
  */
-async function takeScreenshot(page: Page): Promise<Buffer> {
+export async function takeScreenshot(page: Page): Promise<Buffer> {
 	const buffer = await page.screenshot({
 		fullPage: true,
 		type: 'png',
@@ -320,6 +398,105 @@ async function takeScreenshot(page: Page): Promise<Buffer> {
 	}
 
 	return buffer;
+}
+
+/**
+ * Capture a mobile page as overlapping vertical slices instead of one giant
+ * full-page image.
+ *
+ * WHY: Claude's vision API downscales images whose longest edge exceeds
+ * 1568px. A 3000px-tall mobile screenshot becomes an unreadable blob.
+ * Each slice is ≤ MOBILE_SLICE_HEIGHT (844px) so Claude sees pixel-perfect UI.
+ *
+ * HOW:
+ *  - Step size = MOBILE_SLICE_HEIGHT − SLICE_OVERLAP_PX (664px)
+ *  - 180px overlap ensures seam content is never split between slices
+ *  - MAX_MOBILE_SLICES caps at 4 (covers ~3000px pages)
+ *  - Scrolls to each slice position so position:fixed elements reposition
+ *
+ * @throws if any individual slice buffer is empty
+ */
+export async function takeMobileSlices(page: Page): Promise<{
+	slices: Buffer[];
+	totalHeight: number;
+	sliceCount: number;
+}> {
+	const getCurrentPageHeight = () =>
+		page.evaluate(() =>
+			Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+		);
+
+	const totalHeight = await getCurrentPageHeight();
+
+	const viewport = page.viewportSize();
+	const viewportWidth = viewport?.width ?? 390;
+	const viewportHeight = viewport?.height ?? MOBILE_SLICE_HEIGHT;
+	const step = MOBILE_SLICE_HEIGHT - SLICE_OVERLAP_PX; // 664px
+	const plannedSliceCount = Math.min(
+		MAX_MOBILE_SLICES,
+		Math.ceil(totalHeight / step),
+	);
+
+	const slices: Buffer[] = [];
+	const usedPositions = new Set<number>();
+	const positions: number[] = [];
+
+	for (let i = 0; i < plannedSliceCount; i++) {
+		positions.push(i * step);
+	}
+
+	// Always include tail anchor so final section is covered even when page height
+	// changes during hydration/lazy-load.
+	const initialTailStart = Math.max(0, totalHeight - viewportHeight);
+	positions.push(initialTailStart);
+
+	for (let i = 0; i < positions.length; i++) {
+		const currentHeight = await getCurrentPageHeight();
+		const y = positions[i] ?? 0;
+
+		// Layout can shrink after lazy loads or hydration. Guard against stale Y.
+		if (y >= currentHeight) {
+			break;
+		}
+
+		// Anchor to the last viewport-sized window of the current document.
+		const maxStartY = Math.max(0, currentHeight - viewportHeight);
+		const boundedY = Math.min(y, maxStartY);
+
+		if (usedPositions.has(boundedY)) {
+			continue;
+		}
+		usedPositions.add(boundedY);
+
+		const clipHeight = Math.min(viewportHeight, currentHeight - boundedY);
+		if (clipHeight <= 0) {
+			continue;
+		}
+
+		// Scroll first so fixed/sticky elements are in the same state users see.
+		await page.evaluate((scrollY) => window.scrollTo(0, scrollY), boundedY);
+		await page.waitForTimeout(SLICE_SCROLL_SETTLE_MS);
+
+		// Capture current viewport window (top-origin clip) to avoid seam drift
+		// between adjacent chunks when document height changes.
+		const buffer = await page.screenshot({
+			clip: { x: 0, y: 0, width: viewportWidth, height: clipHeight },
+			type: 'png',
+		});
+
+		if (!buffer || buffer.length === 0) {
+			throw new Error(
+				`screenshot_empty: mobile slice ${i + 1}/${positions.length} returned empty buffer`,
+			);
+		}
+
+		slices.push(buffer);
+	}
+
+	// Restore scroll to top
+	await page.evaluate(() => window.scrollTo(0, 0));
+
+	return { slices, totalHeight, sliceCount: slices.length };
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
@@ -357,13 +534,9 @@ export async function captureMobileScreenshot(
 	let context: BrowserContext | undefined;
 
 	try {
-		// Single browser instance, new context — no extra browser.launch() cost
-		context = await browser.newContext({
-			...iPhone,
-		});
+		context = await browser.newContext({ ...iPhone });
 
 		const page = await context.newPage();
-
 		const navigation = await safeGoto(page, url);
 
 		if (navigation.warning) {
@@ -371,9 +544,12 @@ export async function captureMobileScreenshot(
 		}
 
 		await preparePageForScreenshot(page, { disableAnimations: false });
+
 		if (await hasLikelyBlankMainContent(page)) {
 			// One recovery pass: nudge viewport observers, then re-settle.
-			await page.evaluate(() => window.scrollTo(0, Math.floor(window.innerHeight * 0.6)));
+			await page.evaluate(() =>
+				window.scrollTo(0, Math.floor(window.innerHeight * 0.6)),
+			);
 			await page.waitForTimeout(180);
 			await page.evaluate(() => window.scrollTo(0, 0));
 			await preparePageForScreenshot(page, { disableAnimations: false });
@@ -382,12 +558,10 @@ export async function captureMobileScreenshot(
 			);
 		}
 
-		const buffer = await takeScreenshot(page);
-		return buffer;
+		return await takeScreenshot(page);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		warnings.push(`mobile_screenshot_failed: ${message}`);
-		// Return null so the caller can skip the DB write rather than store null
 		return null;
 	} finally {
 		if (context) {
@@ -395,6 +569,3 @@ export async function captureMobileScreenshot(
 		}
 	}
 }
-
-// Re-export for internal callers that already have a prepared page
-export { takeScreenshot };

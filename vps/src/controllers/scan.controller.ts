@@ -10,6 +10,10 @@ import { AppError } from '../utils/AppError';
 import { runPlaywrightScan } from '../services/index';
 import { MOBILE_VIEWPORT_NAME } from '../services/responsive';
 import type { ScanStatus, ScreenshotUploadResult } from '../types/scan.types';
+import {
+	compressScreenshotBuffer,
+	type ImageCompressionProfile,
+} from '../utils/imageCompression';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -25,6 +29,8 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// ─── Small utilities ───────────────────────────────────────────────────────
 
 function nowIso(): string {
 	return new Date().toISOString();
@@ -65,7 +71,6 @@ function getAxeGateFailure(result: ScanResult) {
 
 function logAxeGateFailure(scanId: string, result: ScanResult): void {
 	const failure = getAxeGateFailure(result);
-
 	if (!failure) return;
 
 	console.warn('[scan:axe_gate_failed]', {
@@ -105,16 +110,13 @@ function validateScanRequest(body: Partial<ScanRequest>): ScanRequest {
 			body.urls.map((url) => url.trim()).filter(Boolean)
 		:	[];
 
-	if (!scanId) {
-		throw new AppError('scanId is required', 400);
-	}
-
-	if (urls.length === 0) {
-		throw new AppError('urls[] is required', 400);
-	}
+	if (!scanId) throw new AppError('scanId is required', 400);
+	if (urls.length === 0) throw new AppError('urls[] is required', 400);
 
 	return { scanId, urls };
 }
+
+// ─── Screenshot upload ─────────────────────────────────────────────────────
 
 async function uploadScreenshotBuffer(
 	screenshot: Buffer | undefined | null,
@@ -123,29 +125,51 @@ async function uploadScreenshotBuffer(
 	fileName: string,
 	label: string,
 ): Promise<ScreenshotUploadResult> {
-	// ── Guard: reject missing or empty buffers before attempting upload ──
+	// Guard: reject missing or empty buffers before attempting upload.
 	// screenshots.ts throws on empty desktop buffers, but captureMobileScreenshot
-	// returns null for non-fatal failures. Both cases must be caught here so we
-	// never attempt to upload an empty file or write null to the DB.
+	// returns null for non-fatal failures. Both must be caught here so we never
+	// attempt to upload an empty file or write null to the DB.
 	if (!screenshot || screenshot.length === 0) {
 		const reason = !screenshot ? 'no buffer' : 'empty buffer (0 bytes)';
 		console.warn(`[screenshot:${label}] skipped — ${reason}`, { pageUrl });
 		return { url: null, warning: `Screenshot skipped (${label}): ${reason}` };
 	}
 
-	const filePath = `${scanId}/${sanitizeForPath(pageUrl)}-${fileName}.png`;
+	const compressionProfile: ImageCompressionProfile =
+		label === 'desktop' ? 'desktop' : 'responsive';
+
+	let uploadBuffer = screenshot;
+	let contentType: 'image/png' | 'image/jpeg' = 'image/png';
+	let extension: 'png' | 'jpg' = 'png';
+
+	try {
+		const optimized = await compressScreenshotBuffer(
+			screenshot,
+			compressionProfile,
+		);
+		uploadBuffer = optimized.buffer;
+		contentType = optimized.contentType;
+		extension = optimized.extension;
+	} catch (error) {
+		console.warn(`[screenshot:${label}] compression skipped`, {
+			pageUrl,
+			error: getErrorMessage(error),
+		});
+	}
+
+	const filePath = `${scanId}/${sanitizeForPath(pageUrl)}-${fileName}.${extension}`;
 	let lastError = 'unknown_error';
 
 	console.log(
-		`[screenshot:${label}] ${pageUrl} uploading ${(screenshot.length / 1024 / 1024).toFixed(2)}MB`,
+		`[screenshot:${label}] ${pageUrl} uploading ${(uploadBuffer.length / 1024 / 1024).toFixed(2)}MB`,
 	);
 
 	for (let attempt = 1; attempt <= SCREENSHOT_UPLOAD_RETRIES; attempt += 1) {
 		try {
 			const { error } = await supabase.storage
 				.from(SCREENSHOT_BUCKET)
-				.upload(filePath, screenshot, {
-					contentType: 'image/png',
+				.upload(filePath, uploadBuffer, {
+					contentType,
 					upsert: true,
 				});
 
@@ -181,9 +205,114 @@ async function uploadScreenshotBuffer(
 	};
 }
 
+// ─── Responsive screenshot upload (slice-aware) ────────────────────────────
+
+/**
+ * Upload all screenshots for every responsive viewport.
+ *
+ * Mobile viewports produce multiple slices (stored in `item.slices`).
+ * Desktop/tablet produce a single full-page image (`item.screenshot`).
+ *
+ * Each slice gets its own storage path and public URL, stored in
+ * `screenshot_slice_urls`. The first slice URL is also written to
+ * `screenshot_url` for backward-compatible callers.
+ */
+async function uploadResponsiveScreenshots(
+	scanId: string,
+	pageUrl: string,
+	result: ScanResult,
+	warnings: string[],
+): Promise<ResponsivePayload[] | null> {
+	if (!result.responsive) return null;
+
+	const responsivePayload = await Promise.all(
+		result.responsive.map(async (item, index) => {
+			const viewportSlug = sanitizeForPath(
+				item.viewport || `viewport-${index + 1}`,
+			);
+
+			// Use slices array when available (mobile), otherwise wrap the single
+			// full-page screenshot so the upload loop is uniform.
+			const slices = item.slices?.length ? item.slices : [item.screenshot];
+
+			const sliceUploads = await Promise.all(
+				slices.map((slice, sliceIndex) =>
+					uploadScreenshotBuffer(
+						slice,
+						scanId,
+						pageUrl,
+						// e.g. "responsive-2-iphone-14-s1.png"
+						`responsive-${index + 1}-${viewportSlug}-s${sliceIndex + 1}`,
+						`responsive:${item.viewport}:slice${sliceIndex + 1}`,
+					),
+				),
+			);
+
+			for (const upload of sliceUploads) {
+				if (upload.warning) warnings.push(upload.warning);
+			}
+
+			return {
+				viewport: item.viewport,
+				width: item.width,
+				height: item.height,
+				hasHorizontalScroll: item.hasHorizontalScroll,
+				// First slice URL kept for backward compatibility
+				screenshot_url: sliceUploads[0]?.url ?? null,
+				// All slice URLs — what Claude receives for visual analysis
+				screenshot_slice_urls: sliceUploads
+					.map((u) => u.url)
+					.filter((url): url is string => typeof url === 'string' && url.length > 0),
+			} satisfies ResponsivePayload;
+		}),
+	);
+
+	return responsivePayload;
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function getMobileScreenshotUrlFromResponsive(
+	responsivePayload: ResponsivePayload[] | null,
+): string | null {
+	if (!responsivePayload) return null;
+
+	return (
+		responsivePayload.find((item) => item.viewport === MOBILE_VIEWPORT_NAME)
+			?.screenshot_url ?? null
+	);
+}
+
+function getMobileSliceUrlsFromResponsive(
+	responsivePayload: ResponsivePayload[] | null,
+): string[] {
+	if (!responsivePayload) return [];
+
+	const mobileViewport = responsivePayload.find(
+		(item) => item.viewport === MOBILE_VIEWPORT_NAME,
+	);
+	if (!mobileViewport) return [];
+
+	return (mobileViewport.screenshot_slice_urls ?? []).filter(
+		(url): url is string => typeof url === 'string' && url.length > 0,
+	);
+}
+
+function buildResponsiveSlicesPayload(
+	responsivePayload: ResponsivePayload[] | null,
+): Array<{ viewport: string; width: number; slice_urls: string[] }> {
+	if (!responsivePayload) return [];
+
+	return responsivePayload.map((item) => ({
+		viewport: item.viewport,
+		width: item.width,
+		slice_urls: (item.screenshot_slice_urls ?? [])
+			.filter((url): url is string => typeof url === 'string' && url.length > 0),
+	}));
+}
+
 function buildPlaywrightPayload(
 	result: ScanResult,
-	responsive: ResponsivePayload[] | null,
 ) {
 	const payload = {
 		links: result.links ?? null,
@@ -192,7 +321,6 @@ function buildPlaywrightPayload(
 		failedRequests: result.failedRequests ?? [],
 		httpErrors: result.httpErrors ?? [],
 		seoData: result.seoData ?? null,
-		responsive,
 		steps: result.steps ?? [],
 		warnings: result.warnings ?? [],
 	};
@@ -207,6 +335,8 @@ function buildPlaywrightPayload(
 		error: result.error ?? 'scan_failed',
 	};
 }
+
+// ─── DB helpers ────────────────────────────────────────────────────────────
 
 async function updateScanStatus(
 	scanId: string,
@@ -254,60 +384,7 @@ async function markScanFailed(scanId: string, message: string): Promise<void> {
 	});
 }
 
-async function uploadResponsiveScreenshots(
-	scanId: string,
-	pageUrl: string,
-	result: ScanResult,
-	warnings: string[],
-): Promise<ResponsivePayload[] | null> {
-	if (!result.responsive) return null;
-
-	const responsivePayload = await Promise.all(
-		result.responsive.map(async (item, index) => {
-			const viewportSlug = sanitizeForPath(
-				item.viewport || `viewport-${index + 1}`,
-			);
-
-			const upload = await uploadScreenshotBuffer(
-				item.screenshot,
-				scanId,
-				pageUrl,
-				`responsive-${index + 1}-${viewportSlug}`,
-				`responsive:${item.viewport}`,
-			);
-
-			if (upload.warning) {
-				warnings.push(upload.warning);
-			}
-
-			return {
-				viewport: item.viewport,
-				width: item.width,
-				height: item.height,
-				hasHorizontalScroll: item.hasHorizontalScroll,
-				screenshot_url: upload.url,
-			};
-		}),
-	);
-
-	return responsivePayload;
-}
-
-function getMobileScreenshotUrlFromResponsive(
-	responsivePayload: ResponsivePayload[] | null,
-): string | null {
-	if (!responsivePayload) return null;
-	const iPhone14Url =
-		responsivePayload.find((item) => item.viewport === MOBILE_VIEWPORT_NAME)
-			?.screenshot_url ?? null;
-	if (iPhone14Url) return iPhone14Url;
-
-	// Fallback so AI analysis is not skipped when iPhone 14 upload fails.
-	return (
-		responsivePayload.find((item) => item.viewport === 'iPhone SE')
-			?.screenshot_url ?? null
-	);
-}
+// ─── Per-page result processor ─────────────────────────────────────────────
 
 async function processScanResult(
 	scanId: string,
@@ -326,15 +403,16 @@ async function processScanResult(
 		uploadResponsiveScreenshots(scanId, result.url, result, uploadWarnings),
 	]);
 
-	for (const upload of [desktopUpload]) {
-		if (upload.warning) {
-			uploadWarnings.push(upload.warning);
-		}
+	if (desktopUpload.warning) {
+		uploadWarnings.push(desktopUpload.warning);
 	}
 
-	const mobileScreenshotUrl = getMobileScreenshotUrlFromResponsive(
-		responsivePayload,
-	);
+	const mobileScreenshotUrl =
+		getMobileScreenshotUrlFromResponsive(responsivePayload);
+	const mobileSliceUrls = getMobileSliceUrlsFromResponsive(responsivePayload);
+	const responsiveSlicesPayload =
+		buildResponsiveSlicesPayload(responsivePayload);
+
 	if (!mobileScreenshotUrl) {
 		uploadWarnings.push(
 			`Screenshot missing (mobile): ${MOBILE_VIEWPORT_NAME} responsive screenshot URL not available`,
@@ -348,36 +426,26 @@ async function processScanResult(
 		warnings: [...(result.warnings ?? []), ...uploadWarnings],
 	};
 
-	// ── Build the DB patch conditionally ────────────────────────────────────
-	// Only include screenshot URL columns when we actually have a URL.
-	// Writing `null` to a non-nullable column (or one the UI expects to be set)
-	// was causing silent DB errors. Screenshots are non-fatal — a missing URL
-	// is surfaced via warnings[] instead.
+	// Build the DB patch conditionally.
+	// Writing `null` to a non-nullable column was causing silent DB errors.
+	// Screenshots are non-fatal — a missing URL is surfaced via warnings[] instead.
 	const screenshotPatch: Record<string, unknown> = {};
 
-	if (desktopUpload.url) {
-		screenshotPatch.screenshot_desktop_url = desktopUpload.url;
-	} else {
-		// Explicitly null so any previous value is cleared rather than left stale
-		screenshotPatch.screenshot_desktop_url = null;
-	}
+	screenshotPatch.screenshot_desktop_url = desktopUpload.url ?? null;
 
-	if (mobileScreenshotUrl) {
-		screenshotPatch.screenshot_mobile_url = mobileScreenshotUrl;
-	} else {
-		screenshotPatch.screenshot_mobile_url = null;
-	}
+	screenshotPatch.screenshot_mobile_url = mobileScreenshotUrl ?? null;
+	screenshotPatch.screenshot_mobile_slice_urls = mobileSliceUrls;
+	screenshotPatch.screenshot_responsive_slices = responsiveSlicesPayload;
 
 	await updateScanPage(scanId, result.url, {
 		...screenshotPatch,
 		raw_html: result.rawHtml ?? null,
 		axe_violations: result.axe ?? null,
-		playwright_data: buildPlaywrightPayload(
-			resultWithUploadWarnings,
-			responsivePayload,
-		),
+		playwright_data: buildPlaywrightPayload(resultWithUploadWarnings),
 	});
 }
+
+// ─── Scan orchestration ────────────────────────────────────────────────────
 
 async function finalizeScan(
 	scanId: string,
@@ -406,6 +474,8 @@ async function processScanResults(
 		await Promise.all(chunk.map((result) => processScanResult(scanId, result)));
 	}
 }
+
+// ─── Route handler ─────────────────────────────────────────────────────────
 
 export const runScan = asyncHandler(async (req, res: Response) => {
 	const { scanId, urls } = validateScanRequest(req.body);

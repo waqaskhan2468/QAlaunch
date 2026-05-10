@@ -17,6 +17,7 @@ const FREE_PREVIEW_ISSUE_COUNT = 3;
 const DEFAULT_SCREENSHOT_SIGNED_URL_TTL_SEC = 3600;
 const MIN_SCREENSHOT_SIGNED_URL_TTL_SEC = 60;
 const MAX_SCREENSHOT_SIGNED_URL_TTL_SEC = 86400;
+const DEFAULT_MAX_CLAUDE_MOBILE_SLICES = 3;
 
 type ScanPageRow = {
 	id: string;
@@ -27,6 +28,8 @@ type ScanPageRow = {
 	axe_violations: unknown;
 	screenshot_desktop_url: string | null;
 	screenshot_mobile_url: string | null;
+	screenshot_mobile_slice_urls: string[] | null;
+	screenshot_responsive_slices: unknown;
 };
 
 type SupabaseStorageObjectRef = {
@@ -119,28 +122,55 @@ async function createSignedScreenshotUrl(
 	return data.signedUrl;
 }
 
-function getResponsiveScreenshotUrls(playwrightData: unknown): string[] {
-	const pd = playwrightData as Record<string, unknown> | null;
-	const responsive = pd?.responsive;
+function getMaxClaudeMobileSlices(): number {
+	const raw = Number.parseInt(
+		process.env.MAX_CLAUDE_MOBILE_SLICES ?? `${DEFAULT_MAX_CLAUDE_MOBILE_SLICES}`,
+		10,
+	);
+	if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_MAX_CLAUDE_MOBILE_SLICES;
+	return Math.min(6, raw);
+}
 
-	if (!Array.isArray(responsive)) {
-		return [];
-	}
+function getIphone14SliceUrlsFromResponsiveSlices(
+	responsiveSlices: unknown,
+): string[] {
+	if (!Array.isArray(responsiveSlices)) return [];
 
-	const seen = new Set<string>();
+	const iPhone14 = responsiveSlices.find((entry) => {
+		if (!isRecord(entry)) return false;
+		return entry.viewport === 'iPhone 14';
+	});
+	if (!isRecord(iPhone14) || !Array.isArray(iPhone14.slice_urls)) return [];
 
-	return responsive
-		.map((item) => {
-			if (!item || typeof item !== 'object') return null;
-			const row = item as Record<string, unknown>;
-			const screenshotUrl = row.screenshot_url;
-			if (typeof screenshotUrl !== 'string' || screenshotUrl.length === 0)
-				return null;
-			if (seen.has(screenshotUrl)) return null;
-			seen.add(screenshotUrl);
-			return screenshotUrl;
-		})
-		.filter((url): url is string => Boolean(url));
+	return iPhone14.slice_urls.filter(
+		(url): url is string => typeof url === 'string' && url.length > 0,
+	);
+}
+
+function getMobileImageUrlsForClaude(page: ScanPageRow): string[] {
+	const fromDirectColumn = Array.isArray(page.screenshot_mobile_slice_urls) ?
+		page.screenshot_mobile_slice_urls.filter(
+			(url): url is string => typeof url === 'string' && url.length > 0,
+		)
+	: [];
+
+	const fromResponsiveSlices =
+		fromDirectColumn.length > 0 ?
+			[]
+		:	getIphone14SliceUrlsFromResponsiveSlices(page.screenshot_responsive_slices);
+
+	const fromSingleMobile =
+		fromDirectColumn.length === 0 &&
+		fromResponsiveSlices.length === 0 &&
+		typeof page.screenshot_mobile_url === 'string' &&
+		page.screenshot_mobile_url.length > 0 ?
+			[page.screenshot_mobile_url]
+		:	[];
+
+	const merged = [...fromDirectColumn, ...fromResponsiveSlices, ...fromSingleMobile];
+	const deduped = Array.from(new Set(merged));
+
+	return deduped.slice(0, getMaxClaudeMobileSlices());
 }
 
 function orderPages(
@@ -349,7 +379,7 @@ export async function runAiAnalysisForScan(
 	const { data: pages, error: pagesError } = await supabase
 		.from('scan_pages')
 		.select(
-			'id, page_url, page_role, page_speed_data, playwright_data, axe_violations, screenshot_desktop_url, screenshot_mobile_url',
+			'id, page_url, page_role, page_speed_data, playwright_data, axe_violations, screenshot_desktop_url, screenshot_mobile_url, screenshot_mobile_slice_urls, screenshot_responsive_slices',
 		)
 		.eq('scan_id', scanId);
 
@@ -365,9 +395,9 @@ export async function runAiAnalysisForScan(
 
 	for (const page of ordered) {
 		const desktop = page.screenshot_desktop_url;
-		const mobile = page.screenshot_mobile_url;
+		const mobileUrls = getMobileImageUrlsForClaude(page);
 
-		if (!desktop || !mobile) {
+		if (!desktop || mobileUrls.length === 0) {
 			console.warn('[runAiAnalysisForScan] skip page (missing screenshots)', {
 				scanId,
 				pageUrl: page.page_url,
@@ -378,32 +408,20 @@ export async function runAiAnalysisForScan(
 		attemptedAnalysisCount += 1;
 
 		try {
-			const responsivePublicUrls = getResponsiveScreenshotUrls(
-				page.playwright_data,
-			);
-			const mobileHandledByResponsive = responsivePublicUrls.includes(mobile);
-
 			// Create signed URLs — no download needed, passed directly to Anthropic.
-			const [desktopSignedUrl, mobileSignedUrl, responsiveSignedUrls] =
-				await Promise.all([
-					createSignedScreenshotUrl(supabase, desktop),
-					!mobileHandledByResponsive ?
-						createSignedScreenshotUrl(supabase, mobile)
-					:	Promise.resolve(null),
-					Promise.all(
-						responsivePublicUrls.map((url) =>
-							createSignedScreenshotUrl(supabase, url),
-						),
-					),
-				]);
+			const [desktopSignedUrl, mobileSignedUrls] = await Promise.all([
+				createSignedScreenshotUrl(supabase, desktop),
+				Promise.all(
+					mobileUrls.map((url) => createSignedScreenshotUrl(supabase, url)),
+				),
+			]);
 
 			// Confirm resolved image URLs right before the Claude request.
 			console.log('[runAiAnalysisForScan] pre-claude image URLs', {
 				scanId,
 				pageUrl: page.page_url,
 				desktop: maskSignedUrl(desktopSignedUrl),
-				mobile: mobileSignedUrl ? maskSignedUrl(mobileSignedUrl) : null,
-				responsive: responsiveSignedUrls.map(maskSignedUrl),
+				mobile: mobileSignedUrls.map(maskSignedUrl),
 			});
 
 			const prompt = buildAnalysisPrompt({
@@ -417,8 +435,7 @@ export async function runAiAnalysisForScan(
 
 			const raw = await analyzeWithClaude({
 				desktopScreenshotUrl: desktopSignedUrl,
-				mobileScreenshotUrl: mobileSignedUrl ?? undefined,
-				responsiveScreenshotUrls: responsiveSignedUrls,
+				mobileScreenshotUrls: mobileSignedUrls,
 				prompt,
 				scanId,
 				pageUrl: page.page_url,

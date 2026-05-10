@@ -4,6 +4,9 @@ export type PlanCTA = {
   variant: "primary" | "soft" | "outline" | "dark"
 }
 
+/** Self-serve Paddle checkout tier slug (Basic / Standard / Premium). */
+export type CheckoutPackageSlug = "basic" | "standard" | "premium"
+
 export type Plan = {
   tier: string
   price: string
@@ -16,6 +19,7 @@ export type Plan = {
   popular?: boolean
   features: string[]
   cta: PlanCTA
+  checkoutPackage?: CheckoutPackageSlug
 }
 
 /**
@@ -37,9 +41,10 @@ export const plans: Plan[] = [
       "Developer fix instructions",
       "PDF via email + download",
     ],
+    checkoutPackage: "basic",
     cta: {
       label: "Get Basic",
-      href: "/#audit-input",
+      href: "/checkout?package=basic",
       variant: "soft",
     },
   },
@@ -58,9 +63,10 @@ export const plans: Plan[] = [
       "Priority fix ranking",
       "PDF via email + download",
     ],
+    checkoutPackage: "standard",
     cta: {
       label: "Get Standard",
-      href: "/#audit-input",
+      href: "/checkout?package=standard",
       variant: "primary",
     },
   },
@@ -78,9 +84,10 @@ export const plans: Plan[] = [
       "Conversion rate insights",
       "Priority email support",
     ],
+    checkoutPackage: "premium",
     cta: {
       label: "Get Premium",
-      href: "/#audit-input",
+      href: "/checkout?package=premium",
       variant: "soft",
     },
   },
@@ -104,3 +111,13 @@ export const plans: Plan[] = [
     },
   },
 ]
+
+export function planForCheckoutPackage(
+  slug: string,
+): (Plan & { checkoutPackage: CheckoutPackageSlug }) | undefined {
+  const normalized = slug.toLowerCase()
+  return plans.find(
+    (p): p is Plan & { checkoutPackage: CheckoutPackageSlug } =>
+      p.checkoutPackage === normalized,
+  )
+}

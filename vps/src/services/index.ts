@@ -63,6 +63,14 @@ function getMissingScanData(result: ScanResult): string[] {
 	return missing;
 }
 
+function getRetryableMissingData(missingData: string[]): string[] {
+	// Screenshot-only misses should not trigger a full page rescan. The scanner
+	// already has responsive outputs and DB-side warnings for missing image URLs.
+	return missingData.filter(
+		(item) => item !== 'desktop_screenshot' && item !== 'mobile_screenshot',
+	);
+}
+
 function getPageConcurrency(urlCount: number): number {
 	const configured = Number.parseInt(
 		process.env.SCAN_PAGE_CONCURRENCY ?? `${DEFAULT_PAGE_CONCURRENCY}`,
@@ -208,19 +216,28 @@ async function scanSingleUrlWithRetry(
 ): Promise<ScanResult> {
 	let result = await scanSingleUrl(browser, url, scanId);
 	let missingData = getMissingScanData(result);
+	let retryableMissingData = getRetryableMissingData(missingData);
+
+	console.log('[scan] attempt 1 missing:', {
+		url,
+		missingData,
+		retryableMissingData,
+		ok: result.ok,
+	});
 
 	for (
 		let attempt = 2;
-		attempt <= PAGE_SCAN_ATTEMPTS && missingData.length > 0;
+		attempt <= PAGE_SCAN_ATTEMPTS && retryableMissingData.length > 0;
 		attempt += 1
 	) {
 		const retryResult = await scanSingleUrl(browser, url, scanId);
 		retryResult.warnings.unshift(
-			`Retried page scan after incomplete attempt: ${missingData.join(', ')}`,
+			`Retried page scan after incomplete attempt: ${retryableMissingData.join(', ')}`,
 		);
 
 		result = retryResult;
 		missingData = getMissingScanData(result);
+		retryableMissingData = getRetryableMissingData(missingData);
 	}
 
 	if (missingData.length > 0) {
