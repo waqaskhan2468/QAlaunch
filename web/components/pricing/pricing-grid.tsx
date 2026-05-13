@@ -5,7 +5,7 @@ import { Check, Zap, ClipboardList, Star } from "lucide-react"
 import { motion } from "motion/react"
 
 import { cn } from "@/lib/utils"
-import { fadeUp, stagger } from "@/components/motion/primitives"
+import { slideInLeft, stagger } from "@/components/motion/primitives"
 import { plans, type Plan } from "./pricing-plans"
 
 type PricingGridProps = {
@@ -21,10 +21,10 @@ export function PricingGrid({ className }: PricingGridProps) {
   return (
     <motion.div
       className={cn("grid gap-5 sm:grid-cols-2 lg:grid-cols-4", className)}
-      variants={stagger(0.1, 0.1)}
+      variants={stagger(0.1, 0.18)}
       initial="hidden"
       whileInView="visible"
-      viewport={{ once: true, margin: "-80px" }}
+      viewport={{ once: true, amount: 0.15 }}
     >
       {plans.map((plan) => (
         <PlanCard key={plan.tier} plan={plan} />
@@ -38,7 +38,7 @@ function PlanCard({ plan }: { plan: Plan }) {
 
   return (
     <motion.article
-      variants={fadeUp}
+      variants={slideInLeft}
       whileHover={{ y: -8 }}
       transition={{ type: "spring", stiffness: 240, damping: 20 }}
       className={cn(

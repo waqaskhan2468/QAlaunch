@@ -3,9 +3,9 @@
 import { Check, X, Rocket } from "lucide-react"
 import { motion } from "motion/react"
 
+import { Reveal, fadeUpSoft, stagger } from "@/components/motion/primitives"
 import { SectionHeader } from "@/components/site/section-header"
 import { cn } from "@/lib/utils"
-import { fadeUpSoft, stagger } from "@/components/motion/primitives"
 
 type Cell =
   | { kind: "yes" }
@@ -89,16 +89,18 @@ export function Comparison() {
   return (
     <section className="bg-surface-soft px-5 py-20 md:px-12 md:py-24">
       <div className="mx-auto max-w-5xl">
-        <SectionHeader
-          eyebrow="How We Compare"
-          title={
-            <>
-              Why QAlaunch beats every
-              <br className="hidden md:block" /> website checker you&apos;ve tried
-            </>
-          }
-          align="center"
-        />
+        <Reveal variants={fadeUpSoft}>
+          <SectionHeader
+            eyebrow="How We Compare"
+            title={
+              <>
+                Why QAlaunch beats every
+                <br className="hidden md:block" /> website checker you&apos;ve tried
+              </>
+            }
+            align="center"
+          />
+        </Reveal>
 
         <motion.div
           className="mt-12 overflow-hidden rounded-2xl shadow-xl shadow-black/[0.06]"

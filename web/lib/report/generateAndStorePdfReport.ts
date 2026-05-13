@@ -199,7 +199,7 @@ async function uploadPdfToStorage(
  * Creates a time-limited signed download URL for a stored report.
  *
  * Used in two places:
- *  1. QStash workflow step 8 — included in the delivery email.
+ *  1. Inngest run-scan step `send-email` — included in the delivery email.
  *  2. GET /api/scans/[scanId]/report-url — on-demand for the dashboard
  *     "Download Report" button (generates a fresh URL each time so it
  *     never expires from the user's perspective).

@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next"
 import { Epilogue, Figtree, JetBrains_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+
+import { PageTransition } from "@/components/motion/page-transition"
 import "./globals.css"
 
 // Body copy — Figtree is warm, highly readable for marketing prose.
@@ -58,7 +60,7 @@ export default function RootLayout({
       className={`${figtree.variable} ${epilogue.variable} ${jetbrains.variable} bg-background`}
     >
       <body className="font-sans antialiased">
-        {children}
+        <PageTransition>{children}</PageTransition>
         {process.env.NODE_ENV === "production" && <Analytics />}
       </body>
     </html>

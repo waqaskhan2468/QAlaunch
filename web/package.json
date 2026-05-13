@@ -4,6 +4,7 @@
 	"private": true,
 	"scripts": {
 		"dev": "next dev",
+		"dev:inngest": "npx --yes inngest-cli@latest dev --no-discovery -u http://localhost:3000/api/inngest",
 		"build": "next build",
 		"start": "next start",
 		"lint": "eslint",
@@ -16,11 +17,10 @@
 		"@paddle/paddle-node-sdk": "^3.8.0",
 		"@supabase/ssr": "^0.10.2",
 		"@supabase/supabase-js": "^2.103.0",
-		"@upstash/qstash": "^2.10.1",
-		"@upstash/workflow": "^1.2.0",
 		"@vercel/analytics": "1.6.1",
 		"cheerio": "^1.2.0",
 		"clsx": "^2.1.1",
+		"inngest": "^4.4.0",
 		"lucide-react": "^0.564.0",
 		"motion": "^12.38.0",
 		"next": "16.2.3",
@@ -39,8 +39,8 @@
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
 		"eslint": "^9",
-		"postcss": "^8.5",
 		"eslint-config-next": "16.2.3",
+		"postcss": "^8.5",
 		"typescript": "^5",
 		"vitest": "^3.0.9"
 	}

@@ -3,8 +3,8 @@
 import { Star } from "lucide-react"
 import { motion } from "motion/react"
 
+import { Reveal, fanOut, stagger } from "@/components/motion/primitives"
 import { SectionHeader } from "@/components/site/section-header"
-import { fadeUp, stagger } from "@/components/motion/primitives"
 
 const testimonials = [
   {
@@ -37,22 +37,25 @@ export function Testimonials() {
   return (
     <section className="bg-surface-soft px-5 py-20 md:px-12 md:py-24">
       <div className="mx-auto max-w-7xl">
-        <SectionHeader
-          eyebrow="What Customers Say"
-          title="Builders trust QAlaunch"
-          description="From Lovable apps to Shopify stores — QAlaunch finds the issues that were silently hurting real customers."
-        />
+        <Reveal>
+          <SectionHeader
+            eyebrow="What Customers Say"
+            title="Builders trust QAlaunch"
+            description="From Lovable apps to Shopify stores — QAlaunch finds the issues that were silently hurting real customers."
+          />
+        </Reveal>
         <motion.div
           className="mt-12 grid gap-5 md:grid-cols-3"
           variants={stagger(0.1, 0.12)}
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, amount: 0.15 }}
         >
-          {testimonials.map((t) => (
+          {testimonials.map((t, i) => (
             <motion.figure
               key={t.name}
-              variants={fadeUp}
+              custom={{ i, total: testimonials.length }}
+              variants={fanOut}
               whileHover={{ y: -6 }}
               transition={{ type: "spring", stiffness: 260, damping: 20 }}
               tabIndex={0}

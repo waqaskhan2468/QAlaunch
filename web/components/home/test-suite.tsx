@@ -10,9 +10,9 @@ import {
 } from "lucide-react"
 import { motion } from "motion/react"
 
+import { Reveal, popIn, stagger } from "@/components/motion/primitives"
 import { SectionHeader } from "@/components/site/section-header"
 import { cn } from "@/lib/utils"
-import { fadeUp, stagger } from "@/components/motion/primitives"
 
 type Priority = "top" | "core"
 
@@ -84,28 +84,30 @@ export function TestSuite() {
   return (
     <section className="px-5 py-20 md:px-12 md:py-24">
       <div className="mx-auto max-w-7xl">
-        <SectionHeader
-          eyebrow="Complete Test Suite"
-          title={
-            <>
-              Every check your users
-              <br className="hidden md:block" /> actually care about
-            </>
-          }
-          description="We lead with what matters to real humans — not just search engines. Usability and functionality first, SEO last."
-        />
+        <Reveal>
+          <SectionHeader
+            eyebrow="Complete Test Suite"
+            title={
+              <>
+                Every check your users
+                <br className="hidden md:block" /> actually care about
+              </>
+            }
+            description="We lead with what matters to real humans — not just search engines. Usability and functionality first, SEO last."
+          />
+        </Reveal>
         <motion.div
           className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
-          variants={stagger(0.08, 0.08)}
+          variants={stagger(0.08, 0.1)}
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, amount: 0.1 }}
         >
           {tests.map(
             ({ icon: Icon, iconTone, title, description, tags, priority }) => (
               <motion.article
                 key={title}
-                variants={fadeUp}
+                variants={popIn}
                 whileHover={{ y: -6 }}
                 transition={{ type: "spring", stiffness: 260, damping: 20 }}
                 tabIndex={0}

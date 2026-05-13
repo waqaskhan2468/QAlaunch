@@ -3,7 +3,7 @@ import { normalizeUrl, urlHash, isPrivateUrl } from '@/utils/url';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { scanStartSchema } from '@/types/zod';
 import { AppError, asyncHandler } from '@/lib/api/error';
-import { queueScanJob } from '@/lib/api/qstash';
+import { queueScanJob } from '@/lib/api/queue-scan-job';
 
 export const runtime = 'nodejs';
 

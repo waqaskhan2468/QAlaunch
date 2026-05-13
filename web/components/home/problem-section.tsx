@@ -1,10 +1,15 @@
 "use client"
 
+import { useRef } from "react"
 import { Frown, Smartphone, AlertTriangle, Clock } from "lucide-react"
-import { motion } from "motion/react"
+import { motion, useScroll, useTransform } from "motion/react"
 
+import {
+  Reveal,
+  slideAlternate,
+  stagger,
+} from "@/components/motion/primitives"
 import { SectionHeader } from "@/components/site/section-header"
-import { fadeUp, stagger } from "@/components/motion/primitives"
 
 const problems = [
   {
@@ -42,31 +47,57 @@ const problems = [
  * lift/tilt on hover for a tactile, modern feel.
  */
 export function ProblemSection() {
+  const sectionRef = useRef<HTMLElement>(null)
+  // Scroll-linked parallax — backdrop blobs drift as the section moves
+  // through the viewport, giving the section depth beyond the trigger fades.
+  const { scrollYProgress } = useScroll({
+    target: sectionRef,
+    offset: ["start end", "end start"],
+  })
+  const blobYLeft = useTransform(scrollYProgress, [0, 1], ["-10%", "30%"])
+  const blobYRight = useTransform(scrollYProgress, [0, 1], ["20%", "-15%"])
+
   return (
-    <section className="bg-surface-soft px-5 py-20 md:px-12 md:py-24">
-      <div className="mx-auto max-w-7xl">
-        <SectionHeader
-          eyebrow="The Real Problem"
-          title={
-            <>
-              Your website is silently
-              <br className="hidden md:block" /> losing customers every day
-            </>
-          }
-          description="Broken buttons, confusing layouts, and slow mobile pages don't announce themselves. Your customers just leave — and never tell you why."
-        />
+    <section
+      ref={sectionRef}
+      className="relative overflow-hidden bg-surface-soft px-5 py-20 md:px-12 md:py-24"
+    >
+      <motion.div
+        aria-hidden="true"
+        style={{ y: blobYLeft }}
+        className="pointer-events-none absolute -left-32 top-20 size-72 rounded-full bg-[radial-gradient(circle,rgba(239,68,68,0.10)_0%,transparent_70%)] blur-2xl"
+      />
+      <motion.div
+        aria-hidden="true"
+        style={{ y: blobYRight }}
+        className="pointer-events-none absolute -right-32 bottom-10 size-80 rounded-full bg-[radial-gradient(circle,rgba(249,115,22,0.10)_0%,transparent_70%)] blur-2xl"
+      />
+      <div className="relative mx-auto max-w-7xl">
+        <Reveal>
+          <SectionHeader
+            eyebrow="The Real Problem"
+            title={
+              <>
+                Your website is silently
+                <br className="hidden md:block" /> losing customers every day
+              </>
+            }
+            description="Broken buttons, confusing layouts, and slow mobile pages don't announce themselves. Your customers just leave — and never tell you why."
+          />
+        </Reveal>
 
         <motion.div
           className="mt-12 grid gap-5 md:grid-cols-2"
-          variants={stagger(0.1, 0.12)}
+          variants={stagger(0.15, 0.18)}
           initial="hidden"
           whileInView="visible"
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, amount: 0.15 }}
         >
-          {problems.map(({ icon: Icon, title, description, stat }) => (
+          {problems.map(({ icon: Icon, title, description, stat }, i) => (
             <motion.article
               key={title}
-              variants={fadeUp}
+              custom={i}
+              variants={slideAlternate}
               whileHover={{ y: -6 }}
               transition={{ type: "spring", stiffness: 260, damping: 20 }}
               tabIndex={0}

@@ -2,17 +2,17 @@
 
 This document explains the scan API in simple English.
 
-The scan starts in the Next.js app, is queued with QStash, then is processed by the VPS scanner. Data is saved in Supabase.
+The scan starts in the Next.js app, is queued with **Inngest**, then the **run-scan** function processes it (including calling the VPS scanner). Data is saved in Supabase.
 
 ## Scan Flow
 
 1. The browser calls `POST /api/scan/start`.
 2. The start route creates a `scans` row in Supabase.
-3. The start route sends a job to QStash.
-4. QStash calls `POST /api/scan/process`.
-5. The process route chooses the pages to test.
-6. The process route runs PageSpeed Insights for each selected page.
-7. The process route calls the VPS scanner.
+3. The start route sends an Inngest event (`scan/process.requested`).
+4. Inngest invokes your app at `GET` / `POST` / `PUT` `/api/inngest` and runs the **run-scan** function.
+5. The function chooses the pages to test.
+6. The function runs PageSpeed Insights for each selected page.
+7. The function calls the VPS scanner.
 8. The VPS scanner runs Playwright and saves the final page data.
 
 ## Start A Scan
@@ -41,7 +41,7 @@ What this route does:
 - Blocks private and local URLs.
 - Creates one row in the `scans` table.
 - Sets the scan status to `pending`.
-- Sends a QStash job to `/api/scan/process`.
+- Sends an Inngest event so the **run-scan** function executes (see Inngest section below).
 
 Response (`201 Created` on success):
 
@@ -57,7 +57,7 @@ Response (`201 Created` on success):
 Why the response is `pending`:
 
 - `POST /api/scan/start` only creates the scan row and queues work.
-- The long work runs asynchronously through QStash and the VPS scanner.
+- The long work runs asynchronously through Inngest and the VPS scanner.
 - Use `scanId` with the status endpoint to read final `done` or `failed` state.
 
 Free package rule:
@@ -68,19 +68,16 @@ Free package rule:
 Paid package rule:
 
 - Paid scans start with `payment_status = pending`.
-- After Paddle confirms payment, the webhook can queue the scan again with QStash.
+- After Paddle confirms payment, the webhook queues the scan again via Inngest.
 
-## QStash Job
+## Inngest (background scan)
 
-The app uses QStash so the scan does not depend on one long browser request.
+The app uses [Inngest](https://www.inngest.com/) so the scan does not depend on one long browser request.
 
-The queued job calls:
+The **run-scan** function is triggered by the event:
 
-```http
-POST /api/scan/process
-```
-
-QStash sends this body:
+- **Name:** `scan/process.requested`
+- **Data:** same shape as before (JSON):
 
 ```json
 {
@@ -91,27 +88,30 @@ QStash sends this body:
 }
 ```
 
-The process route uses `verifySignatureAppRouter` from `@upstash/qstash/nextjs`. This means normal users should not call `/api/scan/process` directly. QStash must sign the request.
+Inngest calls your deployment at **`/api/inngest`** (signed requests). Do not expose ad-hoc public URLs for the pipeline; enqueue only through `inngest.send` from trusted server routes.
 
-Required QStash environment variables:
+### Dashboard and production URL
 
-- `QSTASH_TOKEN`
-- `QSTASH_CURRENT_SIGNING_KEY`
-- `QSTASH_NEXT_SIGNING_KEY`
-- `NEXT_PUBLIC_APP_URL`
+1. In the [Inngest dashboard](https://app.inngest.com), create an app (or use an existing one) and point **sync / serve** at your deployed Next app.
+2. Set the serve URL to **`{NEXT_PUBLIC_APP_URL}/api/inngest`**. For example, if `NEXT_PUBLIC_APP_URL` is `https://qalaunch.example`, the value is `https://qalaunch.example/api/inngest`.
+3. Add the same env vars on **Vercel** (or your host) as in `.env.local`.
 
-## Process A Scan
+Required Inngest environment variables (see `web/.env.example`):
 
-Endpoint:
+- **`INNGEST_EVENT_KEY`** — required for `inngest.send()` in production (scan start and Paddle webhook).
+- **`INNGEST_SIGNING_KEY`** — so `serve()` can verify requests from Inngest to your app.
 
-```http
-POST /api/scan/process
-Content-Type: application/json
-```
+### Local development
 
-This endpoint is called by QStash.
+1. Run Next: `pnpm dev` (from `web/`).
+2. Run the [Inngest Dev Server](https://www.inngest.com/docs/local-development): `pnpm dev:inngest` (from `web/`). This repo pins sync to **`http://localhost:3000/api/inngest`** with **`--no-discovery`** so the dev server does not probe other ports (for example your VPS on 3001).
+3. Set **`INNGEST_DEV`** as documented there so events and runs target your machine instead of only production cloud.
 
-What this route does:
+## Process a scan (Inngest function)
+
+There is no public `POST /api/scan/process` route anymore. Processing happens inside the **run-scan** Inngest function (durable `step.run` stages).
+
+What that function does:
 
 - Marks the scan as `crawling`.
 - Fetches the homepage HTML.
@@ -126,7 +126,7 @@ If no public pages are found, the route returns `422`.
 
 ## Website Type Detection
 
-The process route fetches the homepage HTML and passes it to `detectWebsiteType`.
+The run-scan function fetches the homepage HTML and passes it to `detectWebsiteType`.
 The detector parses the HTML with Cheerio and normalizes:
 
 - Full HTML.
@@ -181,11 +181,11 @@ The first matching type is saved in `scans.website_type`.
 
 The same detector also checks whether the site appears to have authentication. It looks for auth subdomains, auth paths, password fields, login or signup links/forms, auth-related text, dashboard/workspace signals, and auth-related meta tags.
 
-For now, auth detection only sets `requiresAuth` and logs the auth note, banner, and contact URL in the process route. It does not stop or change the public page scan. If this needs to be stored later, add a database column for the auth detection result and save it with the scan metadata.
+For now, auth detection only sets `requiresAuth` and logs the auth note, banner, and contact URL during the run-scan pipeline. It does not stop or change the public page scan. If this needs to be stored later, add a database column for the auth detection result and save it with the scan metadata.
 
 ## Page Selection
 
-The process route finds links from the homepage.
+The run-scan function finds links from the homepage.
 
 It keeps only useful public pages:
 
@@ -240,7 +240,7 @@ Example selected pages for a premium SaaS scan:
 
 ## PageSpeed Insights
 
-After pages are selected, the process route runs PageSpeed Insights for each page.
+After pages are selected, the run-scan function runs PageSpeed Insights for each page.
 
 For each page, it runs:
 
@@ -276,7 +276,7 @@ Required PageSpeed environment variable:
 
 ## VPS Scanner
 
-After PageSpeed data is saved, the process route calls the VPS scanner.
+After PageSpeed data is saved, the run-scan function calls the VPS scanner.
 
 Endpoint:
 
@@ -381,16 +381,16 @@ This is why the API immediately returns:
 }
 ```
 
-### 2) `POST /api/scan/process` updates the same `scans` row
+### 2) Inngest **run-scan** updates the same `scans` row
 
-The process route sets/updates:
+The function sets/updates:
 
 - `status = crawling`
 - `website_type` (example: `saas`)
 - `pages_to_test` (selected public URLs)
 - `error_message = null` while processing
 
-### 3) Process route prepares child rows in `scan_pages`
+### 3) **run-scan** prepares child rows in `scan_pages`
 
 - One row per selected page is upserted (`scan_id + page_url`).
 - `page_role` is saved at this step (`homepage`, `pricing`, `docs`, etc.).

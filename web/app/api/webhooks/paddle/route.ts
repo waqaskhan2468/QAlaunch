@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyAndParsePaddleWebhook } from "@/lib/api/paddle";
 import { getServiceSupabase } from "@/lib/db/supabase";
-import { queueScanJob } from "@/lib/api/qstash";
+import { queueScanJob } from "@/lib/api/queue-scan-job";
 import { scanPackageSchema } from "@/types/zod";
 
 export const runtime = "nodejs";
