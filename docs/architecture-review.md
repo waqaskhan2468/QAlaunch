@@ -10,11 +10,10 @@ A two-service monorepo:
 
 | Service | Purpose |
 |---------|---------|
-| `web/` | Next.js marketing site + scan pipeline (Inngest) on Vercel |
-| `vps/` | Express + Playwright scanner running in Docker |
+| `web/` | Next.js app + Inngest scan pipeline + Browserbase scanner on Vercel |
 
 **Core flow:**  
-User submits URL → `POST /api/scan/start` → Inngest event → `run-scan` function → VPS runs Playwright + axe-core + Claude → PDF generated → results served at `/result?scanId=...`
+User submits URL → `POST /api/scan/start` → Inngest event → `run-scan` function → Browserbase + Playwright in `web/lib/scan` → Claude → PDF via Browserbase → results at `/result?scanId=...`
 
 ---
 

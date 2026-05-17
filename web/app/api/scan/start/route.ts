@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { normalizeUrl, urlHash, isPrivateUrl } from '@/utils/url';
+import { normalizeUrl, urlHash, isPrivateUrl } from '@/lib/utils/url';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { scanStartSchema } from '@/types/zod';
 import { AppError, asyncHandler } from '@/lib/api/error';

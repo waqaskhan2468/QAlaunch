@@ -1,4 +1,4 @@
-import type { IssueCategory, IssueSeverity } from '@/types/claude';
+import type { IssueCategory, IssueSeverity } from '@/lib/scan/ai/types';
 
 export type ReportIssue = {
 	id: string;
@@ -16,6 +16,8 @@ export type ReportIssue = {
 export type ReportScanPage = {
 	page_url: string;
 	page_speed_data: unknown;
+	/** VPS scan payload (broken states, rollup, …) */
+	playwright_data?: unknown;
 };
 
 export type ReportScan = {

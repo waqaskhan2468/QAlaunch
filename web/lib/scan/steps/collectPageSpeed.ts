@@ -1,5 +1,5 @@
 import { getServiceSupabase } from '@/lib/db/supabase';
-import { collectPageSpeedForPages } from '@/utils/savePageSpeedForPage';
+import { collectPageSpeedForPages } from '@/lib/utils/savePageSpeedForPage';
 
 export async function collectPageSpeedStep(
 	scanId: string,

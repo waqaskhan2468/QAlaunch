@@ -274,35 +274,24 @@ Required PageSpeed environment variable:
 
 - `GOOGLE_PAGESPEED_API_KEY`
 
-## VPS Scanner
+## Browser scanner (Inngest + Browserbase)
 
-After PageSpeed data is saved, the run-scan function calls the VPS scanner.
+After PageSpeed data is saved, per-page `scan-page` Inngest steps run Playwright via `web/lib/scan/runner.ts` (no separate VPS service).
 
-Endpoint:
+Required environment variables:
 
-```http
-POST ${SCAN_SERVICE_URL}/scan
-Authorization: Bearer ${SCAN_API_TOKEN}
-Content-Type: application/json
-```
+- `BROWSERBASE_API_KEY`
+- `BROWSERBASE_PROJECT_ID`
 
-Request body:
+Optional tuning:
 
-```json
-{
-	"scanId": "1423ace4-bb8b-4d33-836d-bc60a5aeb415",
-	"urls": ["https://supabase.com/", "https://supabase.com/pricing"]
-}
-```
+- `SCAN_PAGE_CONCURRENCY`
+- `MAX_CONCURRENT_SCANS`
+- `BROWSERBASE_SESSION_TIMEOUT_SEC`
 
-Required scanner environment variables:
+## Scan work
 
-- `SCAN_SERVICE_URL`
-- `SCAN_API_TOKEN`
-
-## VPS Scan Work
-
-The VPS scanner uses Playwright.
+The scanner connects to Browserbase via Playwright CDP (`playwright-core`).
 
 For each selected page, it collects:
 

@@ -1,7 +1,6 @@
 # dependencies
 node_modules/
 web/node_modules/
-vps/node_modules/
 
 # env files
 .env

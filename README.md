@@ -1,165 +1,81 @@
 # QA Launch
 
-A monorepo system for automated website scanning using:
-
-- **Next.js frontend** for the user interface
-- **Playwright VPS service** for headless browser scanning
+Automated website scanning with Next.js, Inngest, Browserbase, and Claude.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```bash
-qa-launch/
-├── web/                # Next.js frontend (Vercel)
+qalaunch/
+├── web/                # Next.js app (Vercel) + scan pipeline
 │   ├── app/
-│   ├── package.json
-│   └── next.config.js
-│
-├── vps/                # Playwright scanning service (VPS/Docker)
-│   ├── src/
-│   ├── package.json
-│   └── Dockerfile
-│
-├── .gitignore
+│   ├── lib/scan/       # Playwright collectors + AI (Browserbase)
+│   └── package.json
 └── README.md
 ```
 
 ---
 
-## System Overview
+## How it works
 
-### Flow
+1. User submits a URL from the Next.js app.
+2. Inngest runs the `run-scan` pipeline (`web/lib/inngest/functions/run-scan.ts`).
+3. **Browserbase** hosts headless Chromium; `web/lib/scan/` collects axe, screenshots, links, SEO, etc.
+4. Results are stored in Supabase; Claude analyzes pages; paid plans get a PDF report.
 
-1. User submits a URL from the **Next.js app**
-2. Backend sends a scan request to the **VPS Playwright service**
-3. Playwright:
-   - Opens the target website
-   - Runs scan checks
-   - Collects results
-   - Returns a structured JSON report
-4. Frontend displays the results
+Local dev: run **Next** and the **Inngest dev server** (see `web/.env.example`). No separate VPS service.
 
 ---
 
-## Tech Stack
+## Tech stack (`web/`)
 
-### `web/`
-- Next.js
-- Tailwind CSS
-- API routes / Server Actions
-
-### `vps/`
-- Node.js
-- Playwright
-- Docker
-- Optional queue worker
+- Next.js, Tailwind, Supabase
+- Inngest (background jobs)
+- Browserbase + `playwright-core` + `@axe-core/playwright`
+- Anthropic Claude, Google PageSpeed, Resend, Paddle
 
 ---
 
-## Installation
+## Setup
 
-### 1) Clone the repository
+### 1) Clone and install
 
 ```bash
 git clone https://github.com/yourname/QALaunch.git
-cd QALaunch
+cd QALaunch/web
+pnpm install
+cp .env.example .env.local
+# Fill in Supabase, Browserbase, Inngest, Claude, etc.
 ```
 
-### 2) Install and run the frontend
+### 2) Run locally
+
+Terminal A:
 
 ```bash
-cd web
-npm install
-npm run dev
+pnpm dev
 ```
 
-The app will run at:
+Terminal B:
 
 ```bash
-http://localhost:3000
+pnpm dev:inngest
 ```
 
-### 3) Install and run the VPS service
-
-```bash
-cd ../vps
-npm install
-npm run dev
-```
-
-Or run with Docker:
-
-```bash
-docker build -t qa-playwright .
-docker run -p 3000:3000 qa-playwright
-```
+App: http://localhost:3000
 
 ---
 
-## Deployment
+## Deployment (Vercel)
 
-### Frontend on Vercel
-
-Set the **root directory** to:
-
-```bash
-web/
-```
-
-Deploy the frontend normally on Vercel.
-
-### VPS on your server
-
-```bash
-git clone https://github.com/yourname/QALaunch.git
-cd QALaunch/vps
-
-docker build -t qa-playwright .
-docker run -d -p 3000:3000 qa-playwright
-```
-
----
-
-## API Communication
-
-Example request from the frontend to the VPS service:
-
-```ts
-await fetch("http://your-vps-ip:3000/scan", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: "Bearer YOUR_SECRET_TOKEN",
-  },
-  body: JSON.stringify({
-    url: "https://example.com",
-  }),
-});
-```
+- Root directory: `web/`
+- Env vars: see `web/.env.example` (required: `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, Inngest keys, Supabase, Claude)
+- Inngest serve URL: `{NEXT_PUBLIC_APP_URL}/api/inngest`
 
 ---
 
 ## Security
 
-- Use an API token between Vercel and VPS
-- Do not expose the Playwright service without authentication
-- Store secrets in `.env`
-
-Example:
-
-```bash
-SCAN_API_SECRET=supersecretkey
-```
-
----
-
-## Important Rules
-
-- Do **not** deploy Playwright on Vercel
-- Do **not** mix `node_modules` between `web/` and `vps/`
-- Do **not** commit `.env`
-- Keep `web/` and `vps/` independent
-- Communicate between them only through API calls
-
----
+- Keep `BROWSERBASE_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` server-only (never `NEXT_PUBLIC_*`)
+- Do not commit `.env` / `.env.local`

@@ -1,10 +1,10 @@
 import { NonRetriableError } from 'inngest';
 import { fetchHomepageHtml } from '@/lib/api/fetchHomePageHtml';
-import { detectWebsiteType } from '@/utils/detect';
+import { detectWebsiteType } from '@/lib/utils/detect';
 import {
 	selectPagesToTestWithRoles,
 	type SelectedScanPage,
-} from '@/utils/page-selection';
+} from '@/lib/utils/page-selection';
 import type { ScanPackage } from '@/types/zod';
 import type { DetectAndSelectResult } from './types';
 

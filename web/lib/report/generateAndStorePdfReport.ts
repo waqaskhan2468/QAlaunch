@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { generatePdfFromHtml } from '@/lib/scan/pdf';
 import { renderReportHtml } from './renderReportHtml';
 import type { ReportIssue, ReportScan, ReportScanPage } from './report.types';
 import type { getServiceSupabase } from '@/lib/db/supabase';
@@ -10,8 +11,6 @@ type ServiceSupabase = ReturnType<typeof getServiceSupabase>;
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const REPORT_BUCKET = process.env.SUPABASE_REPORT_BUCKET!;
-const SCAN_SERVICE_URL = process.env.SCAN_SERVICE_URL!;
-const SCAN_API_TOKEN = process.env.SCAN_API_TOKEN!;
 
 /**
  * How long a signed download URL stays valid.
@@ -84,7 +83,7 @@ async function fetchReportData(
 			.single(),
 		supabase
 			.from('scan_pages')
-			.select('page_url, page_speed_data')
+			.select('page_url, page_speed_data, playwright_data')
 			.eq('scan_id', scanId),
 		supabase
 			.from('issues')
@@ -144,31 +143,12 @@ async function fetchReportData(
 
 // ─── PDF generation ───────────────────────────────────────────────────────────
 
-async function requestPdfFromVps(
-	scanId: string,
-	html: string,
-): Promise<Buffer> {
-	if (!SCAN_SERVICE_URL || !SCAN_API_TOKEN) {
-		throw new Error('SCAN_SERVICE_URL or SCAN_API_TOKEN is not configured.');
+async function requestPdfFromBrowser(html: string): Promise<Buffer> {
+	if (!process.env.BROWSERBASE_API_KEY?.trim()) {
+		throw new Error('BROWSERBASE_API_KEY is not configured.');
 	}
 
-	const response = await fetch(`${SCAN_SERVICE_URL}/report/pdf`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${SCAN_API_TOKEN}`,
-		},
-		body: JSON.stringify({ scanId, html }),
-	});
-
-	if (!response.ok) {
-		const text = await response.text().catch(() => '');
-		throw new Error(
-			`PDF service failed ${response.status}${text ? `: ${text}` : ''}`,
-		);
-	}
-
-	return Buffer.from(await response.arrayBuffer());
+	return generatePdfFromHtml(html);
 }
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
@@ -288,7 +268,7 @@ export async function generateAndStorePdfReport(
 		const { scan, pages, issues } = await fetchReportData(supabase, scanId);
 
 		const html = renderReportHtml({ scan, pages, issues });
-		const pdfBuffer = await requestPdfFromVps(scanId, html);
+		const pdfBuffer = await requestPdfFromBrowser(html);
 		const pdfStoragePath = await uploadPdfToStorage(
 			supabase,
 			scanId,

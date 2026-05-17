@@ -1,7 +1,7 @@
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { AppError } from '@/lib/api/error';
-import type { DetectionResult } from '@/utils/detect';
-import type { SelectedScanPage } from '@/utils/page-selection';
+import type { DetectionResult } from '@/lib/utils/detect';
+import type { SelectedScanPage } from '@/lib/utils/page-selection';
 
 export async function persistScanMetadataStep(input: {
 	scanId: string;

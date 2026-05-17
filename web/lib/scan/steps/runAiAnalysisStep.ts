@@ -1,6 +1,6 @@
 import { NonRetriableError } from 'inngest';
 import { getServiceSupabase } from '@/lib/db/supabase';
-import { runAiAnalysisForScan } from '@/lib/claude-scan/runAiAnalysisForScan';
+import { runAiAnalysisForScan } from '@/lib/scan/ai';
 import type { ScanPackage } from '@/types/zod';
 import type { ScanRowAfterReload } from './types';
 

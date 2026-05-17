@@ -1,4 +1,4 @@
-import type { PageSpeedStrategy, PageSpeedScores, PageSpeedResult, PsiResponse } from '@/types/api/pagespeed';
+import type { PageSpeedStrategy, PageSpeedScores, PageSpeedResult, PsiResponse } from '@/lib/api/pagespeed.types';
 
 const PSI_ENDPOINT =
 	'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';

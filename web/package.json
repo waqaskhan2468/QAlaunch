@@ -13,6 +13,7 @@
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.88.0",
 		"@axe-core/playwright": "^4.11.2",
+		"@browserbasehq/sdk": "^2.6.0",
 		"@paddle/paddle-js": "^1.6.2",
 		"@paddle/paddle-node-sdk": "^3.8.0",
 		"@supabase/ssr": "^0.10.2",
@@ -24,7 +25,8 @@
 		"lucide-react": "^0.564.0",
 		"motion": "^12.38.0",
 		"next": "16.2.3",
-		"puppeteer": "^24.41.0",
+		"playwright-core": "^1.59.1",
+		"sharp": "^0.34.5",
 		"react": "19.2.4",
 		"react-dom": "19.2.4",
 		"resend": "^6.10.0",

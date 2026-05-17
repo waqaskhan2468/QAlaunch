@@ -1,22 +1,35 @@
 import { inngest } from '@/lib/inngest/client';
 import { SCAN_PROCESS_REQUESTED } from '@/lib/inngest/events';
-import { callScannerStep } from '@/lib/scan/steps/callScanner';
+import { stepIdFromPageUrl } from '@/lib/inngest/step-id';
+import { analyzePageStep } from '@/lib/scan/steps/analyzePage';
+import { clearAiAnalysisStep } from '@/lib/scan/steps/clearAiAnalysis';
 import { collectPageSpeedStep } from '@/lib/scan/steps/collectPageSpeed';
 import { detectAndSelectPagesStep } from '@/lib/scan/steps/detectAndSelectPages';
+import { finalizeScannerStep } from '@/lib/scan/steps/finalizeScanner';
 import { generatePdfStep } from '@/lib/scan/steps/generatePdf';
 import { markCrawlingStep } from '@/lib/scan/steps/markCrawling';
 import { markScanDoneStep } from '@/lib/scan/steps/markScanDone';
+import { persistAiIssuesStep } from '@/lib/scan/steps/persistAiIssues';
 import { persistScanMetadataStep } from '@/lib/scan/steps/persistScanMetadata';
+import { prepareScannerStep } from '@/lib/scan/steps/prepareScanner';
 import { reloadScanStep } from '@/lib/scan/steps/reloadScan';
-import { runAiAnalysisStep } from '@/lib/scan/steps/runAiAnalysisStep';
+import { scanPageStep } from '@/lib/scan/steps/scanPage';
 import { sendReportEmailStep } from '@/lib/scan/steps/sendReportEmail';
-import type { ProcessPayload } from '@/types/api/process';
+import type { ProcessPayload } from '@/lib/inngest/process.types';
+
+function getScanConcurrencyLimit(): number {
+	const raw = Number.parseInt(process.env.INNGEST_SCAN_CONCURRENCY ?? '', 10);
+	return Number.isFinite(raw) && raw > 0 ? raw : 5;
+}
 
 export const runScan = inngest.createFunction(
 	{
 		id: 'run-scan',
 		name: 'Run scan pipeline',
 		retries: 2,
+		concurrency: {
+			limit: getScanConcurrencyLimit(),
+		},
 		triggers: [{ event: SCAN_PROCESS_REQUESTED }],
 	},
 	async ({ event, step }) => {
@@ -38,23 +51,46 @@ export const runScan = inngest.createFunction(
 			}),
 		);
 
-		await Promise.all([
-			step.run('collect-pagespeed', () =>
-				collectPageSpeedStep(scanId, pagesToTest),
-			),
-			step.run('call-scanner', () =>
-				callScannerStep({ scanId, pagesToTest }),
-			),
-		]);
+		await step.run('prepare-scanner', () => prepareScannerStep(scanId));
 
-		const scanAfter = await step.run('reload-scan', () =>
-			reloadScanStep(scanId),
+		await step.run('collect-pagespeed', () =>
+			collectPageSpeedStep(scanId, pagesToTest),
 		);
+
+		await Promise.all(
+			pagesToTest.map((pageUrl) =>
+				step.run(`scan-page:${stepIdFromPageUrl(pageUrl)}`, () =>
+					scanPageStep({ scanId, pageUrl }),
+				),
+			),
+		);
+
+		const scannerStatus = await step.run('finalize-scanner', () =>
+			finalizeScannerStep(scanId),
+		);
+
+		if (scannerStatus === 'failed') return;
+
+		const scanAfter = await step.run('reload-scan', () => reloadScanStep(scanId));
 
 		if (scanAfter?.status === 'failed') return;
 
-		await step.run('ai-analysis', () =>
-			runAiAnalysisStep({ scanId, pkg, scanAfter, pagesToTest }),
+		await step.run('clear-ai-issues', () => clearAiAnalysisStep(scanId));
+
+		await Promise.all(
+			pagesToTest.map((pageUrl) =>
+				step.run(`ai-page:${stepIdFromPageUrl(pageUrl)}`, () =>
+					analyzePageStep({
+						scanId,
+						pageUrl,
+						websiteType: scanAfter?.website_type ?? detection.type ?? null,
+					}),
+				),
+			),
+		);
+
+		await step.run('persist-ai-issues', () =>
+			persistAiIssuesStep({ scanId, pkg, pagesToTest }),
 		);
 
 		const isFree = pkg === 'free';

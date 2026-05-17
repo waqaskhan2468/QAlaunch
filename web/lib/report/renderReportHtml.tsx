@@ -1,4 +1,4 @@
-import type { IssueCategory, IssueSeverity } from '@/types/claude';
+import type { IssueCategory, IssueSeverity } from '@/lib/scan/ai/types';
 import type { ReportIssue, ReportScan, ReportScanPage } from './report.types';
 import {
 	computeHealthScore,
@@ -147,6 +147,150 @@ function escapeHtml(value: string): string {
 		.replaceAll('>', '&gt;')
 		.replaceAll('"', '&quot;')
 		.replaceAll("'", '&#39;');
+}
+
+function isPlaywrightRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+type ProgrammaticFindingRow = {
+	id: string;
+	severity: string;
+	category: string;
+	title: string;
+	summary: string;
+	elements?: Array<{ selectorHint?: string; tag?: string }>;
+};
+
+function collectProgrammaticFindings(
+	pages: ReportScanPage[],
+): Array<{ pageUrl: string; finding: ProgrammaticFindingRow }> {
+	const out: Array<{ pageUrl: string; finding: ProgrammaticFindingRow }> = [];
+	for (const page of pages) {
+		const pd = page.playwright_data;
+		if (!isPlaywrightRecord(pd)) continue;
+		for (const key of ['brokenStates'] as const) {
+			const block = pd[key];
+			if (!isPlaywrightRecord(block)) continue;
+			const list = block.findings;
+			if (!Array.isArray(list)) continue;
+			for (const raw of list) {
+				if (!isPlaywrightRecord(raw)) continue;
+				const title = raw.title;
+				const summary = raw.summary;
+				if (typeof title !== 'string' || typeof summary !== 'string') continue;
+				out.push({
+					pageUrl: page.page_url,
+					finding: {
+						id: typeof raw.id === 'string' ? raw.id : 'unknown',
+						severity: typeof raw.severity === 'string' ? raw.severity : 'info',
+						category:
+							typeof raw.category === 'string' ? raw.category : 'layout',
+						title,
+						summary,
+						elements: Array.isArray(raw.elements) ?
+							(raw.elements as ProgrammaticFindingRow['elements'])
+						:	undefined,
+					},
+				});
+			}
+		}
+	}
+	return out;
+}
+
+function programmaticSeverityStyle(severity: string): {
+	bg: string;
+	color: string;
+	dot: string;
+	label: string;
+} {
+	switch (severity) {
+		case 'critical':
+			return {
+				bg: '#fff1f2',
+				color: '#be123c',
+				dot: '#f43f5e',
+				label: 'Critical',
+			};
+		case 'major':
+			return { bg: '#fff7ed', color: '#c2410c', dot: '#f97316', label: 'Major' };
+		case 'minor':
+			return {
+				bg: '#fefce8',
+				color: '#a16207',
+				dot: '#eab308',
+				label: 'Minor',
+			};
+		default:
+			return { bg: '#f1f5f9', color: '#475569', dot: '#94a3b8', label: 'Info' };
+	}
+}
+
+function programmaticFindingToHtml(
+	pageUrl: string,
+	f: ProgrammaticFindingRow,
+): string {
+	const sev = programmaticSeverityStyle(f.severity);
+	const hint =
+		f.elements?.[0]?.selectorHint || f.elements?.[0]?.tag || '';
+	const meta = hint ?
+		`${escapeHtml(hint)} · ${escapeHtml(f.category)}`
+	:	escapeHtml(f.category);
+	return `
+<div class="issue prog-issue">
+  <div class="issue-header">
+    <div class="sev-badge" style="background:${sev.bg};color:${sev.color};">
+      <span class="sev-dot" style="background:${sev.dot};"></span>
+      ${sev.label}
+    </div>
+    <div class="issue-title">${escapeHtml(f.title)}</div>
+  </div>
+  <div class="issue-url">${escapeHtml(pageUrl)} <span class="url-sep">›</span> <span class="prog-id">${escapeHtml(f.id)}</span></div>
+  <div class="issue-desc">${escapeHtml(f.summary)}</div>
+  <div class="issue-fields">
+    <div class="field-row"><span class="field-key">Rule</span><span class="field-val">${escapeHtml(f.id)}</span></div>
+    <div class="field-row"><span class="field-key">Target</span><span class="field-val">${meta}</span></div>
+  </div>
+</div>`;
+}
+
+function buildProgrammaticScanHtml(pages: ReportScanPage[]): string {
+	const rows = collectProgrammaticFindings(pages);
+	if (rows.length === 0) {
+		return `
+<div class="page">
+  <div class="sec-head">
+    <div class="sec-left">
+      <span class="sec-num">00</span>
+      <span class="sec-icon">◇</span>
+      <span class="sec-title">Automated state checks</span>
+    </div>
+    <span class="sec-pill sec-pill--clean">Clean</span>
+  </div>
+  <div class="issues-body"><p class="empty-state">No automated broken-state findings were recorded for these pages.</p></div>
+</div>`;
+	}
+
+	const inner = rows
+		.map(({ pageUrl, finding }) => programmaticFindingToHtml(pageUrl, finding))
+		.join('');
+
+	return `
+<div class="page">
+  <div class="sec-head">
+    <div class="sec-left">
+      <span class="sec-num">00</span>
+      <span class="sec-icon">◇</span>
+      <span class="sec-title">Automated state checks</span>
+    </div>
+    <span class="sec-pill">${rows.length} finding${rows.length !== 1 ? 's' : ''}</span>
+  </div>
+  <div class="issues-body">
+    <p class="prog-lead">Detected in-browser during the scan (no AI): loading tokens, empty tables, and similar signals. Use with Claude findings for confirmation.</p>
+    ${inner}
+  </div>
+</div>`;
 }
 
 function issueToHtml(issue: ReportIssue): string {
@@ -344,6 +488,8 @@ export function renderReportHtml(input: {
 			:	'';
 		return buildSectionHtml(s, sectionIssues, perfExtra);
 	}).join('');
+
+	const programmaticScanHtml = buildProgrammaticScanHtml(pages);
 
 	// Format date nicely
 	const formattedDate = new Date(generatedAt).toLocaleDateString('en-US', {
@@ -869,6 +1015,21 @@ body {
   font-weight: 700;
 }
 
+.prog-lead {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.prog-id {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-4);
+}
+.prog-issue {
+  margin-bottom: 10px;
+}
+
 @media print {
   .page { page-break-after: always; }
 }
@@ -958,6 +1119,7 @@ body {
 <!-- ═══════════════════════════════════════════════════════════════
      SECTIONS
 ════════════════════════════════════════════════════════════════ -->
+${programmaticScanHtml}
 ${sectionsHtml}
 
 <!-- ═══════════════════════════════════════════════════════════════
