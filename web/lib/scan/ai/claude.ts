@@ -1,11 +1,12 @@
 import {
 	claudeIssuesResponseSchema,
 	legacyClaudeIssuesResponseSchema,
+	normalizeClaudeIssuesPayload,
 	type ClaudeIssue,
 } from './types';
 
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 90_000;
 const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_MAX_TOKENS = 8_000;
 const MAX_RESPONSE_PREVIEW_LENGTH = 500;
@@ -484,13 +485,15 @@ export function parseClaudeIssues(raw: unknown): ClaudeIssue[] {
 		return parsedJson;
 	})();
 
-	const parsed = claudeIssuesResponseSchema.safeParse(payload);
+	const normalized = normalizeClaudeIssuesPayload(payload);
+
+	const parsed = claudeIssuesResponseSchema.safeParse(normalized);
 
 	if (parsed.success) {
 		return parsed.data.issues;
 	}
 
-	const legacy = legacyClaudeIssuesResponseSchema.safeParse(payload);
+	const legacy = legacyClaudeIssuesResponseSchema.safeParse(normalized);
 	if (legacy.success) {
 		return legacy.data.issues.map(
 			(row): ClaudeIssue => ({

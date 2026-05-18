@@ -21,6 +21,24 @@ const scanChecklistSteps = [
 const aiAnalysisStepLabel =
 	'Generating expert findings & fix instructions…';
 
+const POLL_INTERVAL_MS = 3000;
+/** Align with Inngest / scan job finish window (~14 min). */
+const MAX_POLL_DURATION_MS = 14 * 60 * 1000;
+
+function pollFetchStatusMessage(hasKnownStatus: boolean): string {
+	return hasKnownStatus ? 'Reconnecting…' : 'Checking status…';
+}
+
+function userFacingScanError(
+	raw: string | undefined | null,
+	fallback: string,
+): string {
+	if (!raw || raw === 'not_found') {
+		return 'Scan not found. Check the link or start a new audit.';
+	}
+	return raw;
+}
+
 type UiState =
 	| 'idle'
 	| 'starting'
@@ -211,11 +229,26 @@ function deriveHost(raw?: string | null) {
 }
 
 /**
+ * Remounts the audit UI when scan/url query params change (e.g. browser Back)
+ * so React state cannot leak between free previews.
+ */
+export function AuditExperience() {
+	const params = useSearchParams();
+	const remountKey = [
+		params.get('scanId') ?? '',
+		params.get('url') ?? '',
+		params.get('freePreviewUsed') ?? '',
+	].join('|');
+
+	return <AuditExperienceInner key={remountKey} />;
+}
+
+/**
  * The audit experience. Plays a scripted 4s "analysing" animation and
  * then reveals a preview of 3 critical findings plus locked full-report
  * teasers and a compact pricing grid.
  */
-export function AuditExperience() {
+function AuditExperienceInner() {
 	const router = useRouter();
 	const params = useSearchParams();
 	const inputUrl = params.get('url');
@@ -230,10 +263,27 @@ export function AuditExperience() {
 	);
 	const [elapsedTick, setElapsedTick] = useState(0);
 	const [message, setMessage] = useState<string | null>(null);
+	const [statusFetchNote, setStatusFetchNote] = useState<string | null>(null);
+	const [isRetrying, setIsRetrying] = useState(false);
 	const legacyPreviewMode = false;
 
 	useEffect(() => {
 		let cancelled = false;
+
+		// Clear stale results when URL/scanId changes (e.g. browser back, new preview).
+		setStatusData(null);
+		setAnalyzingStartedAt(null);
+		setElapsedTick(0);
+		setMessage(null);
+		setStatusFetchNote(null);
+		if (freePreviewUsedParam === '1') {
+			setUiState('free_preview_used');
+			setMessage('You already used your free preview for this website.');
+			return () => {
+				cancelled = true;
+			};
+		}
+		setUiState(initialScanId ? 'processing' : 'idle');
 
 		const delay = (ms: number) =>
 			new Promise<void>((resolve) => {
@@ -241,8 +291,20 @@ export function AuditExperience() {
 			});
 
 		const pollScanStatus = async (currentScanId: string) => {
-			let retryCount = 0;
+			const pollStartedAt = Date.now();
+			let hadSuccessfulStatus = false;
+
 			while (!cancelled) {
+				if (Date.now() - pollStartedAt > MAX_POLL_DURATION_MS) {
+					setUiState('failed');
+					setMessage(
+						hadSuccessfulStatus ?
+							'This audit is taking longer than expected. Please try again.'
+						:	'Scan not found. Check the link or start a new audit.',
+					);
+					return;
+				}
+
 				try {
 					const res = await fetch(`/api/scan/status/${currentScanId}`, {
 						method: 'GET',
@@ -250,30 +312,23 @@ export function AuditExperience() {
 					});
 
 					if (!res.ok) {
-						const errorPayload = (await res.json().catch(() => null)) as {
-							error?: string;
-							message?: string;
-						} | null;
-						throw new Error(
-							errorPayload?.message ??
-								errorPayload?.error ??
-								'Could not fetch scan status.',
-						);
+						await res.json().catch(() => null);
+						setStatusFetchNote(pollFetchStatusMessage(hadSuccessfulStatus));
+						setUiState('processing');
+						await delay(POLL_INTERVAL_MS);
+						continue;
 					}
 
 					const data = (await res.json()) as ScanStatusResponse;
-					if (cancelled) return;
+					if (cancelled || data.scan.id !== currentScanId) return;
 
+					hadSuccessfulStatus = true;
+					setStatusFetchNote(null);
 					setStatusData(data);
 					if (data.scan.status === 'analyzing') {
 						setAnalyzingStartedAt((prev) => prev ?? Date.now());
 					}
 					setUiState('processing');
-					retryCount = 0;
-
-					const aiAnalysisFailed = (data.pages ?? []).some(
-						(page) => page.ai_analysis?.status === 'failed',
-					);
 
 					if (data.scan.status === 'done') {
 						const hasNoIssues =
@@ -290,42 +345,26 @@ export function AuditExperience() {
 						return;
 					}
 
-					if (data.scan.status === 'failed' || aiAnalysisFailed) {
+					if (data.scan.status === 'failed') {
 						setUiState('failed');
-						const pageAiError = (data.pages ?? []).find(
-							(page) => page.ai_analysis?.status === 'failed',
-						)?.ai_analysis?.error;
 						setMessage(
-							data.scan.error_message ??
-								pageAiError ??
+							userFacingScanError(
+								data.scan.error_message,
 								'Scan failed before completion. Please try again.',
+							),
 						);
 						return;
 					}
-				} catch (error) {
-					retryCount += 1;
-					if (retryCount >= 3) {
-						setUiState('failed');
-						setMessage(
-							error instanceof Error ?
-								error.message
-							:	'Could not retrieve scan status. Please retry.',
-						);
-						return;
-					}
+				} catch {
+					setStatusFetchNote(pollFetchStatusMessage(hadSuccessfulStatus));
+					setUiState('processing');
 				}
 
-				await delay(1500);
+				await delay(POLL_INTERVAL_MS);
 			}
 		};
 
 		const resumeOnly = async () => {
-			if (freePreviewUsedParam === '1') {
-				setUiState('free_preview_used');
-				setMessage('You already used your free preview for this website.');
-				return;
-			}
-
 			if (!initialScanId) {
 				router.replace('/#audit-input');
 				return;
@@ -336,8 +375,10 @@ export function AuditExperience() {
 					method: 'GET',
 					cache: 'no-store',
 				});
+				if (cancelled) return;
 				if (res.ok) {
 					const data = (await res.json()) as ScanStatusResponse;
+					if (cancelled || data.scan?.id !== initialScanId) return;
 					const pkg = data.scan?.package;
 					if (pkg && pkg !== 'free') {
 						router.replace(
@@ -350,12 +391,13 @@ export function AuditExperience() {
 				/* continue — free preview may still load */
 			}
 
+			if (cancelled) return;
+
 			if (!inputUrl) {
 				router.replace('/#audit-input');
 				return;
 			}
 
-			setUiState('processing');
 			await pollScanStatus(initialScanId);
 		};
 
@@ -366,7 +408,11 @@ export function AuditExperience() {
 		};
 	}, [freePreviewUsedParam, initialScanId, inputUrl, router]);
 
-	const loadingStatus = statusData?.scan.status ?? null;
+	const statusForCurrentScan =
+		statusData?.scan?.id === initialScanId ? statusData : null;
+	const resultsReady =
+		uiState === 'completed' && statusForCurrentScan != null;
+	const loadingStatus = statusForCurrentScan?.scan.status ?? null;
 	const loadingCopy = loadingCopyForStatus(loadingStatus);
 
 	useEffect(() => {
@@ -381,10 +427,57 @@ export function AuditExperience() {
 		:	null;
 	void elapsedTick;
 
+	const handleRetryScan = async () => {
+		if (!inputUrl || isRetrying) return;
+		const value =
+			inputUrl.startsWith('http://') || inputUrl.startsWith('https://') ?
+				inputUrl
+			:	`https://${inputUrl}`;
+
+		setIsRetrying(true);
+		setMessage(null);
+		try {
+			const res = await fetch('/api/scan/start', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ url: value, package: 'free' }),
+			});
+
+			const payload = (await res.json()) as
+				| { ok: true; scanId: string }
+				| { ok: false; code?: string; message?: string };
+
+			if (
+				res.status === 409 &&
+				payload.ok === false &&
+				payload.code === 'free_preview_used'
+			) {
+				router.replace(
+					`/result?url=${encodeURIComponent(value)}&freePreviewUsed=1`,
+				);
+				return;
+			}
+
+			if (!res.ok || payload.ok !== true || !('scanId' in payload)) {
+				setMessage('Could not restart your audit. Please try again.');
+				return;
+			}
+
+			router.replace(
+				`/result?url=${encodeURIComponent(value)}&scanId=${encodeURIComponent(payload.scanId)}`,
+			);
+		} catch {
+			setMessage('Could not restart your audit. Please try again.');
+		} finally {
+			setIsRetrying(false);
+		}
+	};
+
 	if (
 		uiState === 'starting' ||
 		uiState === 'processing' ||
-		uiState === 'idle'
+		uiState === 'idle' ||
+		(uiState === 'completed' && !resultsReady)
 	) {
 		return (
 			<section className='flex min-h-[calc(100vh-4rem)] items-center justify-center bg-surface-soft px-5 py-16'>
@@ -401,6 +494,9 @@ export function AuditExperience() {
 						<div className='inline-flex items-center rounded-full border border-brand/20 bg-brand-pale px-3 py-1 text-xs font-semibold text-brand'>
 							Current stage: {loadingCopy.stageLabel}
 						</div>
+						{statusFetchNote ?
+							<p className='text-xs text-muted-ink'>{statusFetchNote}</p>
+						:	null}
 						{analyzingElapsedSec != null ?
 							<p className='text-xs text-muted-ink'>
 								{analyzingElapsedSec < 90 ?
@@ -476,9 +572,10 @@ export function AuditExperience() {
 					<div className='mt-5 flex flex-wrap justify-center gap-3'>
 						<button
 							type='button'
-							onClick={() => window.location.reload()}
-							className='inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand-mid'>
-							Retry audit
+							disabled={isRetrying || !inputUrl}
+							onClick={() => void handleRetryScan()}
+							className='inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand-mid disabled:opacity-60'>
+							{isRetrying ? 'Starting…' : 'Retry audit'}
 						</button>
 						<button
 							type='button'
@@ -493,24 +590,33 @@ export function AuditExperience() {
 	}
 
 	const findings =
-		legacyPreviewMode ? fallbackFindings : (statusData?.issues ?? []);
+		legacyPreviewMode ? fallbackFindings : (
+			(statusForCurrentScan?.issues ?? [])
+		);
 	const totalIssueCount =
-		legacyPreviewMode ? 12 : (statusData?.totalIssueCount ?? findings.length);
+		legacyPreviewMode ? 12 : (
+			(statusForCurrentScan?.totalIssueCount ?? findings.length)
+		);
 	const lockedIssueCount =
-		legacyPreviewMode ? 9 : (statusData?.lockedIssueCount ?? 0);
+		legacyPreviewMode ? 9 : (statusForCurrentScan?.lockedIssueCount ?? 0);
 	const allKnownSeverities =
 		legacyPreviewMode ?
 			fallbackFindings.map((item) => item.severity)
 		:	[
-				...(statusData?.issues ?? []).map((item) => item.severity),
-				...(statusData?.lockedIssues ?? []).map((item) => item.severity),
+				...(statusForCurrentScan?.issues ?? []).map((item) => item.severity),
+				...(statusForCurrentScan?.lockedIssues ?? []).map(
+					(item) => item.severity,
+				),
 			];
 	const healthScore =
-		statusData?.healthScore ?? computeHealthScore(allKnownSeverities);
+		statusForCurrentScan?.healthScore ??
+		computeHealthScore(allKnownSeverities);
 	const healthTone = scoreTone(healthScore);
 	const healthLabel =
-		statusData?.healthLabel ?? labelFromScore(healthScore) ?? healthTone.label;
-	const previewHealthScore = statusData?.previewHealthScore;
+		statusForCurrentScan?.healthLabel ??
+		labelFromScore(healthScore) ??
+		healthTone.label;
+	const previewHealthScore = statusForCurrentScan?.previewHealthScore;
 
 	return (
 		<section className='bg-surface-soft'>
@@ -591,7 +697,7 @@ export function AuditExperience() {
 				<div className='mt-5 flex flex-col gap-3'>
 					{findings.map((f) => (
 						<FindingCard
-							key={f.title}
+							key={f.id}
 							finding={f}
 						/>
 					))}

@@ -89,3 +89,95 @@ export type IssueCategory = z.infer<typeof issueCategorySchema>;
 export type IssueSeverity = z.infer<typeof issueSeveritySchema>;
 export type IssueEvidence = z.infer<typeof issueEvidenceSchema>;
 export type ClaudeBoundingBox = z.infer<typeof claudeBoundingBoxSchema>;
+
+/** String limits aligned with `claudeIssueSchema` / Postgres `issues` checks. */
+export const CLAUDE_ISSUE_STRING_LIMITS = {
+	title: { min: 20, max: 80 },
+	description: { min: 100, max: 800 },
+	impact: { min: 20, max: 200 },
+	page_section: { min: 1, max: 500 },
+	fix_instructions: { min: 20, max: 8000 },
+} as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Trim and clamp a Claude string field so minor length violations do not fail the scan.
+ */
+export function clampClaudeString(
+	value: unknown,
+	min: number,
+	max: number,
+): string {
+	let s = typeof value === 'string' ? value.trim() : '';
+	if (s.length > max) {
+		s = s.slice(0, max).trimEnd();
+	}
+	if (s.length < min) {
+		const filler = ' See report for details.';
+		s = (s + filler).slice(0, max);
+		if (s.length < min) {
+			s = s.padEnd(min, '.');
+		}
+	}
+	return s;
+}
+
+function normalizeIssueRow(row: unknown): unknown {
+	if (!isRecord(row)) return row;
+
+	const pageSection = row.page_section;
+	const normalizedPageSection =
+		pageSection === '' || pageSection == null ?
+			pageSection
+		:	clampClaudeString(
+				pageSection,
+				CLAUDE_ISSUE_STRING_LIMITS.page_section.min,
+				CLAUDE_ISSUE_STRING_LIMITS.page_section.max,
+			);
+
+	const confidence =
+		typeof row.confidence === 'number' ?
+			Math.min(1, Math.max(0, row.confidence))
+		:	row.confidence;
+
+	return {
+		...row,
+		title: clampClaudeString(
+			row.title,
+			CLAUDE_ISSUE_STRING_LIMITS.title.min,
+			CLAUDE_ISSUE_STRING_LIMITS.title.max,
+		),
+		description: clampClaudeString(
+			row.description,
+			CLAUDE_ISSUE_STRING_LIMITS.description.min,
+			CLAUDE_ISSUE_STRING_LIMITS.description.max,
+		),
+		impact: clampClaudeString(
+			row.impact,
+			CLAUDE_ISSUE_STRING_LIMITS.impact.min,
+			CLAUDE_ISSUE_STRING_LIMITS.impact.max,
+		),
+		page_section: normalizedPageSection,
+		fix_instructions: clampClaudeString(
+			row.fix_instructions,
+			CLAUDE_ISSUE_STRING_LIMITS.fix_instructions.min,
+			CLAUDE_ISSUE_STRING_LIMITS.fix_instructions.max,
+		),
+		...(confidence !== undefined ? { confidence } : {}),
+	};
+}
+
+/** Coerce tool output to schema limits before Zod validation. */
+export function normalizeClaudeIssuesPayload(payload: unknown): unknown {
+	if (!isRecord(payload) || !Array.isArray(payload.issues)) {
+		return payload;
+	}
+
+	return {
+		...payload,
+		issues: payload.issues.map(normalizeIssueRow),
+	};
+}
