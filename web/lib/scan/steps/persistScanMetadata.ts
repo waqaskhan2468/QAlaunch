@@ -47,6 +47,13 @@ export async function persistScanMetadataStep(input: {
 	);
 
 	if (upsertPagesError) {
+		console.error('[persist-metadata] scan_pages upsert error', {
+			scanId,
+			code: upsertPagesError.code,
+			message: upsertPagesError.message,
+			details: upsertPagesError.details,
+			hint: upsertPagesError.hint,
+		});
 		throw new AppError(
 			500,
 			'scan_pages_prepare_failed',

@@ -30,6 +30,9 @@ export const runScan = inngest.createFunction(
 		concurrency: {
 			limit: getScanConcurrencyLimit(),
 		},
+		timeouts: {
+			finish: '14m',
+		},
 		triggers: [{ event: SCAN_PROCESS_REQUESTED }],
 	},
 	async ({ event, step }) => {

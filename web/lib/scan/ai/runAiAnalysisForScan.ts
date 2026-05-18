@@ -8,10 +8,15 @@ import {
 	formatErrorWithCause,
 	updateScanPageAiAnalysis,
 } from '@/lib/db/supabase-retry';
+import { failScan, toUserFacingScanError } from '@/lib/scan/fail-scan';
+import { withRetry } from '@/lib/scan/services/retry';
 import type { ClaudeIssue } from './types';
 import type { ScanPackage } from '@/types/zod';
 
 type ServiceSupabase = ReturnType<typeof getServiceSupabase>;
+
+const CLAUDE_PROMPT_MAX_BROKEN_LINKS = 15;
+const CLAUDE_PROMPT_MAX_EXTERNAL_LINKS = 15;
 
 const SEVERITY_RANK: Record<string, number> = {
 	critical: 0,
@@ -274,14 +279,20 @@ function buildAnalysisPromptAfterImages(input: {
 	const brokenStates = pd?.brokenStates ?? null;
 	const programmaticRollup = pd?.programmaticRollup ?? null;
 	const responseSecurity = pd?.responseSecurity ?? null;
-	const externalLinksSameTab = allLinks.filter((link) => {
-		if (!isRecord(link)) return false;
-		return link.isExternal === true && link.target !== '_blank';
-	});
+	const externalLinksSameTab = allLinks
+		.filter((link) => {
+			if (!isRecord(link)) return false;
+			return link.isExternal === true && link.target !== '_blank';
+		})
+		.slice(0, CLAUDE_PROMPT_MAX_EXTERNAL_LINKS);
+
+	const brokenLinksForPrompt = Array.isArray(brokenLinks) ?
+		(brokenLinks as unknown[]).slice(0, CLAUDE_PROMPT_MAX_BROKEN_LINKS)
+	:	[];
 
 	const scanData = {
 		consoleMessages: pd?.consoleMessages ?? [],
-		brokenLinks: brokenLinks ?? [],
+		brokenLinks: brokenLinksForPrompt,
 		externalLinksSameTab,
 		forms:
 			(pd?.interactive as Record<string, unknown> | undefined)?.forms ?? null,
@@ -483,8 +494,14 @@ export async function analyzeScanPageWithClaude(
 
 	try {
 		const [desktopSignedUrl, mobileSignedUrl] = await Promise.all([
-			createSignedScreenshotUrl(supabase, desktop),
-			createSignedScreenshotUrl(supabase, mobileUrl),
+			withRetry(() => createSignedScreenshotUrl(supabase, desktop), {
+				attempts: 3,
+				delayMs: 1_000,
+			}),
+			withRetry(() => createSignedScreenshotUrl(supabase, mobileUrl), {
+				attempts: 3,
+				delayMs: 1_000,
+			}),
 		]);
 
 		console.log('[runAiAnalysisForScan] pre-claude image URLs', {
@@ -546,6 +563,16 @@ export async function analyzeScanPageWithClaude(
 			pageUrl: page.page_url,
 			error: message,
 		});
+
+		try {
+			await failScan(supabase, scanId, message);
+		} catch (markFailedError) {
+			console.error('[runAiAnalysisForScan] failScan after AI error', {
+				scanId,
+				pageUrl: page.page_url,
+				error: getErrorMessage(markFailedError),
+			});
+		}
 
 		throw error instanceof Error ? error : new Error(message);
 	}
@@ -630,11 +657,20 @@ export async function persistScanIssuesFromAnalysis(
 	}
 
 	if (attemptedAnalysisCount > 0 && successfulAnalysisCount === 0) {
-		throw new Error(
+		const err = new Error(
 			`AI analysis failed for all ${attemptedAnalysisCount} page(s): ${analysisFailures
 				.slice(0, 3)
 				.join(' | ')}`,
 		);
+		try {
+			await failScan(supabase, scanId, err);
+		} catch (markFailedError) {
+			console.error('[runAiAnalysisForScan] failScan after persist failure', {
+				scanId,
+				error: getErrorMessage(markFailedError),
+			});
+		}
+		throw err;
 	}
 
 	if (analysisFailures.length > 0) {

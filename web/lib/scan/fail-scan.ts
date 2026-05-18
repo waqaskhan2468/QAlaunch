@@ -25,6 +25,28 @@ export function toUserFacingScanError(error: unknown): string {
 	if (message.includes('all_responsive_viewports_failed')) {
 		return 'Mobile layout capture failed. The desktop scan may still be partial.';
 	}
+	if (
+		message.includes('This operation was aborted') ||
+		message.includes('AbortError') ||
+		/timed?\s*out/i.test(message)
+	) {
+		return 'Report generation timed out. Please try again.';
+	}
+	if (message.includes('Invalid Claude issues payload')) {
+		return 'Could not build the report from AI output. Please try again.';
+	}
+	if (/Claude API error:\s*429/.test(message)) {
+		return 'AI service is busy. Please wait a moment and try again.';
+	}
+	if (/Claude API error/i.test(message)) {
+		return 'Report generation failed. Please try again.';
+	}
+	if (message.includes('AI analysis failed for all')) {
+		return 'Report generation failed for all pages. Please try again.';
+	}
+	if (message.includes('ai_page_failed') || message.includes('ai_page_error')) {
+		return 'Report generation failed. Please try again.';
+	}
 
 	return message.length > 500 ? `${message.slice(0, 497)}…` : message;
 }

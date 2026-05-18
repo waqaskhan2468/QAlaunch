@@ -5,8 +5,8 @@ import {
 } from './types';
 
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
-const DEFAULT_TIMEOUT_MS = 90_000;
-const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_MAX_TOKENS = 8_000;
 const MAX_RESPONSE_PREVIEW_LENGTH = 500;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
@@ -237,8 +237,9 @@ function isAbortError(error: unknown): boolean {
 }
 
 function isRetryableClaudeError(error: unknown): boolean {
+	if (isAbortError(error)) return false;
 	if (error instanceof ClaudeApiError) return error.retryable;
-	return isAbortError(error);
+	return false;
 }
 
 type MessageContentBlock =

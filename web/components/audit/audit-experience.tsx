@@ -9,13 +9,17 @@ import { cn } from '@/lib/utils';
 import { plans } from '@/components/pricing/pricing-plans';
 import { computeHealthScore, labelFromScore } from '@/lib/scoring/health';
 
-const checklistSteps = [
+/** Browser / scanner work — completed before AI analysis starts. */
+const scanChecklistSteps = [
 	'Testing usability & UI/UX patterns…',
 	'Checking all interactive functionality…',
 	'Testing mobile responsiveness…',
 	'Measuring performance & Core Web Vitals…',
 	'Analysing SEO, security & trust signals…',
 ];
+
+const aiAnalysisStepLabel =
+	'Generating expert findings & fix instructions…';
 
 type UiState =
 	| 'idle'
@@ -34,6 +38,13 @@ type ScanIssue = {
 	impact: string;
 };
 
+type ScanPageStatus = {
+	ai_analysis?: {
+		status?: string;
+		error?: string;
+	} | null;
+};
+
 type ScanStatusResponse = {
 	scan: {
 		id: string;
@@ -41,6 +52,7 @@ type ScanStatusResponse = {
 		error_message?: string | null;
 		package?: string;
 	};
+	pages?: ScanPageStatus[];
 	issues: ScanIssue[];
 	lockedIssues: Array<{
 		id: string;
@@ -57,6 +69,47 @@ type ScanStatusResponse = {
 	previewHealthScore?: number;
 };
 
+function ChecklistRow({
+	label,
+	state,
+}: {
+	label: string;
+	state: 'done' | 'pending' | 'active';
+}) {
+	return (
+		<div
+			className={cn(
+				'flex items-center gap-3 rounded-xl border px-4 py-3 text-[13.5px] transition-colors',
+				state === 'done' ?
+					'border-accent-pale bg-[#F9FFFE] text-ink'
+				: state === 'active' ?
+					'border-brand/30 bg-brand-pale text-ink ring-2 ring-brand/15'
+				:	'border-border-soft bg-white text-body',
+			)}>
+			<span
+				aria-hidden='true'
+				className={cn(
+					'flex size-5 shrink-0 items-center justify-center rounded-full',
+					state === 'done' ?
+						'bg-accent-bright text-white'
+					: state === 'active' ?
+						'bg-white'
+					:	'bg-surface-soft text-muted-ink',
+				)}>
+				{state === 'done' ?
+					<Check
+						className='size-3'
+						strokeWidth={3}
+					/>
+				: state === 'active' ?
+					<span className='qa-spin block size-3 rounded-full border-2 border-brand/30 border-t-brand' />
+				:	<Clock className='size-3' />}
+			</span>
+			{label}
+		</div>
+	);
+}
+
 function scoreTone(score: number): { ring: string; label: string } {
 	if (score >= 80) return { ring: 'border-accent-bright', label: 'Good' };
 	if (score >= 60) return { ring: 'border-warn', label: 'Needs attention' };
@@ -69,14 +122,18 @@ function loadingCopyForStatus(
 	title: string;
 	subtitle: string;
 	stageLabel: string;
-	stepCount: number;
+	/** How many scan checklist rows show a green check (not AI). */
+	completedScanSteps: number;
+	/** When true, show an extra row in progress for Claude / report generation. */
+	showAiStep: boolean;
 } {
 	if (status === 'pending') {
 		return {
 			title: 'Starting your free audit…',
 			subtitle: 'We queued your scan and are preparing website checks.',
 			stageLabel: 'Queued',
-			stepCount: 1,
+			completedScanSteps: 0,
+			showAiStep: false,
 		};
 	}
 
@@ -84,17 +141,20 @@ function loadingCopyForStatus(
 		return {
 			title: 'Scanning your website…',
 			subtitle: 'Collecting pages, UI states, and performance signals.',
-			stageLabel: 'Crawling pages',
-			stepCount: 3,
+			stageLabel: 'Browser scan',
+			completedScanSteps: 2,
+			showAiStep: false,
 		};
 	}
 
 	if (status === 'analyzing') {
 		return {
-			title: 'Analyzing findings…',
-			subtitle: 'Reviewing severity, impact, and developer fix guidance.',
-			stageLabel: 'AI analysis',
-			stepCount: checklistSteps.length,
+			title: 'Building your report…',
+			subtitle:
+				'Automated checks are done. Our AI is writing severity, impact, and fix guidance — usually 1–2 minutes.',
+			stageLabel: 'AI report',
+			completedScanSteps: scanChecklistSteps.length,
+			showAiStep: true,
 		};
 	}
 
@@ -102,7 +162,8 @@ function loadingCopyForStatus(
 		title: 'Auditing your website…',
 		subtitle: 'Preparing your free preview report.',
 		stageLabel: 'Initializing',
-		stepCount: 1,
+		completedScanSteps: 0,
+		showAiStep: false,
 	};
 }
 
@@ -163,8 +224,11 @@ export function AuditExperience() {
 	const host = deriveHost(inputUrl);
 
 	const [uiState, setUiState] = useState<UiState>('idle');
-	const [completedSteps, setCompletedSteps] = useState(0);
 	const [statusData, setStatusData] = useState<ScanStatusResponse | null>(null);
+	const [analyzingStartedAt, setAnalyzingStartedAt] = useState<number | null>(
+		null,
+	);
+	const [elapsedTick, setElapsedTick] = useState(0);
 	const [message, setMessage] = useState<string | null>(null);
 	const legacyPreviewMode = false;
 
@@ -201,19 +265,39 @@ export function AuditExperience() {
 					if (cancelled) return;
 
 					setStatusData(data);
-					setCompletedSteps(loadingCopyForStatus(data.scan.status).stepCount);
+					if (data.scan.status === 'analyzing') {
+						setAnalyzingStartedAt((prev) => prev ?? Date.now());
+					}
 					setUiState('processing');
 					retryCount = 0;
 
+					const aiAnalysisFailed = (data.pages ?? []).some(
+						(page) => page.ai_analysis?.status === 'failed',
+					);
+
 					if (data.scan.status === 'done') {
+						const hasNoIssues =
+							(data.issues?.length ?? 0) === 0 &&
+							(data.totalIssueCount ?? 0) === 0;
+						if (hasNoIssues) {
+							setUiState('failed');
+							setMessage(
+								'No findings could be generated for this scan. Please try again.',
+							);
+							return;
+						}
 						setUiState('completed');
 						return;
 					}
 
-					if (data.scan.status === 'failed') {
+					if (data.scan.status === 'failed' || aiAnalysisFailed) {
 						setUiState('failed');
+						const pageAiError = (data.pages ?? []).find(
+							(page) => page.ai_analysis?.status === 'failed',
+						)?.ai_analysis?.error;
 						setMessage(
 							data.scan.error_message ??
+								pageAiError ??
 								'Scan failed before completion. Please try again.',
 						);
 						return;
@@ -272,7 +356,6 @@ export function AuditExperience() {
 			}
 
 			setUiState('processing');
-			setCompletedSteps(1);
 			await pollScanStatus(initialScanId);
 		};
 
@@ -285,6 +368,18 @@ export function AuditExperience() {
 
 	const loadingStatus = statusData?.scan.status ?? null;
 	const loadingCopy = loadingCopyForStatus(loadingStatus);
+
+	useEffect(() => {
+		if (!loadingCopy.showAiStep || analyzingStartedAt == null) return;
+		const id = window.setInterval(() => setElapsedTick((t) => t + 1), 1000);
+		return () => window.clearInterval(id);
+	}, [loadingCopy.showAiStep, analyzingStartedAt]);
+
+	const analyzingElapsedSec =
+		loadingCopy.showAiStep && analyzingStartedAt != null ?
+			Math.floor((Date.now() - analyzingStartedAt) / 1000)
+		:	null;
+	void elapsedTick;
 
 	if (
 		uiState === 'starting' ||
@@ -302,40 +397,37 @@ export function AuditExperience() {
 						{loadingCopy.subtitle}{' '}
 						<span className='font-mono text-ink'>({host})</span>
 					</p>
-					<div className='mt-3 inline-flex items-center rounded-full border border-brand/20 bg-brand-pale px-3 py-1 text-xs font-semibold text-brand'>
-						Current stage: {loadingCopy.stageLabel}
+					<div className='mt-3 flex flex-col items-center gap-2'>
+						<div className='inline-flex items-center rounded-full border border-brand/20 bg-brand-pale px-3 py-1 text-xs font-semibold text-brand'>
+							Current stage: {loadingCopy.stageLabel}
+						</div>
+						{analyzingElapsedSec != null ?
+							<p className='text-xs text-muted-ink'>
+								{analyzingElapsedSec < 90 ?
+									`Usually finishes in about ${Math.max(1, 120 - analyzingElapsedSec)}s`
+								:	analyzingElapsedSec < 150 ?
+									'Still working — large sites can take a little longer'
+								:	'Taking longer than usual — hang tight or retry if this continues'}
+							</p>
+						:	null}
 					</div>
 					<div className='mt-7 flex flex-col gap-2 text-left'>
-						{checklistSteps.map((label, i) => {
-							const done = i < completedSteps;
+						{scanChecklistSteps.map((label, i) => {
+							const done = i < loadingCopy.completedScanSteps;
 							return (
-								<div
+								<ChecklistRow
 									key={label}
-									className={cn(
-										'flex items-center gap-3 rounded-xl border px-4 py-3 text-[13.5px] transition-colors',
-										done ?
-											'border-accent-pale bg-[#F9FFFE] text-ink'
-										:	'border-border-soft bg-white text-body',
-									)}>
-									<span
-										aria-hidden='true'
-										className={cn(
-											'flex size-5 shrink-0 items-center justify-center rounded-full',
-											done ?
-												'bg-accent-bright text-white'
-											:	'bg-surface-soft text-muted-ink',
-										)}>
-										{done ?
-											<Check
-												className='size-3'
-												strokeWidth={3}
-											/>
-										:	<Clock className='size-3' />}
-									</span>
-									{label}
-								</div>
+									label={label}
+									state={done ? 'done' : 'pending'}
+								/>
 							);
 						})}
+						{loadingCopy.showAiStep ?
+							<ChecklistRow
+								label={aiAnalysisStepLabel}
+								state='active'
+							/>
+						:	null}
 					</div>
 				</div>
 			</section>

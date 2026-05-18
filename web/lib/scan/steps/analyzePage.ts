@@ -1,6 +1,6 @@
 import { NonRetriableError } from 'inngest';
-import { AppError } from '@/lib/api/error';
 import { analyzeScanPageWithClaude } from '@/lib/scan/ai';
+import { toUserFacingScanError } from '@/lib/scan/fail-scan';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import type { ScanPackage } from '@/types/zod';
 
@@ -25,7 +25,6 @@ export async function analyzePageStep(input: {
 			input.pkg,
 		);
 	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : 'ai_page_failed';
-		throw new AppError(502, 'ai_page_error', message);
+		throw new NonRetriableError(toUserFacingScanError(error));
 	}
 }
