@@ -1,11 +1,10 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { getServiceSupabase } from '@/lib/db/supabase';
+import type { ServiceSupabase } from '@/lib/db/supabase';
 import { runPlaywrightScanForUrl } from './services/index';
 import { MOBILE_VIEWPORT_NAME } from './services/responsive';
+import type { ScanStatus } from '@/types/zod';
 import type {
 	ResponsivePayload,
 	ScanResult,
-	ScanStatus,
 	ScreenshotUploadResult,
 } from './types/scan.types';
 import { buildProgrammaticRollup } from './utils/programmaticSummary';
@@ -19,7 +18,6 @@ const SCREENSHOT_BUCKET =
 
 const SCREENSHOT_UPLOAD_RETRIES = 3;
 const SCREENSHOT_UPLOAD_RETRY_DELAY_MS = 1_000;
-const DEFAULT_PAGE_UPDATE_CONCURRENCY = 2;
 
 class ScannerError extends Error {
 	constructor(
@@ -29,10 +27,6 @@ class ScannerError extends Error {
 		super(message);
 		this.name = 'ScannerError';
 	}
-}
-
-function getSupabase(): SupabaseClient {
-	return getServiceSupabase();
 }
 
 // ─── Structured logger ─────────────────────────────────────────────────────
@@ -109,20 +103,6 @@ function logAxeGateFailure(scanId: string, result: ScanResult): void {
 	});
 }
 
-function getPageUpdateConcurrency(pageCount: number): number {
-	const configured = Number.parseInt(
-		process.env.SCAN_PAGE_UPDATE_CONCURRENCY ??
-			`${DEFAULT_PAGE_UPDATE_CONCURRENCY}`,
-		10,
-	);
-	const safeConfigured =
-		Number.isFinite(configured) && configured > 0 ?
-			configured
-		:	DEFAULT_PAGE_UPDATE_CONCURRENCY;
-
-	return Math.max(1, Math.min(safeConfigured, pageCount));
-}
-
 function sanitizeForPath(value: string): string {
 	return value
 		.toLowerCase()
@@ -132,19 +112,10 @@ function sanitizeForPath(value: string): string {
 		.slice(0, 120);
 }
 
-function validateScanInput(scanId: string, urls: string[]): { scanId: string; urls: string[] } {
-	const id = scanId.trim();
-	const cleaned = urls.map((url) => url.trim()).filter(Boolean);
-
-	if (!id) throw new ScannerError('scanId is required', 400);
-	if (cleaned.length === 0) throw new ScannerError('urls[] is required', 400);
-
-	return { scanId: id, urls: cleaned };
-}
-
 // ─── Screenshot upload ─────────────────────────────────────────────────────
 
 async function uploadScreenshotBuffer(
+	supabase: ServiceSupabase,
 	screenshot: Buffer | undefined | null,
 	scanId: string,
 	pageUrl: string,
@@ -195,7 +166,7 @@ async function uploadScreenshotBuffer(
 
 	for (let attempt = 1; attempt <= SCREENSHOT_UPLOAD_RETRIES; attempt += 1) {
 		try {
-			const { error } = await getSupabase().storage
+			const { error } = await supabase.storage
 				.from(SCREENSHOT_BUCKET)
 				.upload(filePath, uploadBuffer, {
 					contentType,
@@ -205,7 +176,7 @@ async function uploadScreenshotBuffer(
 			if (error) {
 				lastError = error.message;
 			} else {
-				const { data } = getSupabase().storage
+				const { data } = supabase.storage
 					.from(SCREENSHOT_BUCKET)
 					.getPublicUrl(filePath);
 
@@ -250,6 +221,7 @@ async function uploadScreenshotBuffer(
  * `screenshot_slice_urls` with `screenshot_url` as the first entry.
  */
 async function uploadResponsiveScreenshots(
+	supabase: ServiceSupabase,
 	scanId: string,
 	pageUrl: string,
 	result: ScanResult,
@@ -270,6 +242,7 @@ async function uploadResponsiveScreenshots(
 			const sliceUploads = await Promise.all(
 				slices.map((slice, sliceIndex) =>
 					uploadScreenshotBuffer(
+						supabase,
 						slice,
 						scanId,
 						pageUrl,
@@ -377,10 +350,11 @@ function buildPlaywrightPayload(
 // ─── DB helpers ────────────────────────────────────────────────────────────
 
 async function updateScanStatus(
+	supabase: ServiceSupabase,
 	scanId: string,
 	patch: Record<string, unknown>,
 ): Promise<void> {
-	const { error } = await getSupabase().from('scans').update(patch).eq('id', scanId);
+	const { error } = await supabase.from('scans').update(patch).eq('id', scanId);
 
 	if (error) {
 		throw new ScannerError(`Failed to update scan: ${error.message}`, 500);
@@ -388,11 +362,12 @@ async function updateScanStatus(
 }
 
 async function updateScanPage(
+	supabase: ServiceSupabase,
 	scanId: string,
 	pageUrl: string,
 	patch: Record<string, unknown>,
 ): Promise<void> {
-	const { data, error } = await getSupabase()
+	const { data, error } = await supabase
 		.from('scan_pages')
 		.update(patch)
 		.eq('scan_id', scanId)
@@ -414,8 +389,12 @@ async function updateScanPage(
 	}
 }
 
-async function markScanFailed(scanId: string, message: string): Promise<void> {
-	await updateScanStatus(scanId, {
+async function markScanFailed(
+	supabase: ServiceSupabase,
+	scanId: string,
+	message: string,
+): Promise<void> {
+	await updateScanStatus(supabase, scanId, {
 		status: 'failed',
 		error_message: message,
 		completed_at: nowIso(),
@@ -425,6 +404,7 @@ async function markScanFailed(scanId: string, message: string): Promise<void> {
 // ─── Per-page result processor ─────────────────────────────────────────────
 
 async function processScanResult(
+	supabase: ServiceSupabase,
 	scanId: string,
 	result: ScanResult,
 ): Promise<void> {
@@ -432,13 +412,14 @@ async function processScanResult(
 
 	const [desktopUpload, responsivePayload] = await Promise.all([
 		uploadScreenshotBuffer(
+			supabase,
 			result.screenshots?.desktop,
 			scanId,
 			result.url,
 			'desktop',
 			'desktop',
 		),
-		uploadResponsiveScreenshots(scanId, result.url, result, uploadWarnings),
+		uploadResponsiveScreenshots(supabase, scanId, result.url, result, uploadWarnings),
 	]);
 
 	if (desktopUpload.warning) {
@@ -475,7 +456,7 @@ async function processScanResult(
 	screenshotPatch.screenshot_mobile_slice_urls = mobileSliceUrls;
 	screenshotPatch.screenshot_responsive_slices = responsiveSlicesPayload;
 
-	await updateScanPage(scanId, result.url, {
+	await updateScanPage(supabase, scanId, result.url, {
 		...screenshotPatch,
 		raw_html: result.rawHtml ?? null,
 		axe_violations: result.axe ?? null,
@@ -483,56 +464,33 @@ async function processScanResult(
 	});
 }
 
-// ─── Scan orchestration ────────────────────────────────────────────────────
-
-async function finalizeScan(
-	scanId: string,
-	results: ScanResult[],
-): Promise<ScanStatus> {
-	const hasSuccessfulPage = results.some((result) => result.ok);
-	const status: ScanStatus = hasSuccessfulPage ? 'analyzing' : 'failed';
-
-	await updateScanStatus(scanId, {
-		status,
-		completed_at: status === 'failed' ? nowIso() : null,
-		error_message: status === 'failed' ? 'All pages failed to scan.' : null,
-	});
-
-	return status;
-}
-
-async function processScanResults(
-	scanId: string,
-	results: ScanResult[],
-): Promise<void> {
-	const concurrency = getPageUpdateConcurrency(results.length);
-
-	for (let index = 0; index < results.length; index += concurrency) {
-		const chunk = results.slice(index, index + concurrency);
-		await Promise.all(chunk.map((result) => processScanResult(scanId, result)));
-	}
-}
-
 // ─── Inngest step entrypoints (one page per step) ───────────────────────────
 
-export async function prepareScannerScan(scanId: string): Promise<void> {
-	await updateScanStatus(scanId, {
+export async function prepareScannerScan(
+	supabase: ServiceSupabase,
+	scanId: string,
+): Promise<void> {
+	await updateScanStatus(supabase, scanId, {
 		status: 'analyzing',
 		error_message: null,
 	});
 }
 
 export async function scanAndPersistPage(
+	supabase: ServiceSupabase,
 	scanId: string,
 	url: string,
 ): Promise<{ ok: boolean }> {
 	const result = await runPlaywrightScanForUrl(scanId, url);
-	await processScanResult(scanId, result);
+	await processScanResult(supabase, scanId, result);
 	return { ok: result.ok };
 }
 
-export async function finalizeScannerFromDb(scanId: string): Promise<ScanStatus> {
-	const { data: pages, error } = await getSupabase()
+export async function finalizeScannerFromDb(
+	supabase: ServiceSupabase,
+	scanId: string,
+): Promise<ScanStatus> {
+	const { data: pages, error } = await supabase
 		.from('scan_pages')
 		.select('playwright_data')
 		.eq('scan_id', scanId);
@@ -548,7 +506,7 @@ export async function finalizeScannerFromDb(scanId: string): Promise<ScanStatus>
 
 	const status: ScanStatus = hasSuccessfulPage ? 'analyzing' : 'failed';
 
-	await updateScanStatus(scanId, {
+	await updateScanStatus(supabase, scanId, {
 		status,
 		completed_at: status === 'failed' ? nowIso() : null,
 		error_message: status === 'failed' ? 'All pages failed to scan.' : null,
@@ -558,47 +516,17 @@ export async function finalizeScannerFromDb(scanId: string): Promise<ScanStatus>
 }
 
 export async function markScannerFailed(
+	supabase: ServiceSupabase,
 	scanId: string,
 	message: string,
 ): Promise<void> {
 	slog('error', 'scan:failed', { scanId, error: message });
 	try {
-		await markScanFailed(scanId, message);
+		await markScanFailed(supabase, scanId, message);
 	} catch (markFailedError: unknown) {
 		slog('error', 'scan:mark_failed_error', {
 			scanId,
 			error: getErrorMessage(markFailedError),
 		});
-	}
-}
-
-// ─── Legacy monolithic entry (avoid in production pipeline) ─────────────────
-
-export type RunScannerResult = {
-	scanId: string;
-	finalStatus: ScanStatus;
-	processedPages: number;
-};
-
-export async function runScannerForScan(input: {
-	scanId: string;
-	urls: string[];
-}): Promise<RunScannerResult> {
-	const { scanId, urls } = validateScanInput(input.scanId, input.urls);
-
-	try {
-		await prepareScannerScan(scanId);
-
-		for (const url of urls) {
-			await scanAndPersistPage(scanId, url);
-		}
-
-		const finalStatus = await finalizeScannerFromDb(scanId);
-
-		return { scanId, finalStatus, processedPages: urls.length };
-	} catch (error: unknown) {
-		const message = getErrorMessage(error);
-		await markScannerFailed(scanId, message);
-		throw error instanceof ScannerError ? error : new ScannerError(message, 500);
 	}
 }

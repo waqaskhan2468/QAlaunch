@@ -39,6 +39,27 @@ export type BrowserbaseSession = {
 	connectUrl: string;
 };
 
+/** Browserbase rejects metadata values containing `://`, `/`, etc. — use host + path slug only. */
+export function pageUrlForBrowserbaseMetadata(pageUrl: string): string {
+	try {
+		const { hostname, pathname } = new URL(pageUrl);
+		const pathSlug =
+			pathname === '/' || !pathname ?
+				''
+			:	pathname
+					.replace(/^\//, '')
+					.replace(/[^a-zA-Z0-9.-]+/g, '_')
+					.replace(/^_|_$/g, '');
+		const slug = pathSlug ? `${hostname}_${pathSlug}` : hostname;
+		return slug.slice(0, 200);
+	} catch {
+		return pageUrl
+			.replace(/[^a-zA-Z0-9._-]+/g, '_')
+			.replace(/^_|_$/g, '')
+			.slice(0, 200);
+	}
+}
+
 export async function createBrowserbaseSession(
 	scanId: string,
 	pageUrl?: string,
@@ -60,7 +81,7 @@ export async function createBrowserbaseSession(
 				timeout: getSessionTimeoutSec(),
 				userMetadata: {
 					scanId,
-					...(pageUrl ? { pageUrl: pageUrl.slice(0, 200) } : {}),
+					...(pageUrl ? { pageHost: pageUrlForBrowserbaseMetadata(pageUrl) } : {}),
 				},
 			});
 

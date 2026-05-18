@@ -1,5 +1,6 @@
 import { serve } from 'inngest/next';
 import { inngest } from '@/lib/inngest/client';
+import { handleScanFailed } from '@/lib/inngest/functions/handle-scan-failed';
 import { runScan } from '@/lib/inngest/functions/run-scan';
 
 export const runtime = 'nodejs';
@@ -9,5 +10,5 @@ export const maxDuration = 300;
 
 export const { GET, POST, PUT } = serve({
 	client: inngest,
-	functions: [runScan],
+	functions: [runScan, handleScanFailed],
 });

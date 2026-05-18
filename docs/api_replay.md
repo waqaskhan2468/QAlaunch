@@ -6,7 +6,7 @@ Plain-language status vs the May 4 review. Based on this codebase.
 
 ## What is already built
 
-- **Scan pipeline:** Next.js workflow calls the VPS scanner, saves data in Supabase.
+- **Scan pipeline:** Next.js + Inngest runs Playwright on **Browserbase** (no separate VPS scanner); data saved in Supabase.
 - **Data collection:** HTML, screenshots, links (with HTTP checks), forms/buttons listed, console errors, axe accessibility, responsive screenshots, PageSpeed, SEO (includes OG tags + favicon flag).
 - **AI:** Claude turns screenshots + metrics into structured issues; saved to the `**issues`** table (Supabase must have this table — migrations are not in this repo).
 - **Free tier preview:** Picks **3 issues** and marks them `is_in_free_preview`.

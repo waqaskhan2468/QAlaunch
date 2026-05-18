@@ -2,7 +2,7 @@
 
 This document explains the scan API in simple English.
 
-The scan starts in the Next.js app, is queued with **Inngest**, then the **run-scan** function processes it (including calling the VPS scanner). Data is saved in Supabase.
+The scan starts in the Next.js app, is queued with **Inngest**, then the **run-scan** function processes it (Playwright via **Browserbase** inside each Inngest step). Data is saved in Supabase.
 
 ## Scan Flow
 
@@ -12,8 +12,8 @@ The scan starts in the Next.js app, is queued with **Inngest**, then the **run-s
 4. Inngest invokes your app at `GET` / `POST` / `PUT` `/api/inngest` and runs the **run-scan** function.
 5. The function chooses the pages to test.
 6. The function runs PageSpeed Insights for each selected page.
-7. The function calls the VPS scanner.
-8. The VPS scanner runs Playwright and saves the final page data.
+7. For each page, Inngest runs a `scan-page` step that opens a **Browserbase** session and runs Playwright.
+8. Results (screenshots, axe, HTML, etc.) are saved to Supabase.
 
 ## Start A Scan
 
@@ -57,7 +57,7 @@ Response (`201 Created` on success):
 Why the response is `pending`:
 
 - `POST /api/scan/start` only creates the scan row and queues work.
-- The long work runs asynchronously through Inngest and the VPS scanner.
+- The long work runs asynchronously through Inngest and Browserbase-backed Playwright steps.
 - Use `scanId` with the status endpoint to read final `done` or `failed` state.
 
 Free package rule:

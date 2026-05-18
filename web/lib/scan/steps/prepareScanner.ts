@@ -1,4 +1,5 @@
 import { NonRetriableError } from 'inngest';
+import { getServiceSupabase } from '@/lib/db/supabase';
 import { prepareScannerScan } from '@/lib/scan/runner';
 
 export async function prepareScannerStep(scanId: string): Promise<void> {
@@ -9,5 +10,6 @@ export async function prepareScannerStep(scanId: string): Promise<void> {
 		throw new NonRetriableError('BROWSERBASE_PROJECT_ID is missing.');
 	}
 
-	await prepareScannerScan(scanId);
+	const supabase = getServiceSupabase();
+	await prepareScannerScan(supabase, scanId);
 }

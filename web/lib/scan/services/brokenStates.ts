@@ -149,6 +149,17 @@ function buildBrokenStatesExpression(opts: { capFindings: number }): string {
 })(${o})`;
 }
 
+function parseBrokenEvaluateResult(raw: unknown): BrokenEvaluateResult {
+	if (!raw || typeof raw !== 'object') {
+		return { findings: [], truncated: false };
+	}
+	const record = raw as Record<string, unknown>;
+	const findings = Array.isArray(record.findings) ? record.findings : [];
+	const truncated =
+		typeof record.truncated === 'boolean' ? record.truncated : false;
+	return { findings: findings as ProgrammaticFinding[], truncated };
+}
+
 export async function collectBrokenStates(
 	page: Page,
 	options?: { maxFindings?: number },
@@ -156,8 +167,11 @@ export async function collectBrokenStates(
 	const maxFindings = options?.maxFindings ?? DEFAULT_MAX_FINDINGS;
 	const started = Date.now();
 
+	// Must use a string expression (not a TS callback): Playwright serializes callbacks
+	// into the page, and bundlers can inject helpers that break evaluation. Keep the
+	// inlined function ES5-compatible (var/function, no optional chaining).
 	const expression = buildBrokenStatesExpression({ capFindings: maxFindings });
-	const evaluated = (await page.evaluate(expression)) as BrokenEvaluateResult;
+	const evaluated = parseBrokenEvaluateResult(await page.evaluate(expression));
 
 	const durationMs = Date.now() - started;
 	const data = evaluated;

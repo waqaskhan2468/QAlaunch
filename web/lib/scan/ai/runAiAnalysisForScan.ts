@@ -4,6 +4,10 @@ import {
 	parseClaudeIssues,
 } from './claude';
 import type { getServiceSupabase } from '@/lib/db/supabase';
+import {
+	formatErrorWithCause,
+	updateScanPageAiAnalysis,
+} from '@/lib/db/supabase-retry';
 import type { ClaudeIssue } from './types';
 import type { ScanPackage } from '@/types/zod';
 
@@ -45,7 +49,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function getErrorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : 'Unknown error';
+	return formatErrorWithCause(error);
 }
 
 function getScreenshotSignedUrlTtlSec(): number {
@@ -512,38 +516,25 @@ export async function analyzeScanPageWithClaude(
 
 		const issues = parseClaudeIssues(raw);
 
-		const { error: aiAnalysisUpdateError } = await supabase
-			.from('scan_pages')
-			.update({ ai_analysis: { issues } })
-			.eq('id', page.id);
-
-		if (aiAnalysisUpdateError) {
-			throw new Error(
-				`Failed to save ai_analysis for page ${page.page_url}: ${aiAnalysisUpdateError.message}`,
-			);
-		}
+		await updateScanPageAiAnalysis(page.id, { issues });
 	} catch (error) {
 		const message = getErrorMessage(error);
+		const failurePayload = {
+			status: 'failed' as const,
+			analyzed_at: new Date().toISOString(),
+			error: message,
+		};
 
-		const { error: aiAnalysisFailureUpdateError } = await supabase
-			.from('scan_pages')
-			.update({
-				ai_analysis: {
-					status: 'failed',
-					analyzed_at: new Date().toISOString(),
-					error: message,
-				},
-			})
-			.eq('id', page.id);
-
-		if (aiAnalysisFailureUpdateError) {
+		try {
+			await updateScanPageAiAnalysis(page.id, failurePayload);
+		} catch (saveError) {
 			console.error(
 				'[runAiAnalysisForScan] failed saving ai_analysis failure payload',
 				{
 					scanId,
 					pageId: page.id,
 					pageUrl: page.page_url,
-					error: aiAnalysisFailureUpdateError.message,
+					error: getErrorMessage(saveError),
 				},
 			);
 		}
@@ -554,6 +545,8 @@ export async function analyzeScanPageWithClaude(
 			pageUrl: page.page_url,
 			error: message,
 		});
+
+		throw error instanceof Error ? error : new Error(message);
 	}
 }
 

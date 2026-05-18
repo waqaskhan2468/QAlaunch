@@ -1,5 +1,3 @@
-export type ScanStatus = 'pending' | 'analyzing' | 'completed' | 'failed';
-
 export type ScanStep = {
 	name: string;
 	ok: boolean;

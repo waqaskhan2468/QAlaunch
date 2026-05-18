@@ -1,14 +1,17 @@
-import { AppError } from '@/lib/api/error';
+import { NonRetriableError } from 'inngest';
+import { getServiceSupabase } from '@/lib/db/supabase';
+import { failScan, toUserFacingScanError } from '@/lib/scan/fail-scan';
 import { scanAndPersistPage } from '@/lib/scan/runner';
 
 export async function scanPageStep(input: {
 	scanId: string;
 	pageUrl: string;
 }): Promise<{ ok: boolean }> {
+	const supabase = getServiceSupabase();
 	try {
-		return await scanAndPersistPage(input.scanId, input.pageUrl);
+		return await scanAndPersistPage(supabase, input.scanId, input.pageUrl);
 	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : 'scan_page_failed';
-		throw new AppError(502, 'scan_page_error', message);
+		await failScan(supabase, input.scanId, error);
+		throw new NonRetriableError(toUserFacingScanError(error));
 	}
 }

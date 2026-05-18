@@ -5,8 +5,6 @@ export {
 	scanAndPersistPage,
 } from './runner';
 export { generatePdfFromHtml } from './pdf';
-export {
-	runPlaywrightScanForUrl,
-	runPlaywrightScan,
-} from './services';
-export type { ScanResult, ScanStatus } from './types';
+export { runPlaywrightScanForUrl } from './services';
+export type { ScanResult } from './types';
+export type { ScanStatus } from '@/types/zod';

@@ -1,4 +1,4 @@
-import type { Browser } from 'playwright-core';
+import type { Browser, Page } from 'playwright-core';
 import {
 	closeBrowserSession,
 	connectBrowserbase,
@@ -16,10 +16,14 @@ import { captureDesktopScreenshot } from './screenshots';
 import { collectBrokenStates } from './brokenStates';
 import { RAW_HTML_MAX_BYTES, truncateUtf8Bytes } from '../utils/html';
 
-const DEFAULT_PAGE_CONCURRENCY = 1;
-const PAGE_SCAN_ATTEMPTS = 2;
-/** Hard ceiling on how long a single URL scan may take (ms). */
-const PAGE_SCAN_TIMEOUT_MS = 150_000;
+const DEFAULT_PAGE_SCAN_TIMEOUT_MS = 240_000;
+
+/** Hard ceiling for one Browserbase pass (navigate + collectors + screenshots). */
+export function getPageScanTimeoutMs(): number {
+	const raw = Number.parseInt(process.env.SCAN_PAGE_TIMEOUT_MS ?? '', 10);
+	return Number.isFinite(raw) && raw >= 60_000 ? raw : DEFAULT_PAGE_SCAN_TIMEOUT_MS;
+}
+
 function withPageTimeout<T>(
 	promise: Promise<T>,
 	url: string,
@@ -32,10 +36,10 @@ function withPageTimeout<T>(
 				() =>
 					reject(
 						new Error(
-							`[scan] page timeout after ${PAGE_SCAN_TIMEOUT_MS}ms: ${url} (scanId=${scanId})`,
+							`[scan] page timeout after ${getPageScanTimeoutMs()}ms: ${url} (scanId=${scanId})`,
 						),
 					),
-				PAGE_SCAN_TIMEOUT_MS,
+				getPageScanTimeoutMs(),
 			),
 		),
 	]);
@@ -61,9 +65,29 @@ function hasSuccessfulNavigation(steps: ScanStep[]): boolean {
 
 function hasSuccessfulAxe(result: ScanResult): boolean {
 	return (
-		result.steps.some((step) => step.name === 'axe' && step.ok) &&
-		Array.isArray(result.axe)
+		result.steps.some(
+			(step) =>
+				(step.name === 'axe' || step.name === 'axe_retry') && step.ok,
+		) && Array.isArray(result.axe)
 	);
+}
+
+async function retryAxeOnSamePage(page: Page, result: ScanResult): Promise<void> {
+	if (!hasSuccessfulNavigation(result.steps) || hasSuccessfulAxe(result)) {
+		return;
+	}
+
+	const axeRetry = await runStep(result.steps, 'axe_retry', () =>
+		withRetry(() => collectAxeViolations(page), {
+			attempts: 2,
+			delayMs: 1_500,
+		}),
+	);
+
+	if (axeRetry !== undefined) {
+		result.axe = axeRetry;
+		result.warnings.push('Retried accessibility scan on the same page.');
+	}
 }
 
 function getAxeFailureReason(result: ScanResult): string {
@@ -89,27 +113,6 @@ function getMissingScanData(result: ScanResult): string[] {
 	if (!result.screenshots?.mobile) missing.push('mobile_screenshot');
 
 	return missing;
-}
-
-function getRetryableMissingData(missingData: string[]): string[] {
-	// Screenshot-only misses should not trigger a full page rescan. The scanner
-	// already has responsive outputs and DB-side warnings for missing image URLs.
-	return missingData.filter(
-		(item) => item !== 'desktop_screenshot' && item !== 'mobile_screenshot',
-	);
-}
-
-function getPageConcurrency(urlCount: number): number {
-	const configured = Number.parseInt(
-		process.env.SCAN_PAGE_CONCURRENCY ?? `${DEFAULT_PAGE_CONCURRENCY}`,
-		10,
-	);
-	const safeConfigured =
-		Number.isFinite(configured) && configured > 0 ?
-			configured
-		:	DEFAULT_PAGE_CONCURRENCY;
-
-	return Math.max(1, Math.min(safeConfigured, urlCount));
 }
 
 async function scanSingleUrl(
@@ -175,6 +178,8 @@ async function scanSingleUrl(
 		result.seoData = seoData;
 		result.axe = axe;
 
+		await retryAxeOnSamePage(page, result);
+
 		result.screenshots = {};
 
 		const desktopScreenshot = await runStep(
@@ -227,11 +232,21 @@ async function scanSingleUrl(
 
 		const navigationOk = hasSuccessfulNavigation(result.steps);
 		const axeOk = hasSuccessfulAxe(result);
+		const hasCoreCapture =
+			Boolean(result.screenshots?.desktop) && Boolean(result.screenshots?.mobile);
 
-		result.ok = navigationOk && axeOk;
+		// Axe can fail when Next bundles axe-core incorrectly; still proceed if we have
+		// navigation + screenshots so AI and the report can run (axe stored when present).
+		result.ok = navigationOk && (axeOk || hasCoreCapture);
 
 		if (navigationOk && !axeOk) {
-			result.error = `accessibility_gate_fail: ${getAxeFailureReason(result)}`;
+			const axeReason = getAxeFailureReason(result);
+			result.warnings.push(
+				`Accessibility scan incomplete (${axeReason}). Other checks and screenshots were captured.`,
+			);
+			if (!hasCoreCapture) {
+				result.error = `accessibility_gate_fail: ${axeReason}`;
+			}
 		}
 
 		return result;
@@ -244,38 +259,24 @@ async function scanSingleUrl(
 	}
 }
 
-async function scanSingleUrlWithRetry(
+async function scanSingleUrlWithTimeout(
 	browser: Browser,
 	url: string,
 	scanId: string,
 ): Promise<ScanResult> {
-	let result = await withPageTimeout(scanSingleUrl(browser, url, scanId), url, scanId);
-	let missingData = getMissingScanData(result);
-	let retryableMissingData = getRetryableMissingData(missingData);
-
-	console.log('[scan] attempt 1 missing:', {
+	const result = await withPageTimeout(
+		scanSingleUrl(browser, url, scanId),
 		url,
-		missingData,
-		retryableMissingData,
-		ok: result.ok,
-	});
+		scanId,
+	);
 
-	for (
-		let attempt = 2;
-		attempt <= PAGE_SCAN_ATTEMPTS && retryableMissingData.length > 0;
-		attempt += 1
-	) {
-		const retryResult = await withPageTimeout(scanSingleUrl(browser, url, scanId), url, scanId);
-		retryResult.warnings.unshift(
-			`Retried page scan after incomplete attempt: ${retryableMissingData.join(', ')}`,
-		);
-
-		result = retryResult;
-		missingData = getMissingScanData(result);
-		retryableMissingData = getRetryableMissingData(missingData);
-	}
-
+	const missingData = getMissingScanData(result);
 	if (missingData.length > 0) {
+		console.log('[scan] incomplete page data:', {
+			url,
+			missingData,
+			ok: result.ok,
+		});
 		result.warnings.push(`Missing scan data: ${missingData.join(', ')}`);
 	}
 
@@ -291,27 +292,8 @@ export async function runPlaywrightScanForUrl(
 	const browser = await connectBrowserbase(session.connectUrl);
 
 	try {
-		return await scanSingleUrlWithRetry(browser, url, scanId);
+		return await scanSingleUrlWithTimeout(browser, url, scanId);
 	} finally {
 		await closeBrowserSession(browser);
 	}
-}
-
-/** @deprecated Use `runPlaywrightScanForUrl` per Inngest step. Kept for local scripts. */
-export async function runPlaywrightScan(
-	urls: string[],
-	scanId: string,
-): Promise<ScanResult[]> {
-	const results: ScanResult[] = [];
-	const concurrency = getPageConcurrency(urls.length);
-
-	for (let index = 0; index < urls.length; index += concurrency) {
-		const chunk = urls.slice(index, index + concurrency);
-		const chunkResults = await Promise.all(
-			chunk.map((url) => runPlaywrightScanForUrl(scanId, url)),
-		);
-		results.push(...chunkResults);
-	}
-
-	return results;
 }

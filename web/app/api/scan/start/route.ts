@@ -3,6 +3,7 @@ import { normalizeUrl, urlHash, isPrivateUrl } from '@/lib/utils/url';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { scanStartSchema } from '@/types/zod';
 import { AppError, asyncHandler } from '@/lib/api/error';
+import { assertScanStartAllowed } from '@/lib/api/scan-start-rate-limit';
 import { queueScanJob } from '@/lib/api/queue-scan-job';
 
 export const runtime = 'nodejs';
@@ -33,6 +34,8 @@ export const POST = asyncHandler(async (req: Request) => {
 
 	const supabase = getServiceSupabase();
 	const hash = urlHash(normalized);
+
+	await assertScanStartAllowed(supabase, req, { email, package: pkg });
 
 	if (pkg === 'free') {
 		const { data: existing, error: freeCheckError } = await supabase
