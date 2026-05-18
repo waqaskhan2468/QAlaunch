@@ -36,12 +36,17 @@ export function Hero() {
   }, [])
 
   const submit = async () => {
-    const value = url.trim()
-    if (!value || isStarting) return
-    if (!isValidPublicWebsiteUrl(value)) {
+    const raw = url.trim()
+    if (!raw || isStarting) return
+    if (!isValidPublicWebsiteUrl(raw)) {
       setStartError("Please enter a valid public website URL.")
       return
     }
+
+    const value =
+      raw.startsWith("http://") || raw.startsWith("https://")
+        ? raw
+        : `https://${raw}`
 
     try {
       setIsStarting(true)
@@ -206,22 +211,17 @@ function UrlInput({
 }) {
   return (
     <div className="relative flex-1">
-      <span className="pointer-events-none absolute left-4 top-1/2 hidden -translate-y-1/2 font-mono text-xs text-white/30 sm:block">
-        https://
-      </span>
       <input
         id="audit-input"
-        
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") onSubmit()
         }}
         type="url"
-        placeholder="yourwebsite.com"
+        placeholder="https://yourwebsite.com"
         className={cn(
-          "h-14 w-full rounded-xl border border-white/15 bg-white/10 px-5 sm:pl-20",
-          
+          "h-14 w-full rounded-xl border border-white/15 bg-white/10 px-5",
           "font-mono text-base text-white outline-none transition-all placeholder:text-white/35",
           "focus:border-accent-bright focus:bg-accent-bright/10 focus:ring-4 focus:ring-accent-bright/15",
         )}

@@ -513,7 +513,6 @@ export async function analyzeScanPageWithClaude(
 			dynamicAfterImagesText,
 			scanId,
 			pageUrl: page.page_url,
-			isFree: pkg === 'free',
 		});
 
 		const issues = parseClaudeIssues(raw);

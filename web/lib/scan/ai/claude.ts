@@ -8,8 +8,6 @@ const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_TIMEOUT_MS = 90_000;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_MAX_TOKENS = 8_000;
-/** Free scans show at most 3 issues — cap output tokens to finish faster. */
-const FREE_MAX_TOKENS = 3_500;
 const MAX_RESPONSE_PREVIEW_LENGTH = 500;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
@@ -140,11 +138,11 @@ const REPORT_SCAN_ISSUES_INPUT_SCHEMA = {
 						type: 'string',
 						enum: ['critical', 'high', 'medium', 'low'],
 					},
-					title: { type: 'string', minLength: 10, maxLength: 120 },
-					description: { type: 'string', minLength: 40, maxLength: 1200 },
-					impact: { type: 'string', minLength: 10, maxLength: 260 },
-					page_section: { type: 'string', maxLength: 520 },
-					fix_instructions: { type: 'string', minLength: 10, maxLength: 9000 },
+				title: { type: 'string', minLength: 20, maxLength: 80 },
+				description: { type: 'string', minLength: 100, maxLength: 800 },
+				impact: { type: 'string', minLength: 20, maxLength: 200 },
+				page_section: { type: 'string', maxLength: 500 },
+				fix_instructions: { type: 'string', minLength: 20, maxLength: 8000 },
 					evidence: {
 						type: 'string',
 						enum: [
@@ -263,7 +261,6 @@ export async function analyzeWithClaude(input: {
 	dynamicAfterImagesText: string;
 	scanId?: string;
 	pageUrl?: string;
-	isFree?: boolean;
 }) {
 	const config = getClaudeConfig();
 
@@ -293,7 +290,7 @@ export async function analyzeWithClaude(input: {
 		{ type: 'text', text: input.dynamicAfterImagesText },
 	];
 
-	const maxTokens = input.isFree ? FREE_MAX_TOKENS : DEFAULT_MAX_TOKENS;
+	const maxTokens = DEFAULT_MAX_TOKENS;
 
 	const body = JSON.stringify({
 		model: config.model,

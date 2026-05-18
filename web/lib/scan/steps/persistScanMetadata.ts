@@ -23,6 +23,13 @@ export async function persistScanMetadataStep(input: {
 		.eq('id', scanId);
 
 	if (scanUpdateError) {
+		console.error('[persist-metadata] scan update error', {
+			scanId,
+			code: scanUpdateError.code,
+			message: scanUpdateError.message,
+			details: scanUpdateError.details,
+			hint: scanUpdateError.hint,
+		});
 		throw new AppError(
 			500,
 			'scan_update_failed',
