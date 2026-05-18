@@ -16,7 +16,7 @@ import { captureDesktopScreenshot } from './screenshots';
 import { collectBrokenStates } from './brokenStates';
 import { RAW_HTML_MAX_BYTES, truncateUtf8Bytes } from '../utils/html';
 
-const DEFAULT_PAGE_SCAN_TIMEOUT_MS = 240_000;
+const DEFAULT_PAGE_SCAN_TIMEOUT_MS = 120_000;
 
 /** Hard ceiling for one Browserbase pass (navigate + collectors + screenshots). */
 export function getPageScanTimeoutMs(): number {
@@ -182,15 +182,22 @@ async function scanSingleUrl(
 
 		result.screenshots = {};
 
-		const desktopScreenshot = await runStep(
-			result.steps,
-			'screenshot:desktop',
-			() =>
+		// Desktop screenshot (on existing page) and responsive capture (new context)
+		// are independent — run them in parallel to hide each other's wait time.
+		const [desktopScreenshot, responsive] = await Promise.all([
+			runStep(result.steps, 'screenshot:desktop', () =>
 				withRetry(() => captureDesktopScreenshot(page), {
 					attempts: 2,
 					delayMs: 1_000,
 				}),
-		);
+			),
+			runStep(result.steps, 'responsive', () =>
+				withRetry(() => collectResponsive(browser, url), {
+					attempts: 2,
+					delayMs: 1_000,
+				}),
+			),
+		]);
 
 		console.log('[scan] desktop screenshot:', {
 			captured: !!desktopScreenshot,
@@ -200,13 +207,6 @@ async function scanSingleUrl(
 		if (desktopScreenshot) {
 			result.screenshots.desktop = desktopScreenshot;
 		}
-
-		const responsive = await runStep(result.steps, 'responsive', () =>
-			withRetry(() => collectResponsive(browser, url), {
-				attempts: 2,
-				delayMs: 1_000,
-			}),
-		);
 
 		result.responsive = responsive;
 

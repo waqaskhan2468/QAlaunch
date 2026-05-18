@@ -231,7 +231,7 @@ export function AuditExperience() {
 					}
 				}
 
-				await delay(3000);
+				await delay(1500);
 			}
 		};
 

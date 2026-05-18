@@ -119,32 +119,42 @@ async function runStrategy(
 	throw new Error('Unexpected PageSpeed retry loop exit');
 }
 
+const DEFAULT_STRATEGIES: PageSpeedStrategy[] = ['mobile', 'desktop'];
+
 export async function runPageSpeedForUrl(
 	targetUrl: string,
-	options?: { timeoutMs?: number },
+	options?: {
+		timeoutMs?: number;
+		strategies?: PageSpeedStrategy[];
+	},
 ): Promise<PageSpeedResult> {
 	const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+	const strategies = options?.strategies ?? DEFAULT_STRATEGIES;
 
 	try {
 		validateHttpUrl(targetUrl);
 
-		const [mobileResult, desktopResult] = await Promise.allSettled([
-			runStrategy(targetUrl, 'mobile', timeoutMs),
-			runStrategy(targetUrl, 'desktop', timeoutMs),
-		]);
+		const settled = await Promise.allSettled(
+			strategies.map((strategy) =>
+				runStrategy(targetUrl, strategy, timeoutMs),
+			),
+		);
 
-		const mobile =
-			mobileResult.status === 'fulfilled' ? mobileResult.value : null;
-		const desktop =
-			desktopResult.status === 'fulfilled' ? desktopResult.value : null;
-
+		const scoresByStrategy = new Map<PageSpeedStrategy, PageSpeedScores>();
 		const strategyErrors: Partial<Record<PageSpeedStrategy, string>> = {};
-		if (mobileResult.status === 'rejected') {
-			strategyErrors.mobile = getErrorMessage(mobileResult.reason);
+
+		for (let i = 0; i < strategies.length; i += 1) {
+			const strategy = strategies[i]!;
+			const result = settled[i]!;
+			if (result.status === 'fulfilled') {
+				scoresByStrategy.set(strategy, result.value);
+			} else {
+				strategyErrors[strategy] = getErrorMessage(result.reason);
+			}
 		}
-		if (desktopResult.status === 'rejected') {
-			strategyErrors.desktop = getErrorMessage(desktopResult.reason);
-		}
+
+		const mobile = scoresByStrategy.get('mobile') ?? null;
+		const desktop = scoresByStrategy.get('desktop') ?? null;
 
 		const hasSuccess = Boolean(mobile || desktop);
 
@@ -160,7 +170,10 @@ export async function runPageSpeedForUrl(
 			mobile: null,
 			desktop: null,
 			strategyErrors,
-			error: 'Both mobile and desktop PageSpeed runs failed',
+			error:
+				strategies.length === 1 ?
+					`${strategies[0]} PageSpeed run failed`
+				:	'All PageSpeed runs failed',
 		};
 	} catch (error) {
 		return {

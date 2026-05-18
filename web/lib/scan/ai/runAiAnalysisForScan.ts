@@ -465,6 +465,7 @@ export async function analyzeScanPageWithClaude(
 	scanId: string,
 	pageUrl: string,
 	websiteType: string | null,
+	pkg?: ScanPackage,
 ): Promise<void> {
 	const page = await loadScanPageRow(supabase, scanId, pageUrl);
 	const desktop = page.screenshot_desktop_url;
@@ -512,6 +513,7 @@ export async function analyzeScanPageWithClaude(
 			dynamicAfterImagesText,
 			scanId,
 			pageUrl: page.page_url,
+			isFree: pkg === 'free',
 		});
 
 		const issues = parseClaudeIssues(raw);

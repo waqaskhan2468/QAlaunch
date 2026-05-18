@@ -53,17 +53,17 @@ export const runScan = inngest.createFunction(
 
 		await step.run('prepare-scanner', () => prepareScannerStep(scanId));
 
-		await step.run('collect-pagespeed', () =>
-			collectPageSpeedStep(scanId, pagesToTest),
-		);
-
-		await Promise.all(
-			pagesToTest.map((pageUrl) =>
+		// PageSpeed and browser scan are independent; run in parallel to cut wall-clock time.
+		await Promise.all([
+			step.run('collect-pagespeed', () =>
+				collectPageSpeedStep(scanId, pagesToTest, pkg),
+			),
+			...pagesToTest.map((pageUrl) =>
 				step.run(`scan-page:${stepIdFromPageUrl(pageUrl)}`, () =>
 					scanPageStep({ scanId, pageUrl }),
 				),
 			),
-		);
+		]);
 
 		const scannerStatus = await step.run('finalize-scanner', () =>
 			finalizeScannerStep(scanId),
@@ -84,6 +84,7 @@ export const runScan = inngest.createFunction(
 						scanId,
 						pageUrl,
 						websiteType: scanAfter?.website_type ?? detection.type ?? null,
+						pkg,
 					}),
 				),
 			),

@@ -7,6 +7,9 @@ import {
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_TIMEOUT_MS = 90_000;
 const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_MAX_TOKENS = 8_000;
+/** Free scans show at most 3 issues — cap output tokens to finish faster. */
+const FREE_MAX_TOKENS = 3_500;
 const MAX_RESPONSE_PREVIEW_LENGTH = 500;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
@@ -260,6 +263,7 @@ export async function analyzeWithClaude(input: {
 	dynamicAfterImagesText: string;
 	scanId?: string;
 	pageUrl?: string;
+	isFree?: boolean;
 }) {
 	const config = getClaudeConfig();
 
@@ -289,9 +293,11 @@ export async function analyzeWithClaude(input: {
 		{ type: 'text', text: input.dynamicAfterImagesText },
 	];
 
+	const maxTokens = input.isFree ? FREE_MAX_TOKENS : DEFAULT_MAX_TOKENS;
+
 	const body = JSON.stringify({
 		model: config.model,
-		max_tokens: 8000,
+		max_tokens: maxTokens,
 		system: [
 			{
 				type: 'text',

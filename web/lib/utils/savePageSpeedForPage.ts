@@ -1,7 +1,17 @@
 import { runPageSpeedForUrl } from '@/lib/api/pagespeed';
+import type { PageSpeedStrategy } from '@/lib/api/pagespeed.types';
 import { getServiceSupabase } from '@/lib/db/supabase';
+import type { ScanPackage } from '@/types/zod';
 
-const PAGESPEED_CONCURRENCY = 1;
+const FREE_PAGESPEED_TIMEOUT_MS = 45_000;
+const FREE_PAGESPEED_STRATEGIES: PageSpeedStrategy[] = ['mobile'];
+
+function getPageSpeedConcurrency(): number {
+	const raw = Number.parseInt(process.env.PAGESPEED_CONCURRENCY ?? '', 10);
+	return Number.isFinite(raw) && raw >= 1 ? raw : 3;
+}
+
+const PAGESPEED_CONCURRENCY = getPageSpeedConcurrency();
 const PAGE_SPEED_DB_RETRIES = 2;
 const PAGE_SPEED_DB_RETRY_DELAY_MS = 1_000;
 
@@ -65,12 +75,26 @@ async function updatePageSpeedDataWithRetry(
 }
 
 
+function pageSpeedOptionsForPackage(pkg: ScanPackage) {
+	if (pkg === 'free') {
+		return {
+			timeoutMs: FREE_PAGESPEED_TIMEOUT_MS,
+			strategies: FREE_PAGESPEED_STRATEGIES,
+		};
+	}
+	return undefined;
+}
+
 export async function savePageSpeedForPage(
 	supabase: SupabaseClient,
 	scanId: string,
 	pageUrl: string,
+	pkg: ScanPackage,
 ): Promise<void> {
-	const pageSpeedData = await runPageSpeedForUrl(pageUrl);
+	const pageSpeedData = await runPageSpeedForUrl(
+		pageUrl,
+		pageSpeedOptionsForPackage(pkg),
+	);
 
 	await updatePageSpeedDataWithRetry(supabase, scanId, pageUrl, pageSpeedData);
 }
@@ -79,12 +103,15 @@ export async function collectPageSpeedForPages(
 	supabase: SupabaseClient,
 	scanId: string,
 	pageUrls: string[],
+	pkg: ScanPackage,
 ): Promise<void> {
 	for (let index = 0; index < pageUrls.length; index += PAGESPEED_CONCURRENCY) {
 		const chunk = pageUrls.slice(index, index + PAGESPEED_CONCURRENCY);
 
 		await Promise.all(
-			chunk.map((pageUrl) => savePageSpeedForPage(supabase, scanId, pageUrl)),
+			chunk.map((pageUrl) =>
+				savePageSpeedForPage(supabase, scanId, pageUrl, pkg),
+			),
 		);
 	}
 }
