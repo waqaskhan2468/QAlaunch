@@ -97,18 +97,6 @@ export type ResponsiveResult = {
 	sliceCount?: number;
 };
 
-/** Stored in the DB / passed to Claude — URLs instead of Buffers */
-export type ResponsivePayload = {
-	viewport: string;
-	width: number;
-	height: number;
-	hasHorizontalScroll: boolean;
-	/** First slice URL (or single full-page URL for desktop/tablet) */
-	screenshot_url: string | null;
-	/** All slice URLs for mobile viewports; single-element for others */
-	screenshot_slice_urls?: string[];
-};
-
 // ─── Screenshot upload result ──────────────────────────────────────────────
 
 export type ScreenshotUploadResult = {

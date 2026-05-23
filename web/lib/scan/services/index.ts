@@ -33,12 +33,13 @@ function withPageTimeout<T>(
 		promise,
 		new Promise<T>((_, reject) =>
 			setTimeout(
-				() =>
+				() => {
 					reject(
 						new Error(
 							`[scan] page timeout after ${getPageScanTimeoutMs()}ms: ${url} (scanId=${scanId})`,
 						),
-					),
+					);
+				},
 				getPageScanTimeoutMs(),
 			),
 		),

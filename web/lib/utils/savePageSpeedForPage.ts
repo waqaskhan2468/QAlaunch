@@ -1,10 +1,9 @@
 import { runPageSpeedForUrl } from '@/lib/api/pagespeed';
-import type { PageSpeedStrategy } from '@/lib/api/pagespeed.types';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import type { ScanPackage } from '@/types/zod';
 
-const FREE_PAGESPEED_TIMEOUT_MS = 45_000;
-const FREE_PAGESPEED_STRATEGIES: PageSpeedStrategy[] = ['mobile'];
+/** Free scans use the same mobile + desktop strategies as paid; slightly shorter per-call timeout. */
+const FREE_PAGESPEED_TIMEOUT_MS = 75_000;
 
 function getPageSpeedConcurrency(): number {
 	const raw = Number.parseInt(process.env.PAGESPEED_CONCURRENCY ?? '', 10);
@@ -68,19 +67,16 @@ async function updatePageSpeedDataWithRetry(
 		pageUrl,
 		error: lastError,
 	});
-	
-  throw new Error(
-    `Failed to persist page speed data after ${PAGE_SPEED_DB_RETRIES + 1} attempts for ${pageUrl}: ${lastError}`,
-  );
+
+	throw new Error(
+		`Failed to persist page speed data after ${PAGE_SPEED_DB_RETRIES + 1} attempts for ${pageUrl}: ${lastError}`,
+	);
 }
 
-
+/** All packages: Google PSI mobile + desktop. Playwright does not collect these metrics. */
 function pageSpeedOptionsForPackage(pkg: ScanPackage) {
 	if (pkg === 'free') {
-		return {
-			timeoutMs: FREE_PAGESPEED_TIMEOUT_MS,
-			strategies: FREE_PAGESPEED_STRATEGIES,
-		};
+		return { timeoutMs: FREE_PAGESPEED_TIMEOUT_MS };
 	}
 	return undefined;
 }

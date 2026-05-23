@@ -26,7 +26,7 @@ export const CLAUDE_SCAN_CACHEABLE_USER_TEXT = [
 	'Two images are attached in order (desktop, then mobile):',
 	'  Image 1 — Desktop viewport: Walk the page top to bottom. Note hero, nav, CTAs, layout, whitespace, typography, trust signals, footer.',
 	'  Image 2 — Mobile viewport: Check nav collapse, hero readability above fold, button sizes and spacing, text legibility, horizontal scroll, thumb-zone placement.',
-	'Cross-reference what you see in the screenshots against the structured data after the images.',
+	'Cross-reference screenshots with structured data after the images (Google PageSpeed mobile+desktop, axe, SEO DOM, console, network).',
 	'Report viewport-specific issues under "responsiveness"; issues visible on both viewports under "ui_bugs" or "usability_ux".',
 	'',
 	'HEURISTICS INSTRUCTIONS:',
@@ -75,8 +75,17 @@ PRIORITY ORDER (report findings in this order of importance):
 3. Mobile layout breaks — content cut off, unreadable text, horizontal scroll, buttons unreachable
 4. Desktop layout bugs — misaligned sections, overlapping elements, broken images
 5. UX clarity — unclear CTAs, poor visual hierarchy, confusing flow
-6. SEO issues — missing/duplicate title, poor meta, missing alt text
-7. Content & trust — placeholder text, inconsistent copy, missing trust signals
+6. Performance — Google PageSpeed lab + field vitals (LCP, INP, CLS, TBT, opportunities); never guess from screenshots
+7. SEO issues — PSI seo score when provided, plus on-page SEO elements (title, meta, headings)
+8. Content & trust — placeholder text, inconsistent copy, missing trust signals
+
+PERFORMANCE & PAGESPEED (mandatory when JSON is provided after screenshots):
+- Treat the PAGE SPEED block as the only source for lab performance scores and Core Web Vitals numbers.
+- Report category "performance" when: performance score is low, vitals exceed common thresholds (e.g. LCP > 2500ms mobile), or opportunities[] lists actionable Lighthouse items.
+- Compare mobile vs desktop PSI when both exist (e.g. mobile LCP much worse than desktop → responsiveness or performance issue).
+- Cite exact numbers in description (e.g. "Mobile LCP 4.5s vs desktop 2.1s per PageSpeed").
+- Use evidence "programmatic" for issues grounded only in PageSpeed data.
+- Do NOT duplicate PSI accessibility score as axe issues; axe violations are listed separately.
 
 ACCESSIBILITY GUIDANCE:
 - Prioritise axe violations by impact: critical > serious > moderate > minor
@@ -97,7 +106,7 @@ EVIDENCE (required per issue — pick the best primary source):
 - console: grounded in browser console messages.
 - network: grounded in failed requests / HTTP errors.
 - heuristic: grounded in programmatic brokenStates / rollup.
-- programmatic: same as heuristic (rollup-only or automated signal without a finer bucket).
+- programmatic: Google PageSpeed / Lighthouse metrics, opportunities, or other automated JSON (not screenshots).
 - mixed: multiple sources equally important.
 
 CONFIDENCE: number from 0 to 1. Use values below 0.6 when you are guessing or the signal is weak.

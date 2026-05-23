@@ -3,6 +3,10 @@ import {
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT,
 	parseClaudeIssues,
 } from './claude';
+import {
+	formatPageSpeedForClaude,
+	PAGE_SPEED_CLAUDE_INSTRUCTIONS,
+} from './format-page-speed-prompt';
 import type { getServiceSupabase } from '@/lib/db/supabase';
 import {
 	formatErrorWithCause,
@@ -40,8 +44,6 @@ type ScanPageRow = {
 	axe_violations: unknown;
 	screenshot_desktop_url: string | null;
 	screenshot_mobile_url: string | null;
-	screenshot_mobile_slice_urls: string[] | null;
-	screenshot_responsive_slices: unknown;
 };
 
 type SupabaseStorageObjectRef = {
@@ -134,47 +136,12 @@ async function createSignedScreenshotUrl(
 	return data.signedUrl;
 }
 
-function getIphone14SliceUrlsFromResponsiveSlices(
-	responsiveSlices: unknown,
-): string[] {
-	if (!Array.isArray(responsiveSlices)) return [];
-
-	const iPhone14 = responsiveSlices.find((entry) => {
-		if (!isRecord(entry)) return false;
-		return entry.viewport === 'iPhone 14';
-	});
-	if (!isRecord(iPhone14) || !Array.isArray(iPhone14.slice_urls)) return [];
-
-	return iPhone14.slice_urls.filter(
-		(url): url is string => typeof url === 'string' && url.length > 0,
-	);
-}
-
-/** One mobile screenshot URL for Claude (full-page capture preferred). */
+/** Mobile screenshot URL for Claude analysis. */
 function getPrimaryMobileScreenshotUrl(page: ScanPageRow): string | null {
-	const fromDirectColumn = Array.isArray(page.screenshot_mobile_slice_urls) ?
-		page.screenshot_mobile_slice_urls.filter(
-			(url): url is string => typeof url === 'string' && url.length > 0,
-		)
-	: [];
-
-	const fromResponsiveSlices =
-		fromDirectColumn.length > 0 ?
-			[]
-		:	getIphone14SliceUrlsFromResponsiveSlices(page.screenshot_responsive_slices);
-
-	const fromSingleMobile =
-		fromDirectColumn.length === 0 &&
-		fromResponsiveSlices.length === 0 &&
-		typeof page.screenshot_mobile_url === 'string' &&
+	return typeof page.screenshot_mobile_url === 'string' &&
 		page.screenshot_mobile_url.length > 0 ?
-			[page.screenshot_mobile_url]
-		:	[];
-
-	const merged = [...fromDirectColumn, ...fromResponsiveSlices, ...fromSingleMobile];
-	const deduped = Array.from(new Set(merged));
-
-	return deduped[0] ?? null;
+		page.screenshot_mobile_url
+	:	null;
 }
 
 function orderPages<T extends { id: string; page_url: string }>(
@@ -307,8 +274,9 @@ function buildAnalysisPromptAfterImages(input: {
 	return [
 		'STRUCTURED SCAN DATA (same page as screenshots above):',
 		'',
-		'PERFORMANCE METRICS (Google PageSpeed):',
-		JSON.stringify(input.pageSpeedData, null, 2),
+		PAGE_SPEED_CLAUDE_INSTRUCTIONS,
+		'',
+		formatPageSpeedForClaude(input.pageSpeedData),
 		'',
 		'JAVASCRIPT CONSOLE ERRORS:',
 		JSON.stringify(scanData.consoleMessages, null, 2),
@@ -456,7 +424,7 @@ async function loadScanPageRow(
 	const { data: page, error } = await supabase
 		.from('scan_pages')
 		.select(
-			'id, page_url, page_role, page_speed_data, playwright_data, axe_violations, screenshot_desktop_url, screenshot_mobile_url, screenshot_mobile_slice_urls, screenshot_responsive_slices',
+			'id, page_url, page_role, page_speed_data, playwright_data, axe_violations, screenshot_desktop_url, screenshot_mobile_url',
 		)
 		.eq('scan_id', scanId)
 		.eq('page_url', pageUrl)

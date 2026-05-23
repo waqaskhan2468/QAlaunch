@@ -1,9 +1,18 @@
-import type { PageSpeedStrategy, PageSpeedScores, PageSpeedResult, PsiResponse } from '@/lib/api/pagespeed.types';
+import type {
+	PageSpeedAuditFinding,
+	PageSpeedFieldVitals,
+	PageSpeedScores,
+	PageSpeedResult,
+	PageSpeedStrategy,
+	PsiAudit,
+	PsiResponse,
+} from '@/lib/api/pagespeed.types';
 
 const PSI_ENDPOINT =
 	'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 const DEFAULT_TIMEOUT_MS = 90_000;
 const MAX_RETRIES = 1;
+const MAX_OPPORTUNITIES = 10;
 
 function validateHttpUrl(value: string): void {
 	let parsed: URL;
@@ -22,8 +31,11 @@ function scoreToPercent(value: unknown): number | null {
 	return typeof value === 'number' ? Math.round(value * 100) : null;
 }
 
-function getAuditNumber(data: PsiResponse, key: string): number | null {
-	const value = data?.lighthouseResult?.audits?.[key]?.numericValue;
+function getAuditNumber(
+	audits: Record<string, PsiAudit> | undefined,
+	key: string,
+): number | null {
+	const value = audits?.[key]?.numericValue;
 	return typeof value === 'number' ? value : null;
 }
 
@@ -80,18 +92,85 @@ async function fetchJsonWithTimeout<T>(
 	}
 }
 
+function extractOpportunities(
+	audits: Record<string, PsiAudit> | undefined,
+): PageSpeedAuditFinding[] {
+	if (!audits) return [];
+
+	const findings: PageSpeedAuditFinding[] = [];
+
+	for (const [id, audit] of Object.entries(audits)) {
+		if (!audit || typeof audit !== 'object') continue;
+
+		const score = audit.score;
+		if (typeof score !== 'number' || score >= 0.9) continue;
+
+		const mode = audit.scoreDisplayMode;
+		if (mode === 'notApplicable' || mode === 'manual' || mode === 'informative') {
+			continue;
+		}
+
+		findings.push({
+			id,
+			title: typeof audit.title === 'string' ? audit.title : id,
+			displayValue:
+				typeof audit.displayValue === 'string' ? audit.displayValue : null,
+			score: Math.round(score * 100),
+		});
+	}
+
+	findings.sort((a, b) => (a.score ?? 100) - (b.score ?? 100));
+	return findings.slice(0, MAX_OPPORTUNITIES);
+}
+
+function extractFieldVitals(data: PsiResponse): PageSpeedFieldVitals | null {
+	const metrics = data.loadingExperience?.metrics;
+	if (!metrics) return null;
+
+	const percentile = (key: string): number | null => {
+		const value = metrics[key]?.percentile;
+		return typeof value === 'number' ? value : null;
+	};
+
+	const lcpMs = percentile('LARGEST_CONTENTFUL_PAINT_MS');
+	const inpMs = percentile('INTERACTION_TO_NEXT_PAINT');
+	const clsRaw = percentile('CUMULATIVE_LAYOUT_SHIFT_SCORE');
+	const fcpMs = percentile('FIRST_CONTENTFUL_PAINT_MS');
+
+	if (lcpMs === null && inpMs === null && clsRaw === null && fcpMs === null) {
+		return null;
+	}
+
+	return {
+		lcpMs,
+		inpMs,
+		cls: clsRaw !== null ? clsRaw / 100 : null,
+		fcpMs,
+	};
+}
+
 function extractScores(data: PsiResponse): PageSpeedScores {
-	const categories = data?.lighthouseResult?.categories;
+	const lighthouse = data.lighthouseResult;
+	const categories = lighthouse?.categories;
+	const audits = lighthouse?.audits;
 
 	return {
 		performance: scoreToPercent(categories?.performance?.score),
 		seo: scoreToPercent(categories?.seo?.score),
 		accessibility: scoreToPercent(categories?.accessibility?.score),
 		bestPractices: scoreToPercent(categories?.['best-practices']?.score),
-		lcpMs: getAuditNumber(data, 'largest-contentful-paint'),
-		fcpMs: getAuditNumber(data, 'first-contentful-paint'),
-		cls: getAuditNumber(data, 'cumulative-layout-shift'),
-		ttiMs: getAuditNumber(data, 'interactive'),
+		lcpMs: getAuditNumber(audits, 'largest-contentful-paint'),
+		fcpMs: getAuditNumber(audits, 'first-contentful-paint'),
+		cls: getAuditNumber(audits, 'cumulative-layout-shift'),
+		ttiMs: getAuditNumber(audits, 'interactive'),
+		inpMs: getAuditNumber(audits, 'interaction-to-next-paint'),
+		tbtMs: getAuditNumber(audits, 'total-blocking-time'),
+		speedIndex: getAuditNumber(audits, 'speed-index'),
+		ttfbMs: getAuditNumber(audits, 'server-response-time'),
+		finalUrl: lighthouse?.finalUrl ?? null,
+		fetchedAt: lighthouse?.fetchTime ?? null,
+		opportunities: extractOpportunities(audits),
+		fieldVitals: extractFieldVitals(data),
 	};
 }
 

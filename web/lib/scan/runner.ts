@@ -1,9 +1,7 @@
 import type { ServiceSupabase } from '@/lib/db/supabase';
 import { runPlaywrightScanForUrl } from './services/index';
-import { MOBILE_VIEWPORT_NAME } from './services/responsive';
 import type { ScanStatus } from '@/types/zod';
 import type {
-	ResponsivePayload,
 	ScanResult,
 	ScreenshotUploadResult,
 } from './types/scan.types';
@@ -211,110 +209,7 @@ async function uploadScreenshotBuffer(
 	};
 }
 
-// ─── Responsive screenshot upload (slice-aware) ────────────────────────────
-
-/**
- * Upload all screenshots for every responsive viewport.
- *
- * Each viewport uses one full-page `item.screenshot`. Multiple uploads only
- * occur when `item.slices` is set (legacy). URLs are stored in
- * `screenshot_slice_urls` with `screenshot_url` as the first entry.
- */
-async function uploadResponsiveScreenshots(
-	supabase: ServiceSupabase,
-	scanId: string,
-	pageUrl: string,
-	result: ScanResult,
-	warnings: string[],
-): Promise<ResponsivePayload[] | null> {
-	if (!result.responsive) return null;
-
-	const responsivePayload = await Promise.all(
-		result.responsive.map(async (item, index) => {
-			const viewportSlug = sanitizeForPath(
-				item.viewport || `viewport-${index + 1}`,
-			);
-
-			// Use slices array when available (mobile), otherwise wrap the single
-			// full-page screenshot so the upload loop is uniform.
-			const slices = item.slices?.length ? item.slices : [item.screenshot];
-
-			const sliceUploads = await Promise.all(
-				slices.map((slice, sliceIndex) =>
-					uploadScreenshotBuffer(
-						supabase,
-						slice,
-						scanId,
-						pageUrl,
-						// e.g. "responsive-2-iphone-14-s1.png"
-						`responsive-${index + 1}-${viewportSlug}-s${sliceIndex + 1}`,
-						`responsive:${item.viewport}:slice${sliceIndex + 1}`,
-					),
-				),
-			);
-
-			for (const upload of sliceUploads) {
-				if (upload.warning) warnings.push(upload.warning);
-			}
-
-			return {
-				viewport: item.viewport,
-				width: item.width,
-				height: item.height,
-				hasHorizontalScroll: item.hasHorizontalScroll,
-				// First slice URL kept for backward compatibility
-				screenshot_url: sliceUploads[0]?.url ?? null,
-				// All slice URLs — what Claude receives for visual analysis
-				screenshot_slice_urls: sliceUploads
-					.map((u) => u.url)
-					.filter((url): url is string => typeof url === 'string' && url.length > 0),
-			} satisfies ResponsivePayload;
-		}),
-	);
-
-	return responsivePayload;
-}
-
 // ─── Helpers ───────────────────────────────────────────────────────────────
-
-function getMobileScreenshotUrlFromResponsive(
-	responsivePayload: ResponsivePayload[] | null,
-): string | null {
-	if (!responsivePayload) return null;
-
-	return (
-		responsivePayload.find((item) => item.viewport === MOBILE_VIEWPORT_NAME)
-			?.screenshot_url ?? null
-	);
-}
-
-function getMobileSliceUrlsFromResponsive(
-	responsivePayload: ResponsivePayload[] | null,
-): string[] {
-	if (!responsivePayload) return [];
-
-	const mobileViewport = responsivePayload.find(
-		(item) => item.viewport === MOBILE_VIEWPORT_NAME,
-	);
-	if (!mobileViewport) return [];
-
-	return (mobileViewport.screenshot_slice_urls ?? []).filter(
-		(url): url is string => typeof url === 'string' && url.length > 0,
-	);
-}
-
-function buildResponsiveSlicesPayload(
-	responsivePayload: ResponsivePayload[] | null,
-): Array<{ viewport: string; width: number; slice_urls: string[] }> {
-	if (!responsivePayload) return [];
-
-	return responsivePayload.map((item) => ({
-		viewport: item.viewport,
-		width: item.width,
-		slice_urls: (item.screenshot_slice_urls ?? [])
-			.filter((url): url is string => typeof url === 'string' && url.length > 0),
-	}));
-}
 
 function buildPlaywrightPayload(
 	result: ScanResult,
@@ -410,7 +305,7 @@ async function processScanResult(
 ): Promise<void> {
 	const uploadWarnings: string[] = [];
 
-	const [desktopUpload, responsivePayload] = await Promise.all([
+	const [desktopUpload, mobileUpload] = await Promise.all([
 		uploadScreenshotBuffer(
 			supabase,
 			result.screenshots?.desktop,
@@ -419,24 +314,18 @@ async function processScanResult(
 			'desktop',
 			'desktop',
 		),
-		uploadResponsiveScreenshots(supabase, scanId, result.url, result, uploadWarnings),
+		uploadScreenshotBuffer(
+			supabase,
+			result.screenshots?.mobile,
+			scanId,
+			result.url,
+			'mobile',
+			'mobile',
+		),
 	]);
 
-	if (desktopUpload.warning) {
-		uploadWarnings.push(desktopUpload.warning);
-	}
-
-	const mobileScreenshotUrl =
-		getMobileScreenshotUrlFromResponsive(responsivePayload);
-	const mobileSliceUrls = getMobileSliceUrlsFromResponsive(responsivePayload);
-	const responsiveSlicesPayload =
-		buildResponsiveSlicesPayload(responsivePayload);
-
-	if (!mobileScreenshotUrl) {
-		uploadWarnings.push(
-			`Screenshot missing (mobile): ${MOBILE_VIEWPORT_NAME} responsive screenshot URL not available`,
-		);
-	}
+	if (desktopUpload.warning) uploadWarnings.push(desktopUpload.warning);
+	if (mobileUpload.warning) uploadWarnings.push(mobileUpload.warning);
 
 	logAxeGateFailure(scanId, result);
 
@@ -445,19 +334,9 @@ async function processScanResult(
 		warnings: [...(result.warnings ?? []), ...uploadWarnings],
 	};
 
-	// Build the DB patch conditionally.
-	// Writing `null` to a non-nullable column was causing silent DB errors.
-	// Screenshots are non-fatal — a missing URL is surfaced via warnings[] instead.
-	const screenshotPatch: Record<string, unknown> = {};
-
-	screenshotPatch.screenshot_desktop_url = desktopUpload.url ?? null;
-
-	screenshotPatch.screenshot_mobile_url = mobileScreenshotUrl ?? null;
-	screenshotPatch.screenshot_mobile_slice_urls = mobileSliceUrls;
-	screenshotPatch.screenshot_responsive_slices = responsiveSlicesPayload;
-
 	await updateScanPage(supabase, scanId, result.url, {
-		...screenshotPatch,
+		screenshot_desktop_url: desktopUpload.url ?? null,
+		screenshot_mobile_url: mobileUpload.url ?? null,
 		raw_html: result.rawHtml ?? null,
 		axe_violations: result.axe ?? null,
 		playwright_data: buildPlaywrightPayload(resultWithUploadWarnings),

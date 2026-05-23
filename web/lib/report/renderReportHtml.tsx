@@ -101,11 +101,13 @@ function getPerformanceMetrics(pages: ReportScanPage[]) {
 	const lcpValues: number[] = [];
 	for (const page of pages) {
 		const pageSpeed = page.page_speed_data as Record<string, unknown> | null;
-		const mobile = pageSpeed?.mobile as Record<string, unknown> | undefined;
-		const perfNum = safeNum(mobile?.performance);
-		const lcpNum = safeNum(mobile?.lcpMs);
-		if (perfNum !== null) perfScores.push(perfNum);
-		if (lcpNum !== null) lcpValues.push(lcpNum);
+		for (const strategy of ['mobile', 'desktop'] as const) {
+			const snapshot = pageSpeed?.[strategy] as Record<string, unknown> | undefined;
+			const perfNum = safeNum(snapshot?.performance);
+			const lcpNum = safeNum(snapshot?.lcpMs);
+			if (perfNum !== null) perfScores.push(perfNum);
+			if (lcpNum !== null) lcpValues.push(lcpNum);
+		}
 	}
 	const avg = (arr: number[]) =>
 		arr.length > 0 ?
