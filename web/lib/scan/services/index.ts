@@ -429,26 +429,22 @@ export async function runPlaywrightScanOnSession(
 /** One Browserbase session per page (legacy / single-page fallback). */
 export async function runPlaywrightScanForUrl(
 	scanId: string,
-	url: string,
+	pageUrl: string,
 	options?: { writer?: IncrementalArtifactWriter },
 ): Promise<ScanResult> {
-	const session = await createBrowserbaseSession(scanId, url);
+	const session: BrowserbaseSession = await createBrowserbaseSession(
+		scanId,
+		pageUrl,
+	);
 	const browser = await connectBrowserbase(session.connectUrl);
-
 	try {
 		return await scanSingleUrlWithTimeout(
 			browser,
-			url,
+			pageUrl,
 			scanId,
 			options?.writer,
 		);
 	} finally {
 		await closeBrowserSession(browser);
 	}
-}
-
-export async function createScanBrowserbaseSession(
-	scanId: string,
-): Promise<BrowserbaseSession> {
-	return createBrowserbaseSession(scanId);
 }
