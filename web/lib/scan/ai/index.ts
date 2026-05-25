@@ -9,5 +9,6 @@ export {
 	parseClaudeIssues,
 	REPORT_SCAN_ISSUES_TOOL_NAME,
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT,
+	CLAUDE_SCAN_CACHEABLE_USER_TEXT_NO_SCREENSHOTS,
 } from './claude';
 export type * from './types';

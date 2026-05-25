@@ -89,6 +89,8 @@ function severityConfig(severity: IssueSeverity): {
 			};
 		case 'low':
 			return { bg: '#eff6ff', color: '#1d4ed8', dot: '#3b82f6', label: 'Low' };
+		default:
+			return { bg: '#f9fafb', color: '#374151', dot: '#6b7280', label: String(severity) };
 	}
 }
 
@@ -1138,11 +1140,12 @@ ${sectionsHtml}
     <div class="report-footer">
       <div class="footer-heading">Next steps</div>
       <div class="footer-text">Share this report with your development team and prioritize critical and high severity issues first. Use the Fix instructions in each card as a starting point for your sprint backlog.</div>
-      <a class="footer-contact" href="mailto:support@qalaunch.com">support@qalaunch.com</a>
+      <a class="footer-contact" href="mailto:support@qalaunch.com">Contact support</a>
     </div>
   </div>
 </div>
-
+</div>
 </body>
-</html>`;
+</html>
+`;
 }

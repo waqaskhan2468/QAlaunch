@@ -22,6 +22,8 @@ export function isRetryableNetworkError(error: unknown): boolean {
 
 	return (
 		combined.includes('fetch failed') ||
+		combined.includes('connection error') ||
+		combined.includes('connect timeout') ||
 		combined.includes('econnreset') ||
 		combined.includes('etimedout') ||
 		combined.includes('enotfound') ||
@@ -45,41 +47,66 @@ function isNonRetryablePostgrestMessage(message: string): boolean {
 	);
 }
 
-export async function updateScanPageAiAnalysis(
-	pageId: string,
-	aiAnalysis: unknown,
+function shouldRetrySupabaseMutation(error: unknown): boolean {
+	if (
+		error &&
+		typeof error === 'object' &&
+		'nonRetryable' in error &&
+		(error as { nonRetryable?: boolean }).nonRetryable
+	) {
+		return false;
+	}
+	return isRetryableNetworkError(error);
+}
+
+export async function updateScanPageRecord(
+	scanId: string,
+	pageUrl: string,
+	patch: Record<string, unknown>,
 	options?: { attempts?: number },
 ): Promise<void> {
 	await withRetry(
 		async () => {
 			const supabase = getServiceSupabase();
-			const { error } = await supabase
+			const { data, error } = await supabase
 				.from('scan_pages')
-				.update({ ai_analysis: aiAnalysis })
-				.eq('id', pageId);
+				.update(patch)
+				.eq('scan_id', scanId)
+				.eq('page_url', pageUrl)
+				.select('id');
 
-			if (!error) return;
+			if (!error && data?.length) return;
 
-			const err = new Error(error.message);
-			if (isNonRetryablePostgrestMessage(error.message)) {
-				throw Object.assign(err, { nonRetryable: true as const });
+			if (error) {
+				const err = new Error(error.message);
+				if (isNonRetryablePostgrestMessage(error.message)) {
+					const nonRetryable = Object.assign(new Error(error.message), {
+						nonRetryable: true,
+					});
+					throw nonRetryable;
+				}
+				throw new Error(error.message);
 			}
-			throw err;
+
+			if (!data?.length) {
+				throw Object.assign(
+					new Error(`No matching scan_pages row for ${pageUrl}`),
+					{ nonRetryable: true },
+				);
+			}
 		},
 		{
-			attempts: options?.attempts ?? 5,
-			delayMs: 2_000,
-			shouldRetry: (error) => {
-				if (
-					error &&
-					typeof error === 'object' &&
-					'nonRetryable' in error &&
-					(error as { nonRetryable?: boolean }).nonRetryable
-				) {
-					return false;
-				}
-				return isRetryableNetworkError(error);
-			},
+			attempts: options?.attempts ?? 3,
+			delayMs: 1_000,
+			shouldRetry: shouldRetrySupabaseMutation,
 		},
 	);
+}
+
+export async function updateScanPageAiAnalysis(
+	scanId: string,
+	pageUrl: string,
+	patch: Record<string, unknown>,
+): Promise<void> {
+	await updateScanPageRecord(scanId, pageUrl, patch, { attempts: 2 });
 }

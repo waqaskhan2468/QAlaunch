@@ -123,12 +123,17 @@ export async function collectLinks(
 		})
 		.filter((link): link is LinkRecord => link !== null);
 
-	const uniqueLinks = Array.from(
-		new Map(normalizedLinks.map((link) => [link.href, link])).values(),
+	const uniqueLinks: LinkRecord[] = Array.from(
+		new Map<string, LinkRecord>(normalizedLinks.map((link): [string, LinkRecord] => [link.href, link])).values(),
 	);
 
 	const checkedLinks = uniqueLinks.slice(0, MAX_LINKS);
-	const validatedLinks = await Promise.all(checkedLinks.map(validateLink));
+	const LINK_CONCURRENCY = 10;
+	const validatedLinks: ValidatedLink[] = [];
+	for (let i = 0; i < checkedLinks.length; i += LINK_CONCURRENCY) {
+		const batch: LinkRecord[] = checkedLinks.slice(i, i + LINK_CONCURRENCY);
+		validatedLinks.push(...(await Promise.all((batch as LinkRecord[]).map(validateLink))));
+	}
 
 	return {
 		totalLinks: uniqueLinks.length,

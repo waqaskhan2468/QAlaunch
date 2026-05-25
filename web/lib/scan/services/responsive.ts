@@ -1,16 +1,12 @@
-import { devices, type Browser } from 'playwright-core';
+import { devices, type Browser, type Page } from 'playwright-core';
 import type { ResponsiveResult } from '../types/scan.types';
-import { closeContext, safeGoto } from './navigation';
-import { withRetry } from './retry';
-import {
-	preparePageForScreenshot,
-	takeScreenshot,
-} from './screenshots';
+import { closeContext, getNavTimeoutMs, safeGoto } from './navigation';
+import { blockThirdPartyResources } from './resourceBlocklist';
+import { preparePageForScreenshot, takeScreenshot } from './screenshots';
 
 export const MOBILE_VIEWPORT_NAME = 'iPhone 14';
 
-// Viewport width threshold: ≤ this value uses the mobile capture branch
-// (single full-page PNG; see plan-scanner-roadmap Phase A2).
+// Viewport width threshold: ≤ this value uses the mobile capture branch.
 const MOBILE_WIDTH_THRESHOLD = 430;
 
 const RESPONSIVE_VIEWPORTS = [
@@ -19,14 +15,14 @@ const RESPONSIVE_VIEWPORTS = [
 
 type ResponsiveViewport = (typeof RESPONSIVE_VIEWPORTS)[number];
 
+// ─── Internal: navigate a fresh context ───────────────────────────────────
+
 async function navigateForResponsiveCapture(
 	browser: Browser,
 	url: string,
 	viewport: ResponsiveViewport,
-): Promise<import('playwright-core').Page> {
+): Promise<Page> {
 	const context = await browser.newContext({
-		// Apply full iPhone 14 device emulation (UA, touch, pixel ratio) for
-		// the primary mobile viewport; bare width/height for everything else.
 		...(viewport.name === MOBILE_VIEWPORT_NAME ?
 			devices[MOBILE_VIEWPORT_NAME]
 		:	{}),
@@ -38,23 +34,14 @@ async function navigateForResponsiveCapture(
 
 	try {
 		const page = await context.newPage();
+		page.setDefaultTimeout(getNavTimeoutMs());
+		page.setDefaultNavigationTimeout(getNavTimeoutMs());
+		await blockThirdPartyResources(page);
 
-		try {
-			await safeGoto(page, url);
-		} catch (error) {
-			// Some sites never fully settle in emulated/mobile contexts. Fall back
-			// to a less strict navigation target so we can still capture screenshots.
-			console.warn('[responsive] safeGoto failed, trying commit fallback', {
-				url,
-				viewport: viewport.name,
-				error: error instanceof Error ? error.message : String(error),
-			});
-
-			await page.goto(url, {
-				waitUntil: 'commit',
-				timeout: 20_000,
-			});
-		}
+		// safeGoto already attempts domcontentloaded then commit internally.
+		// No additional fallback needed here — if safeGoto throws, both
+		// attempts already failed and a third commit attempt won't help.
+		await safeGoto(page, url);
 
 		return page;
 	} catch (error) {
@@ -63,81 +50,82 @@ async function navigateForResponsiveCapture(
 	}
 }
 
-async function scanViewport(
-	browser: Browser,
-	url: string,
+// ─── Internal: capture from an already-navigated page ─────────────────────
+
+async function captureFromPage(
+	page: Page,
 	viewport: ResponsiveViewport,
 ): Promise<ResponsiveResult> {
-	const page = await navigateForResponsiveCapture(browser, url, viewport);
-	const context = page.context();
+	// Keep animations enabled for responsive captures so IntersectionObserver-
+	// based reveals fire during the lazy-load scroll.
+	await preparePageForScreenshot(page, { disableAnimations: false });
 
-	try {
-		// Keep animations enabled for responsive captures so that
-		// IntersectionObserver-based reveals fire during the lazy-load scroll.
-		await preparePageForScreenshot(page, { disableAnimations: false });
+	const hasHorizontalScroll = await page.evaluate(
+		() =>
+			document.documentElement.scrollWidth >
+			document.documentElement.clientWidth,
+	);
 
-		const hasHorizontalScroll = await page.evaluate(
-			() =>
-				document.documentElement.scrollWidth >
-				document.documentElement.clientWidth,
-		);
+	const isMobile = viewport.width <= MOBILE_WIDTH_THRESHOLD;
 
-		const isMobile = viewport.width <= MOBILE_WIDTH_THRESHOLD;
-
-		if (isMobile) {
-			// ── Mobile: single full-page PNG (same semantics as desktop) ────
-			const screenshot = await takeScreenshot(page);
-
-			return {
-				viewport: viewport.name,
-				width: viewport.width,
-				height: viewport.height,
-				hasHorizontalScroll,
-				screenshot,
-				sliceCount: 1,
-			};
-		}
-
-		// ── Non-mobile fallback: single full-page screenshot ──────────────
+	if (isMobile) {
+		const screenshot = await takeScreenshot(page);
 		return {
 			viewport: viewport.name,
 			width: viewport.width,
 			height: viewport.height,
 			hasHorizontalScroll,
-			screenshot: await takeScreenshot(page),
+			screenshot,
 			sliceCount: 1,
 		};
-	} finally {
-		await closeContext(context);
 	}
+
+	return {
+		viewport: viewport.name,
+		width: viewport.width,
+		height: viewport.height,
+		hasHorizontalScroll,
+		screenshot: await takeScreenshot(page),
+		sliceCount: 1,
+	};
 }
 
-export async function collectResponsive(
+// ─── Public API ────────────────────────────────────────────────────────────
+
+/**
+ * Capture a responsive result from a **pre-navigated** mobile Page.
+ *
+ * Use this when you have already navigated the mobile page in a background
+ * context (e.g. started in parallel with desktop data collection). This avoids
+ * the cost of a second navigation to the same URL.
+ *
+ * The caller is responsible for closing the page/context after this returns.
+ *
+ * @param page    Already-navigated Playwright Page with mobile viewport set.
+ * @param viewport Viewport metadata (name, width, height).
+ */
+export async function captureResponsiveFromPage(
+	page: Page,
+	viewport: ResponsiveViewport = RESPONSIVE_VIEWPORTS[0],
+): Promise<ResponsiveResult> {
+	return captureFromPage(page, viewport);
+}
+
+/**
+ * Start a mobile browser context and navigate to `url` in the background.
+ *
+ * Returns a Promise that resolves to `{ page, context }` once navigation
+ * completes. The caller must close the context when done.
+ *
+ * Designed to be fired at the top of a scan and awaited only when the
+ * screenshot is actually needed — so navigation happens concurrently with
+ * desktop data collection (axe, links, seo, etc.).
+ */
+export async function startMobileNavigation(
 	browser: Browser,
 	url: string,
-): Promise<ResponsiveResult[]> {
-	const results: ResponsiveResult[] = [];
-
-	for (const viewport of RESPONSIVE_VIEWPORTS) {
-		try {
-			results.push(
-				await withRetry(() => scanViewport(browser, url, viewport), {
-					attempts: 2,
-					delayMs: 1_000,
-				}),
-			);
-		} catch (error) {
-			console.warn('[responsive] viewport capture failed', {
-				url,
-				viewport: viewport.name,
-				error: error instanceof Error ? error.message : String(error),
-			});
-		}
-	}
-
-	if (results.length === 0) {
-		throw new Error('all_responsive_viewports_failed');
-	}
-
-	return results;
+): Promise<{ page: Page; viewport: ResponsiveViewport }> {
+	const viewport = RESPONSIVE_VIEWPORTS[0];
+	const page = await navigateForResponsiveCapture(browser, url, viewport);
+	return { page, viewport };
 }

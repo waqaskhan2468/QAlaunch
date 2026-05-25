@@ -10,7 +10,8 @@ export const handleScanFailed = inngest.createFunction(
 		name: 'Mark scan failed after pipeline exhaustion',
 		triggers: [{ event: internalEvents.FunctionFailed }],
 	},
-	async ({ event }) => {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	async ({ event }: { event: any }) => {
 		const data = event.data as {
 			function_id?: string;
 			error?: { message?: string } | string;

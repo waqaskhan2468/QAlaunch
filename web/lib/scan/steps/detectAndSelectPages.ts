@@ -8,25 +8,53 @@ import {
 import type { ScanPackage } from '@/types/zod';
 import type { DetectAndSelectResult } from './types';
 
+/** When server-side fetch cannot reach the site, still scan homepage via Browserbase. */
+function buildHomepageFetchFallback(targetUrl: string): DetectAndSelectResult {
+	const homepageUrl = new URL('/', targetUrl).toString();
+	const selectedPages: SelectedScanPage[] = [
+		{ url: homepageUrl, role: 'homepage' },
+	];
+
+	console.warn(
+		JSON.stringify({
+			ts: new Date().toISOString(),
+			level: 'warn',
+			event: 'detect:homepage_fetch_fallback',
+			targetUrl,
+			homepageUrl,
+			reason: 'Server could not fetch homepage HTML; scanning homepage only via browser.',
+		}),
+	);
+
+	return {
+		detection: { type: 'other' as const, requiresAuth: false },
+		pagesToTest: selectedPages.map((p) => p.url),
+		selectedPages,
+	};
+}
+
 export async function detectAndSelectPagesStep(
 	targetUrl: string,
 	pkg: ScanPackage,
 ): Promise<DetectAndSelectResult> {
-	const homepageHtml = await fetchHomepageHtml(targetUrl);
-	const detection = detectWebsiteType(homepageHtml, targetUrl);
-	const selectedPages = selectPagesToTestWithRoles(
-		homepageHtml,
-		targetUrl,
-		detection.type,
-		pkg,
-	);
-	const pagesToTest = selectedPages.map((p: SelectedScanPage) => p.url);
+	let html: string | null = null;
 
-	if (!pagesToTest.length) {
-		throw new NonRetriableError(
-			'No public pages were found to test on this website.',
-		);
+	try {
+		html = await fetchHomepageHtml(targetUrl);
+	} catch {
+		return buildHomepageFetchFallback(targetUrl);
 	}
 
-	return { detection, pagesToTest, selectedPages };
+	if (!html) {
+		return buildHomepageFetchFallback(targetUrl);
+	}
+
+	const detection = detectWebsiteType(html ?? '', targetUrl);
+	const selectedPages = selectPagesToTestWithRoles(html ?? '', targetUrl, detection.type, pkg);
+
+	return {
+		detection,
+		pagesToTest: selectedPages.map((p) => p.url),
+		selectedPages,
+	};
 }

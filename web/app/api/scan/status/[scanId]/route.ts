@@ -92,7 +92,8 @@ export async function GET(
 			id: issue.id,
 			category: issue.category,
 			severity: issue.severity,
-			isLocked: true,
+			title: issue.title,   // exposed as teaser — no description/impact/fix
+			isLocked: true as const,
 		}));
 
 	return NextResponse.json({

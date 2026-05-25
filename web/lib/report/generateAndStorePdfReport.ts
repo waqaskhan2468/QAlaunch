@@ -2,9 +2,8 @@ import { Resend } from 'resend';
 import { generatePdfFromHtml } from '@/lib/scan/pdf';
 import { renderReportHtml } from './renderReportHtml';
 import type { ReportIssue, ReportScan, ReportScanPage } from './report.types';
+import { hydratePagesWithArtifacts } from '@/lib/artifacts';
 import type { getServiceSupabase } from '@/lib/db/supabase';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 type ServiceSupabase = ReturnType<typeof getServiceSupabase>;
 
@@ -83,7 +82,7 @@ async function fetchReportData(
 			.single(),
 		supabase
 			.from('scan_pages')
-			.select('page_url, page_speed_data, playwright_data')
+			.select('page_url, page_speed_data, playwright_data, artifact_path')
 			.eq('scan_id', scanId),
 		supabase
 			.from('issues')
@@ -134,9 +133,19 @@ async function fetchReportData(
 		};
 	});
 
+	const hydratedPages = await hydratePagesWithArtifacts(
+		(pages ?? []).map((p) => ({
+			scan_id: scanId,
+			page_url: (p as { page_url: string }).page_url,
+			artifact_path: (p as { artifact_path?: string | null }).artifact_path,
+			playwright_data: (p as { playwright_data?: unknown }).playwright_data,
+			page_speed_data: (p as { page_speed_data?: unknown }).page_speed_data,
+		})),
+	);
+
 	return {
 		scan: scan as ReportScan,
-		pages: (pages ?? []) as ReportScanPage[],
+		pages: hydratedPages as unknown as ReportScanPage[],
 		issues: normalizedIssues,
 	};
 }
@@ -292,7 +301,9 @@ export async function generateAndStorePdfReport(
 			targetUrl: scan.url,
 			userEmail: scan.user_email,
 		};
-	} catch (error) {
-		throw new Error(`PDF flow failed: ${getErrorMessage(error)}`);
+	} catch (error: unknown) {
+		throw new Error(
+			`PDF generation failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 }

@@ -53,14 +53,15 @@ Steps run in `lib/inngest/functions/run-scan.ts`:
 3. **persist-metadata** — detection + selected pages on `scans`
 4. **prepare-scanner** — env + scanner row prep
 5. **collect-pagespeed** — PSI scores per URL → `scan_pages.page_speed_data`
-6. **scan-page:{url}** — parallel Playwright scan per page (`lib/scan/runner`)
-7. **finalize-scanner** — aggregate scanner status; exit early if failed
-8. **reload-scan** — fresh scan row for AI inputs
-9. **clear-ai-issues** — reset prior AI issues
-10. **ai-page:{url}** — parallel Claude analysis per page
-11. **persist-ai-issues** — merge into `issues` table
-12. **generate-pdf** + **send-email** — paid packages only
-13. **mark-done** — final status
+6. **scan-browser:{url}** — Playwright + artifact upload to storage (`lib/artifacts`)
+7. **scan-persist:{url}** — DB index only (`artifact_path`, screenshots; no browser rerun)
+8. **finalize-scanner** — aggregate scanner status; exit early if failed
+9. **reload-scan** — fresh scan row for AI inputs
+10. **clear-ai-issues** — reset prior AI issues
+11. **ai-page:{url}** — parallel Claude analysis per page
+12. **persist-ai-issues** — merge into `issues` table
+13. **generate-pdf** + **send-email** — paid packages only
+14. **mark-done** — final status
 
 Free scans skip PDF and email.
 

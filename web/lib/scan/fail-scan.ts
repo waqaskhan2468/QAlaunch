@@ -10,14 +10,26 @@ export function toUserFacingScanError(error: unknown): string {
 	if (message.includes('page timeout')) {
 		return 'This page took too long to analyze. Try again or check that the site loads quickly.';
 	}
-	if (/invalid project id/i.test(message) || /browserbase/i.test(message)) {
-		return 'Could not start a browser session. Check Browserbase configuration.';
+	if (
+		message === 'Connection error.' ||
+		message === 'Request timed out.'
+	) {
+		return 'Could not connect to the browser service. Please try again in a moment.';
 	}
 	if (
+		message.includes('session not running') ||
+		message.includes('410 Gone') ||
 		message.includes('browser has been closed') ||
 		message.includes('Target page, context or browser')
 	) {
 		return 'The browser session ended unexpectedly. Please run the scan again.';
+	}
+	if (
+		/invalid project id/i.test(message) ||
+		/BROWSERBASE_(API_KEY|PROJECT_ID)/i.test(message) ||
+		/Browserbase session missing/i.test(message)
+	) {
+		return 'Could not start a browser session. Check Browserbase configuration.';
 	}
 	if (message.includes('accessibility_gate') || message.includes('axe')) {
 		return 'Accessibility analysis did not complete for this page.';
@@ -32,6 +44,9 @@ export function toUserFacingScanError(error: unknown): string {
 	) {
 		return 'Report generation timed out. Please try again.';
 	}
+	if (message.includes('claude_tool_use_truncated')) {
+		return 'AI response was cut short (token limit). Please try again.';
+	}
 	if (message.includes('Invalid Claude issues payload')) {
 		return 'Could not build the report from AI output. Please try again.';
 	}
@@ -44,11 +59,19 @@ export function toUserFacingScanError(error: unknown): string {
 	if (message.includes('AI analysis failed for all')) {
 		return 'Report generation failed for all pages. Please try again.';
 	}
-	if (message.includes('ai_page_failed') || message.includes('ai_page_error')) {
-		return 'Report generation failed. Please try again.';
+	if (
+		message.includes('fetch failed') ||
+		message.includes('Failed to update scan in storage') ||
+		message.includes('artifact upload')
+	) {
+		return 'Could not save scan results. Please try again.';
 	}
 
-	return message.length > 500 ? `${message.slice(0, 497)}…` : message;
+	if (message.includes('Invalid Supabase public screenshot URL')) {
+		return 'Could not access page screenshots for AI analysis. Please try again.';
+	}
+
+	return 'An unexpected error occurred. Please try again.';
 }
 
 export async function failScan(
@@ -56,5 +79,6 @@ export async function failScan(
 	scanId: string,
 	error: unknown,
 ): Promise<void> {
-	await markScannerFailed(supabase, scanId, toUserFacingScanError(error));
+	const message = toUserFacingScanError(error);
+	await markScannerFailed(supabase, scanId, message);
 }

@@ -13,7 +13,9 @@ import { persistAiIssuesStep } from '@/lib/scan/steps/persistAiIssues';
 import { persistScanMetadataStep } from '@/lib/scan/steps/persistScanMetadata';
 import { prepareScannerStep } from '@/lib/scan/steps/prepareScanner';
 import { reloadScanStep } from '@/lib/scan/steps/reloadScan';
-import { scanPageStep } from '@/lib/scan/steps/scanPage';
+import { scanBrowserOnlyStep } from '@/lib/scan/steps/scanBrowserOnly';
+import { persistFailedPageIndex } from '@/lib/scan/runner';
+import { scanPersistOnlyStep } from '@/lib/scan/steps/scanPersistOnly';
 import { sendReportEmailStep } from '@/lib/scan/steps/sendReportEmail';
 import type { ProcessPayload } from '@/lib/inngest/process.types';
 
@@ -22,22 +24,50 @@ function getScanConcurrencyLimit(): number {
 	return Number.isFinite(raw) && raw > 0 ? raw : 5;
 }
 
+/**
+ * Main scan pipeline.
+ *
+ * Step execution order:
+ *   1.  mark-crawling            — status → crawling
+ *   2.  detect-and-select-pages  — homepage HTML → page list + website type
+ *   3.  persist-metadata         — save detection result to DB
+ *   4.  prepare-scanner          — pre-flight checks
+ *   5a. collect-pagespeed        — Google PSI for all pages   ─┐ parallel
+ *   5b. scan-browser:{url}        — Browserbase + Playwright + artifact upload ─┐
+ *   5c. scan-persist:{url}        — DB index only (retries without browser)     ─┘
+ *   6.  finalize-scanner         — aggregate page statuses; early-exit if all failed
+ *   7.  reload-scan              — re-fetch scan row for AI input
+ *   8.  clear-ai-issues          — wipe stale AI results
+ *   9.  ai-page:{url}            — Claude analysis per page (parallel)
+ *   10. persist-ai-issues        — write issues to DB
+ *   11. generate-pdf             — paid only
+ *   12. send-email               — paid only
+ *   13. mark-done                — status → done
+ */
 export const runScan = inngest.createFunction(
 	{
 		id: 'run-scan',
 		name: 'Run scan pipeline',
-		retries: 2,
+		// One retry only. With SCAN_PAGE_TIMEOUT_MS=90s, retries:2 meant 3 attempts
+		// = up to 270s on a stuck page before final failure. retries:1 cuts that
+		// to ~180s while still giving one recovery shot for transient errors.
+		retries: 1,
 		concurrency: {
 			limit: getScanConcurrencyLimit(),
 		},
 		timeouts: {
+			// Inngest hard ceiling. With parallelism and the optimised Browserbase +
+			// Claude timeouts, a typical 3-page paid scan should finish in 3–5 min.
+			// 14 min gives generous headroom for slow target sites.
 			finish: '14m',
 		},
 		triggers: [{ event: SCAN_PROCESS_REQUESTED }],
 	},
-	async ({ event, step }) => {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	async ({ event, step }: { event: any; step: any }) => {
 		const { scanId, targetUrl, package: pkg } = event.data as ProcessPayload;
 
+		// ── Phase 1: Discover pages ─────────────────────────────────────────
 		await step.run('mark-crawling', () => markCrawlingStep(scanId));
 
 		const { detection, pagesToTest, selectedPages } = await step.run(
@@ -56,28 +86,68 @@ export const runScan = inngest.createFunction(
 
 		await step.run('prepare-scanner', () => prepareScannerStep(scanId));
 
-		// PageSpeed and browser scan are independent; run in parallel to cut wall-clock time.
-		await Promise.all([
+		// ── Phase 2: Browser scans + PageSpeed (all parallel) ───────────────
+		// Each scan-browser step creates its own Browserbase session so Inngest
+		// retries never reuse a dead/stale shared session.
+		const runPageScan = async (pageUrl: string) => {
+			const slug = stepIdFromPageUrl(pageUrl);
+			try {
+				const browserResult = await step.run(`scan-browser:${slug}`, () =>
+					scanBrowserOnlyStep({ scanId, pageUrl }),
+				);
+				await step.run(`scan-persist:${slug}`, () =>
+					scanPersistOnlyStep({ browserResult }),
+				);
+			} catch {
+				await step.run(`scan-persist-failed:${slug}`, () =>
+					persistFailedPageIndex({ scanId, pageUrl }),
+				);
+			}
+		};
+
+		await Promise.allSettled([
 			step.run('collect-pagespeed', () =>
 				collectPageSpeedStep(scanId, pagesToTest, pkg),
 			),
-			...pagesToTest.map((pageUrl) =>
-				step.run(`scan-page:${stepIdFromPageUrl(pageUrl)}`, () =>
-					scanPageStep({ scanId, pageUrl }),
-				),
-			),
+			...pagesToTest.map((pageUrl) => runPageScan(pageUrl)),
 		]);
 
+		// ── Phase 3: Finalize browser phase ──────────────────────────────────
 		const scannerStatus = await step.run('finalize-scanner', () =>
 			finalizeScannerStep(scanId),
 		);
 
-		if (scannerStatus === 'failed') return;
+		if (scannerStatus === 'failed') {
+			console.error(
+				JSON.stringify({
+					ts: new Date().toISOString(),
+					level: 'error',
+					event: 'pipeline:early_exit',
+					reason: 'all_pages_failed',
+					scanId,
+				}),
+			);
+			return;
+		}
 
-		const scanAfter = await step.run('reload-scan', () => reloadScanStep(scanId));
+		const scanAfter = await step.run('reload-scan', () =>
+			reloadScanStep(scanId),
+		);
 
-		if (scanAfter?.status === 'failed') return;
+		if (scanAfter?.status === 'failed') {
+			console.error(
+				JSON.stringify({
+					ts: new Date().toISOString(),
+					level: 'error',
+					event: 'pipeline:early_exit',
+					reason: 'scan_status_failed_after_reload',
+					scanId,
+				}),
+			);
+			return;
+		}
 
+		// ── Phase 4: Claude AI analysis (all pages parallel) ─────────────────
 		await step.run('clear-ai-issues', () => clearAiAnalysisStep(scanId));
 
 		await Promise.all(
@@ -86,7 +156,7 @@ export const runScan = inngest.createFunction(
 					analyzePageStep({
 						scanId,
 						pageUrl,
-						websiteType: scanAfter?.website_type ?? detection.type ?? null,
+						websiteType: detection.type ?? null,
 						pkg,
 					}),
 				),
@@ -97,14 +167,17 @@ export const runScan = inngest.createFunction(
 			persistAiIssuesStep({ scanId, pkg, pagesToTest }),
 		);
 
-		const isFree = pkg === 'free';
-		if (!isFree) {
+		// ── Phase 5: Report + email (paid packages only) ──────────────────────
+		if (pkg !== 'free') {
 			const report = await step.run('generate-pdf', () =>
 				generatePdfStep(scanId),
 			);
 
 			await step.run('send-email', () =>
-				sendReportEmailStep({ scanId, report }),
+				sendReportEmailStep({
+					scanId,
+					report: report ?? { pdfStoragePath: '', userEmail: null, targetUrl },
+				}),
 			);
 		}
 

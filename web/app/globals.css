@@ -154,6 +154,15 @@
   animation: qa-spin 0.9s linear infinite;
 }
 
+@keyframes qa-pulse-red {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1;   }
+}
+@keyframes qa-green-pulse {
+  0%, 100% { opacity: 1;   }
+  50%       { opacity: 0.4; }
+}
+
 /* Shared press microinteraction — use on any tappable button */
 .qa-press {
   transition-property: transform, background-color, box-shadow, border-color,

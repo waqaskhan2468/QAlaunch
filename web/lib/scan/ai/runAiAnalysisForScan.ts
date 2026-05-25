@@ -1,8 +1,14 @@
 import {
 	analyzeWithClaude,
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT,
+	CLAUDE_SCAN_CACHEABLE_USER_TEXT_NO_SCREENSHOTS,
 	parseClaudeIssues,
 } from './claude';
+import {
+	pageHasAnalyzableData,
+	resolveAiAnalysisMode,
+	type AiAnalysisMode,
+} from './eligibility';
 import {
 	formatPageSpeedForClaude,
 	PAGE_SPEED_CLAUDE_INSTRUCTIONS,
@@ -12,6 +18,8 @@ import {
 	formatErrorWithCause,
 	updateScanPageAiAnalysis,
 } from '@/lib/db/supabase-retry';
+import { resolvePageScanData } from '@/lib/artifacts';
+import { getArtifactBucket, getScreenshotBucket } from '@/lib/artifacts/upload';
 import { failScan, toUserFacingScanError } from '@/lib/scan/fail-scan';
 import { withRetry } from '@/lib/scan/services/retry';
 import type { ClaudeIssue } from './types';
@@ -22,11 +30,26 @@ type ServiceSupabase = ReturnType<typeof getServiceSupabase>;
 const CLAUDE_PROMPT_MAX_BROKEN_LINKS = 15;
 const CLAUDE_PROMPT_MAX_EXTERNAL_LINKS = 15;
 
+// ── Payload trimming constants ────────────────────────────────────────────
+// Sending the full axe dump for heavy pages adds thousands of tokens with
+// diminishing returns — most actionable issues are in critical/serious.
+// We sort by severity, strip the verbose `nodes` array, and cap at 20 items.
+const MAX_AXE_VIOLATIONS = 20;
+const MAX_CONSOLE_MESSAGES = 30;
+
 const SEVERITY_RANK: Record<string, number> = {
 	critical: 0,
 	high: 1,
 	medium: 2,
 	low: 3,
+};
+
+// axe-core impact levels (separate from our own severity scale)
+const AXE_IMPACT_RANK: Record<string, number> = {
+	critical: 0,
+	serious: 1,
+	moderate: 2,
+	minor: 3,
 };
 
 const FREE_PREVIEW_ISSUE_COUNT = 3;
@@ -44,6 +67,7 @@ type ScanPageRow = {
 	axe_violations: unknown;
 	screenshot_desktop_url: string | null;
 	screenshot_mobile_url: string | null;
+	artifact_path?: string | null;
 };
 
 type SupabaseStorageObjectRef = {
@@ -110,38 +134,85 @@ function maskSignedUrl(url: string): string {
 	}
 }
 
-async function createSignedScreenshotUrl(
+/**
+ * Resolves a screenshot reference into a URL that Claude can fetch.
+ *
+ * Bucket layout:
+ *   scan-screenshots  → PUBLIC  → getPublicUrl() works, URL returned as-is.
+ *   scan-artifacts    → PRIVATE → getPublicUrl() generates a URL that looks
+ *                                  public but returns 403. Must be signed.
+ *
+ * Input formats handled:
+ *   1. Full https:// URL from the public scan-screenshots bucket
+ *      → contains "/scan-screenshots/" in the path → return as-is.
+ *   2. Full https:// URL from scan-artifacts or any other bucket
+ *      → looks like /object/public/ but the bucket is private → sign it.
+ *   3. Bare storage path (legacy, no http prefix)
+ *      → sign using the screenshot bucket.
+ */
+async function resolveScreenshotUrl(
 	supabase: ServiceSupabase,
-	publicUrl: string,
+	screenshotRef: string,
 ): Promise<string> {
-	const { bucket, path } = parseSupabasePublicStorageUrl(publicUrl);
-	const ttlSec = getScreenshotSignedUrlTtlSec();
+	if (screenshotRef.startsWith('http')) {
+		// Check if this URL is from the actual public screenshot bucket.
+		// We match on the bucket name in the URL path rather than just
+		// "/object/public/" because getPublicUrl() generates that prefix for
+		// ALL buckets — including private ones — so the prefix alone is not
+		// a reliable indicator of accessibility.
+		const publicBucket = getScreenshotBucket(); // e.g. "scan-screenshots"
+		if (screenshotRef.includes(`/${publicBucket}/`)) {
+			// Confirmed public bucket URL — Claude can fetch it directly.
+			return screenshotRef;
+		}
 
-	console.log('[runAiAnalysisForScan] creating signed URL', {
-		bucket,
-		path,
+		// URL is from a different bucket (e.g. old scan-artifacts scans).
+		// Parse bucket + path and create a signed URL so Anthropic can access it.
+		const parsed = parseSupabasePublicStorageUrl(screenshotRef);
+		const ttlSec = getScreenshotSignedUrlTtlSec();
+		console.log('[runAiAnalysisForScan] signing non-public-bucket screenshot', {
+			bucket: parsed.bucket,
+			path: parsed.path.slice(0, 60),
+			ttlSec,
+		});
+		const { data, error } = await supabase.storage
+			.from(parsed.bucket)
+			.createSignedUrl(parsed.path, ttlSec);
+		if (error || !data?.signedUrl) {
+			throw new Error(
+				`Failed to create signed screenshot URL: ${error?.message ?? 'missing signedUrl'}`,
+			);
+		}
+		return data.signedUrl;
+	}
+
+	// Bare storage path (legacy format — old scans stored just the path).
+	// Sign it using the screenshot bucket.
+	const ttlSec = getScreenshotSignedUrlTtlSec();
+	console.log('[runAiAnalysisForScan] signing legacy bare-path screenshot', {
+		path: screenshotRef.slice(0, 60),
+		bucket: getScreenshotBucket(),
 		ttlSec,
 	});
-
 	const { data, error } = await supabase.storage
-		.from(bucket)
-		.createSignedUrl(path, ttlSec);
-
+		.from(getScreenshotBucket())
+		.createSignedUrl(screenshotRef, ttlSec);
 	if (error || !data?.signedUrl) {
 		throw new Error(
 			`Failed to create signed screenshot URL: ${error?.message ?? 'missing signedUrl'}`,
 		);
 	}
-
 	return data.signedUrl;
 }
 
 /** Mobile screenshot URL for Claude analysis. */
 function getPrimaryMobileScreenshotUrl(page: ScanPageRow): string | null {
-	return typeof page.screenshot_mobile_url === 'string' &&
-		page.screenshot_mobile_url.length > 0 ?
-		page.screenshot_mobile_url
-	:	null;
+	return (
+			typeof page.screenshot_mobile_url === 'string' &&
+				page.screenshot_mobile_url.length > 0
+		) ?
+			page.screenshot_mobile_url
+		:	null;
 }
 
 function orderPages<T extends { id: string; page_url: string }>(
@@ -180,7 +251,11 @@ function buildWebsiteTypeFocus(
 	const type = (websiteType ?? '').toLowerCase();
 	const role = (pageRole ?? '').toLowerCase();
 
-	if (type.includes('ecommerce') || type.includes('shopify') || type.includes('shop')) {
+	if (
+		type.includes('ecommerce') ||
+		type.includes('shopify') ||
+		type.includes('shop')
+	) {
 		lines.push(
 			'ECOMMERCE FOCUS: Pay close attention to — product images (quality, consistency), pricing display (clarity, formatting), add-to-cart / buy CTA (prominence, contrast), trust badges and reviews (present and visible), checkout path entry (obvious next step).',
 		);
@@ -192,7 +267,11 @@ function buildWebsiteTypeFocus(
 		lines.push(
 			'AGENCY/PORTFOLIO FOCUS: Pay close attention to — work showcase (images load, layout intact), contact CTA (clear and above fold or footer), case study links, client logos.',
 		);
-	} else if (type.includes('blog') || type.includes('content') || type.includes('news')) {
+	} else if (
+		type.includes('blog') ||
+		type.includes('content') ||
+		type.includes('news')
+	) {
 		lines.push(
 			'CONTENT SITE FOCUS: Pay close attention to — article readability (font, line-height, measure), navigation to related content, ad placement (does it obstruct content?), mobile reading experience.',
 		);
@@ -221,7 +300,10 @@ function buildAnalysisPromptBeforeImages(input: {
 	pageRole: string | null;
 	websiteType: string | null;
 }): string {
-	const websiteTypeFocus = buildWebsiteTypeFocus(input.websiteType, input.pageRole);
+	const websiteTypeFocus = buildWebsiteTypeFocus(
+		input.websiteType,
+		input.pageRole,
+	);
 
 	return [
 		'CONTEXT:',
@@ -233,11 +315,50 @@ function buildAnalysisPromptBeforeImages(input: {
 	].join('\n');
 }
 
+// ─── Axe violation trimming ────────────────────────────────────────────────
+
+type AxeViolation = {
+	id?: string;
+	impact?: string;
+	description?: string;
+	help?: string;
+	helpUrl?: string;
+	tags?: string[];
+	nodes?: unknown;
+	[key: string]: unknown;
+};
+
+/**
+ * Trim the axe violations array before sending to Claude.
+ *
+ * - Sort by impact severity (critical > serious > moderate > minor)
+ * - Strip the verbose `nodes` array (each node can contain hundreds of chars
+ *   of HTML; not useful to Claude since it can see the screenshots directly)
+ * - Cap at MAX_AXE_VIOLATIONS items
+ *
+ * This reduces token count by 60–80 % on heavy pages while keeping all the
+ * high-signal findings intact.
+ */
+function trimAxeViolations(raw: unknown): unknown {
+	if (!Array.isArray(raw)) return raw;
+
+	const sorted = [...(raw as AxeViolation[])].sort((a, b) => {
+		const ra = AXE_IMPACT_RANK[a.impact ?? ''] ?? 99;
+		const rb = AXE_IMPACT_RANK[b.impact ?? ''] ?? 99;
+		return ra - rb;
+	});
+
+	return sorted
+		.slice(0, MAX_AXE_VIOLATIONS)
+		.map(({ nodes: _nodes, ...rest }) => rest);
+}
+
 /** Large JSON payload after screenshots (not prompt-cached). */
 function buildAnalysisPromptAfterImages(input: {
 	pageSpeedData: unknown;
 	playwrightData: unknown;
 	axeViolations: unknown;
+	hasScreenshots: boolean;
 }): string {
 	const pd = input.playwrightData as Record<string, unknown> | null;
 	const links = pd?.links as Record<string, unknown> | undefined;
@@ -246,6 +367,7 @@ function buildAnalysisPromptAfterImages(input: {
 	const brokenStates = pd?.brokenStates ?? null;
 	const programmaticRollup = pd?.programmaticRollup ?? null;
 	const responseSecurity = pd?.responseSecurity ?? null;
+
 	const externalLinksSameTab = allLinks
 		.filter((link) => {
 			if (!isRecord(link)) return false;
@@ -253,12 +375,23 @@ function buildAnalysisPromptAfterImages(input: {
 		})
 		.slice(0, CLAUDE_PROMPT_MAX_EXTERNAL_LINKS);
 
-	const brokenLinksForPrompt = Array.isArray(brokenLinks) ?
-		(brokenLinks as unknown[]).slice(0, CLAUDE_PROMPT_MAX_BROKEN_LINKS)
-	:	[];
+	const brokenLinksForPrompt =
+		Array.isArray(brokenLinks) ?
+			(brokenLinks as unknown[]).slice(0, CLAUDE_PROMPT_MAX_BROKEN_LINKS)
+		:	[];
+
+	// Cap console messages to avoid prompt bloat from noisy pages
+	const rawConsoleMessages = pd?.consoleMessages ?? [];
+	const consoleMessages =
+		Array.isArray(rawConsoleMessages) ?
+			rawConsoleMessages.slice(0, MAX_CONSOLE_MESSAGES)
+		:	rawConsoleMessages;
+
+	// Trim axe violations: sort by severity, strip nodes, cap at 20
+	const axeViolations = trimAxeViolations(input.axeViolations);
 
 	const scanData = {
-		consoleMessages: pd?.consoleMessages ?? [],
+		consoleMessages,
 		brokenLinks: brokenLinksForPrompt,
 		externalLinksSameTab,
 		forms:
@@ -271,8 +404,13 @@ function buildAnalysisPromptAfterImages(input: {
 		error: pd?.error,
 	};
 
+	const dataHeader =
+		input.hasScreenshots ?
+			'STRUCTURED SCAN DATA (same page as screenshots above):'
+		:	'STRUCTURED SCAN DATA (no screenshots — use PageSpeed and JSON only):';
+
 	return [
-		'STRUCTURED SCAN DATA (same page as screenshots above):',
+		dataHeader,
 		'',
 		PAGE_SPEED_CLAUDE_INSTRUCTIONS,
 		'',
@@ -297,8 +435,8 @@ function buildAnalysisPromptAfterImages(input: {
 		'Use for category "security" when relevant: HTTPS final URL, HTTP status, recommended headers (HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy), disclosure via Server / X-Powered-By.',
 		JSON.stringify(responseSecurity, null, 2),
 		'',
-		'ACCESSIBILITY VIOLATIONS (axe-core — prioritise critical > serious > moderate > minor):',
-		JSON.stringify(input.axeViolations, null, 2),
+		`ACCESSIBILITY VIOLATIONS (axe-core top ${MAX_AXE_VIOLATIONS} by severity — nodes stripped, full data in DB):`,
+		JSON.stringify(axeViolations, null, 2),
 		'',
 		'BROKEN UI STATES (stuck loading, bad text tokens, empty lists):',
 		JSON.stringify(brokenStates, null, 2),
@@ -424,7 +562,7 @@ async function loadScanPageRow(
 	const { data: page, error } = await supabase
 		.from('scan_pages')
 		.select(
-			'id, page_url, page_role, page_speed_data, playwright_data, axe_violations, screenshot_desktop_url, screenshot_mobile_url',
+			'id, page_url, page_role, page_speed_data, playwright_data, axe_violations, screenshot_desktop_url, screenshot_mobile_url, artifact_path',
 		)
 		.eq('scan_id', scanId)
 		.eq('page_url', pageUrl)
@@ -439,6 +577,26 @@ async function loadScanPageRow(
 	return page as ScanPageRow;
 }
 
+async function tryResolveScreenshotUrl(
+	supabase: ServiceSupabase,
+	ref: string | null,
+): Promise<string | null> {
+	if (!ref) return null;
+
+	try {
+		return await withRetry(() => resolveScreenshotUrl(supabase, ref), {
+			attempts: 3,
+			delayMs: 1_000,
+		});
+	} catch (error: unknown) {
+		console.warn('[runAiAnalysisForScan] screenshot sign failed (non-fatal)', {
+			ref: ref.slice(0, 80),
+			error: getErrorMessage(error),
+		});
+		return null;
+	}
+}
+
 export async function analyzeScanPageWithClaude(
 	supabase: ServiceSupabase,
 	scanId: string,
@@ -447,36 +605,53 @@ export async function analyzeScanPageWithClaude(
 	pkg?: ScanPackage,
 ): Promise<void> {
 	const page = await loadScanPageRow(supabase, scanId, pageUrl);
+	const scanData = await resolvePageScanData({
+		artifact_path: page.artifact_path,
+		playwright_data: page.playwright_data,
+		axe_violations: page.axe_violations,
+		scan_id: scanId,
+		page_url: pageUrl,
+	});
 	const desktop = page.screenshot_desktop_url;
 	const mobileUrl = getPrimaryMobileScreenshotUrl(page);
 
-	if (!desktop || !mobileUrl) {
-		console.warn('[runAiAnalysisForScan] skip page (missing screenshots)', {
+	if (
+		!pageHasAnalyzableData({
+			pageSpeedData: page.page_speed_data,
+			scanData,
+		})
+	) {
+		console.warn('[runAiAnalysisForScan] skip page (no analyzable data)', {
 			scanId,
 			pageUrl: page.page_url,
-			hasDesktop: Boolean(desktop),
-			hasMobile: Boolean(mobileUrl),
+			hasPageSpeed: Boolean(page.page_speed_data),
+			hasScanData: Boolean(scanData),
 		});
 		return;
 	}
 
-	try {
-		const [desktopSignedUrl, mobileSignedUrl] = await Promise.all([
-			withRetry(() => createSignedScreenshotUrl(supabase, desktop), {
-				attempts: 3,
-				delayMs: 1_000,
-			}),
-			withRetry(() => createSignedScreenshotUrl(supabase, mobileUrl), {
-				attempts: 3,
-				delayMs: 1_000,
-			}),
-		]);
+	const [desktopSignedUrl, mobileSignedUrl] = await Promise.all([
+		tryResolveScreenshotUrl(supabase, desktop),
+		tryResolveScreenshotUrl(supabase, mobileUrl),
+	]);
 
-		console.log('[runAiAnalysisForScan] pre-claude image URLs', {
+	const analysisMode: AiAnalysisMode = resolveAiAnalysisMode({
+		hasDesktop: Boolean(desktopSignedUrl),
+		hasMobile: Boolean(mobileSignedUrl),
+	});
+
+	const cachedUserText =
+		analysisMode === 'text_only' ?
+			CLAUDE_SCAN_CACHEABLE_USER_TEXT_NO_SCREENSHOTS
+		:	CLAUDE_SCAN_CACHEABLE_USER_TEXT;
+
+	try {
+		console.log('[runAiAnalysisForScan] starting claude analysis', {
 			scanId,
 			pageUrl: page.page_url,
-			desktop: maskSignedUrl(desktopSignedUrl),
-			mobile: maskSignedUrl(mobileSignedUrl),
+			analysisMode,
+			desktop: desktopSignedUrl ? maskSignedUrl(desktopSignedUrl) : null,
+			mobile: mobileSignedUrl ? maskSignedUrl(mobileSignedUrl) : null,
 		});
 
 		const dynamicBeforeImagesText = buildAnalysisPromptBeforeImages({
@@ -484,16 +659,28 @@ export async function analyzeScanPageWithClaude(
 			pageRole: page.page_role,
 			websiteType,
 		});
+		// scanData = buildPlaywrightPayloadFromArtifact() result (new artifact format)
+		// OR page.playwright_data (legacy DB column for old scans)
+		// Either way it is the correct object to pass as playwrightData.
+		// axeViolations: new artifact format includes it as .axeViolations;
+		// legacy format falls back to page.axe_violations DB column.
+		const sdRecord =
+			scanData && typeof scanData === 'object' ?
+				(scanData as Record<string, unknown>)
+			:	null;
+		const axeViolationsData =
+			sdRecord?.axeViolations ?? page.axe_violations ?? null;
 		const dynamicAfterImagesText = buildAnalysisPromptAfterImages({
 			pageSpeedData: page.page_speed_data,
-			playwrightData: page.playwright_data,
-			axeViolations: page.axe_violations,
+			playwrightData: scanData,
+			axeViolations: axeViolationsData,
+			hasScreenshots: analysisMode !== 'text_only',
 		});
 
 		const raw = await analyzeWithClaude({
 			desktopScreenshotUrl: desktopSignedUrl,
 			mobileScreenshotUrl: mobileSignedUrl,
-			cachedUserText: CLAUDE_SCAN_CACHEABLE_USER_TEXT,
+			cachedUserText,
 			dynamicBeforeImagesText,
 			dynamicAfterImagesText,
 			scanId,
@@ -502,17 +689,27 @@ export async function analyzeScanPageWithClaude(
 
 		const issues = parseClaudeIssues(raw);
 
-		await updateScanPageAiAnalysis(page.id, { issues });
+		await updateScanPageAiAnalysis(scanId, page.page_url, {
+			ai_analysis: {
+				issues,
+				analyzed_at: new Date().toISOString(),
+				status: 'ok',
+				analysis_mode: analysisMode,
+				screenshots_available: analysisMode !== 'text_only',
+			},
+		});
 	} catch (error) {
 		const message = getErrorMessage(error);
 		const failurePayload = {
-			status: 'failed' as const,
-			analyzed_at: new Date().toISOString(),
-			error: message,
+			ai_analysis: {
+				status: 'failed' as const,
+				analyzed_at: new Date().toISOString(),
+				error: message,
+			},
 		};
 
 		try {
-			await updateScanPageAiAnalysis(page.id, failurePayload);
+			await updateScanPageAiAnalysis(scanId, page.page_url, failurePayload);
 		} catch (saveError) {
 			console.error(
 				'[runAiAnalysisForScan] failed saving ai_analysis failure payload',
@@ -690,9 +887,29 @@ export async function runAiAnalysisForScan(
 	await clearScanIssuesForAnalysis(supabase, scanId);
 
 	const urls = pagesToTest ?? [];
-	for (const pageUrl of urls) {
-		await analyzeScanPageWithClaude(supabase, scanId, pageUrl, websiteType);
-	}
 
-	await persistScanIssuesFromAnalysis(supabase, scanId, pagesToTest, pkg);
+	// ── Analyse all pages in parallel ────────────────────────────────────────
+	// Previously this was a sequential for-loop. For a 5-page scan where Claude
+	// takes 30–60 s each, the old approach added 2–4 minutes of avoidable serial
+	// waiting. Promise.all lets all pages hit the Anthropic API concurrently.
+	// Note: Inngest's ai-page:* steps run per page already enforce isolation, so a single page
+	// failure won't cascade. Each page gets its own try/catch.
+	await Promise.all(
+		urls.map((pageUrl) =>
+			analyzeScanPageWithClaude(supabase, scanId, pageUrl, websiteType, pkg).catch(
+				(error: unknown) => {
+					console.error(
+						JSON.stringify({
+							ts: new Date().toISOString(),
+							level: 'error',
+							event: 'ai:page_analysis_failed',
+							scanId,
+							pageUrl,
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					);
+				},
+			),
+		),
+	);
 }

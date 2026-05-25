@@ -226,5 +226,6 @@ export type AxeViolation = {
 
 export type ScanRequest = {
 	scanId: string;
-	urls: string[];
+	url: string;
+	package: string;
 };

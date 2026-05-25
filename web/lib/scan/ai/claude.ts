@@ -6,11 +6,30 @@ import {
 } from './types';
 
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
-const DEFAULT_TIMEOUT_MS = 90_000;
-const DEFAULT_MAX_RETRIES = 1;
+
+// ─── Tuned defaults ────────────────────────────────────────────────────────
+// Timeout: 90 s was too tight for complex pages with large image + JSON payloads.
+// Most responses arrive in 30–60 s; 120 s gives a comfortable ceiling.
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+// Retries: 2 retries = 3 total attempts, safe under Inngest's 14-min step timeout.
+const DEFAULT_MAX_RETRIES = 2;
+
+// max_tokens: must be high enough that a tool_use response is NEVER truncated.
+// When Anthropic hits the token limit mid-tool-call, block.input comes back as
+// null — the JSON is incomplete and parseClaudeIssues throws "Invalid Claude
+// issues payload", killing the scan as NonRetriable.
+//
+// A typical page with 15–20 issues (title + description + fix_instructions each)
+// uses ~4 000–6 000 output tokens. 8 000 gives a safe ceiling without wasting
+// significant cost on the typical case.
+//
+// DO NOT lower this below 6 000 without verifying stop_reason never hits
+// max_tokens in production logs.
 const DEFAULT_MAX_TOKENS = 8_000;
+
 const MAX_RESPONSE_PREVIEW_LENGTH = 500;
-const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic overloaded
 
 /** Anthropic tool name — must match `tool_choice` and tool definition. */
 export const REPORT_SCAN_ISSUES_TOOL_NAME = 'report_scan_issues';
@@ -18,6 +37,7 @@ export const REPORT_SCAN_ISSUES_TOOL_NAME = 'report_scan_issues';
 /**
  * User-message prefix marked with `cache_control` (must not contain signed URLs).
  * Placed before screenshot URLs so the cacheable prefix is stable across pages in a scan.
+ * Used when both desktop and mobile screenshots are available.
  */
 export const CLAUDE_SCAN_CACHEABLE_USER_TEXT = [
 	'Analyze this webpage and identify all quality issues.',
@@ -33,6 +53,33 @@ export const CLAUDE_SCAN_CACHEABLE_USER_TEXT = [
 	'- Treat programmatic findings (brokenStates) as high-signal; confirm visually where relevant.',
 	'- Do NOT duplicate an issue already fully explained in brokenStates unless the screenshot shows different or higher severity.',
 	'- DO report purely visual issues that code cannot detect: wrong imagery, poor whitespace, typography feel, trust-signal gaps.',
+	'',
+].join('\n');
+
+/**
+ * Alternative cached prefix used when screenshots are unavailable (slow page,
+ * partial scan, navigation timeout). Instructs Claude to work from structured
+ * data only and constrains evidence types accordingly.
+ */
+export const CLAUDE_SCAN_CACHEABLE_USER_TEXT_NO_SCREENSHOTS = [
+	'Analyze this webpage and identify all quality issues.',
+	'',
+	'NOTE: Visual screenshots are not available for this page.',
+	'Analyze using structured data only: Google PageSpeed results, axe accessibility violations,',
+	'SEO data, console messages, network errors, and broken-state findings.',
+	'',
+	'EVIDENCE CONSTRAINTS (no screenshots):',
+	'- Do NOT use evidence type "visual" — you cannot see the page.',
+	'- Do NOT report layout, spacing, imagery, or other purely visual issues.',
+	'- DO report: performance (PageSpeed scores/vitals/opportunities), accessibility (axe violations),',
+	'  SEO issues, functionality errors (console/network), and programmatic findings.',
+	'- Use only these evidence types: programmatic, axe, console, network, heuristic.',
+	'',
+	'HEURISTICS INSTRUCTIONS:',
+	'- Treat programmatic findings (brokenStates) as high-signal.',
+	'- Report PageSpeed performance issues with exact numbers (LCP, CLS, TBT, scores, opportunities).',
+	'- For accessibility, base findings strictly on axe violation data provided.',
+	'- Confidence should reflect that you cannot confirm issues visually.',
 	'',
 ].join('\n');
 
@@ -118,7 +165,6 @@ severity must be one of: critical, high, medium, low.`;
 
 /**
  * JSON Schema for Anthropic tool use (draft subset).
- * @see https://docs.anthropic.com/en/docs/build-with-claude/tool-use
  */
 const REPORT_SCAN_ISSUES_INPUT_SCHEMA = {
 	type: 'object',
@@ -148,11 +194,15 @@ const REPORT_SCAN_ISSUES_INPUT_SCHEMA = {
 						type: 'string',
 						enum: ['critical', 'high', 'medium', 'low'],
 					},
-				title: { type: 'string', minLength: 20, maxLength: 80 },
-				description: { type: 'string', minLength: 100, maxLength: 800 },
-				impact: { type: 'string', minLength: 20, maxLength: 200 },
-				page_section: { type: 'string', maxLength: 500 },
-				fix_instructions: { type: 'string', minLength: 20, maxLength: 8000 },
+					title: { type: 'string', minLength: 20, maxLength: 80 },
+					description: { type: 'string', minLength: 100, maxLength: 800 },
+					impact: { type: 'string', minLength: 20, maxLength: 200 },
+					page_section: { type: 'string', maxLength: 500 },
+					fix_instructions: {
+						type: 'string',
+						minLength: 20,
+						maxLength: 8000,
+					},
 					evidence: {
 						type: 'string',
 						enum: [
@@ -224,7 +274,11 @@ function getClaudeConfig() {
 	return {
 		model: process.env.ANTHROPIC_MODEL ?? DEFAULT_CLAUDE_MODEL,
 		timeoutMs: getPositiveIntEnv('ANTHROPIC_TIMEOUT_MS', DEFAULT_TIMEOUT_MS),
-		maxRetries: getPositiveIntEnv('ANTHROPIC_MAX_RETRIES', DEFAULT_MAX_RETRIES),
+		maxRetries: getPositiveIntEnv(
+			'ANTHROPIC_MAX_RETRIES',
+			DEFAULT_MAX_RETRIES,
+		),
+		maxTokens: getPositiveIntEnv('ANTHROPIC_MAX_TOKENS', DEFAULT_MAX_TOKENS),
 	};
 }
 
@@ -237,9 +291,7 @@ function getBackoffMs(attempt: number): number {
 }
 
 function getErrorMessage(error: unknown): string {
-	return error instanceof Error ?
-			error.message
-		:	'Unknown Claude request error.';
+	return error instanceof Error ? error.message : 'Unknown Claude request error.';
 }
 
 function isAbortError(error: unknown): boolean {
@@ -262,11 +314,11 @@ type MessageContentBlock =
 /**
  * @param input.cachedUserText — Stable per-scan instructions; marked with prompt cache (must not contain signed URLs).
  * @param input.dynamicBeforeImagesText — Page context shown before screenshots.
- * @param input.dynamicAfterImagesText — Large JSON payload after screenshots.
+ * @param input.dynamicAfterImagesText — Structured JSON payload after screenshots.
  */
 export async function analyzeWithClaude(input: {
-	desktopScreenshotUrl: string;
-	mobileScreenshotUrl: string;
+	desktopScreenshotUrl?: string | null;
+	mobileScreenshotUrl?: string | null;
 	cachedUserText: string;
 	dynamicBeforeImagesText: string;
 	dynamicAfterImagesText: string;
@@ -275,6 +327,23 @@ export async function analyzeWithClaude(input: {
 }) {
 	const config = getClaudeConfig();
 
+	// Build image blocks conditionally — screenshots may be absent for partial scans
+	const imageBlocks: MessageContentBlock[] = [];
+	if (input.desktopScreenshotUrl) {
+		imageBlocks.push({ type: 'text', text: 'Desktop screenshot:' });
+		imageBlocks.push({
+			type: 'image',
+			source: { type: 'url', url: input.desktopScreenshotUrl },
+		});
+	}
+	if (input.mobileScreenshotUrl) {
+		imageBlocks.push({ type: 'text', text: 'Mobile screenshot:' });
+		imageBlocks.push({
+			type: 'image',
+			source: { type: 'url', url: input.mobileScreenshotUrl },
+		});
+	}
+
 	const userContent: MessageContentBlock[] = [
 		{
 			type: 'text',
@@ -282,30 +351,13 @@ export async function analyzeWithClaude(input: {
 			cache_control: { type: 'ephemeral' },
 		},
 		{ type: 'text', text: input.dynamicBeforeImagesText },
-		{ type: 'text', text: 'Desktop screenshot:' },
-		{
-			type: 'image',
-			source: {
-				type: 'url',
-				url: input.desktopScreenshotUrl,
-			},
-		},
-		{ type: 'text', text: 'Mobile screenshot:' },
-		{
-			type: 'image',
-			source: {
-				type: 'url',
-				url: input.mobileScreenshotUrl,
-			},
-		},
+		...imageBlocks,
 		{ type: 'text', text: input.dynamicAfterImagesText },
 	];
 
-	const maxTokens = DEFAULT_MAX_TOKENS;
-
 	const body = JSON.stringify({
 		model: config.model,
-		max_tokens: maxTokens,
+		max_tokens: config.maxTokens,
 		system: [
 			{
 				type: 'text',
@@ -383,30 +435,35 @@ export async function analyzeWithClaude(input: {
 			};
 
 			if (json.stop_reason === 'max_tokens') {
-				console.warn(JSON.stringify({
+				console.warn(
+					JSON.stringify({
+						ts: new Date().toISOString(),
+						level: 'warn',
+						event: 'claude:response_truncated',
+						scanId: input.scanId,
+						pageUrl: input.pageUrl,
+						model: config.model,
+						stop_reason: 'max_tokens',
+						currentMaxTokens: config.maxTokens,
+						note: 'Increase ANTHROPIC_MAX_TOKENS env var or reduce prompt size to avoid truncated tool output.',
+					}),
+				);
+			}
+
+			console.log(
+				JSON.stringify({
 					ts: new Date().toISOString(),
-					level: 'warn',
-					event: 'claude:response_truncated',
+					level: 'info',
+					event: 'claude:request_completed',
 					scanId: input.scanId,
 					pageUrl: input.pageUrl,
 					model: config.model,
-					stop_reason: 'max_tokens',
-					note: 'Increase max_tokens or reduce prompt size to avoid truncated tool output.',
-				}));
-			}
-
-			console.log(JSON.stringify({
-				ts: new Date().toISOString(),
-				level: 'info',
-				event: 'claude:request_completed',
-				scanId: input.scanId,
-				pageUrl: input.pageUrl,
-				model: config.model,
-				attempt,
-				status: res.status,
-				durationMs,
-				stop_reason: json.stop_reason ?? null,
-			}));
+					attempt,
+					status: res.status,
+					durationMs,
+					stop_reason: json.stop_reason ?? null,
+				}),
+			);
 
 			return json;
 		} catch (error) {
@@ -464,10 +521,26 @@ function parseIssuesFromToolUse(raw: unknown): unknown | null {
 		if (!isRecord(block)) continue;
 		if (
 			block.type === 'tool_use' &&
-			block.name === REPORT_SCAN_ISSUES_TOOL_NAME &&
-			block.input !== undefined
+			block.name === REPORT_SCAN_ISSUES_TOOL_NAME
 		) {
-			return block.input;
+			// When Anthropic hits max_tokens mid-tool-call the response arrives with
+			// stop_reason === 'max_tokens' and block.input === null (the JSON is
+			// incomplete and cannot be parsed). Returning null here would silently
+			// fall through to the JSON-text path and ultimately throw "Invalid Claude
+			// issues payload" — a confusing error that maps to NonRetriable.
+			// Throw a distinct, diagnosable error instead so the caller can decide
+			// whether to retry or escalate.
+			if (block.input === null) {
+				throw new Error(
+					'claude_tool_use_truncated: Claude hit max_tokens before completing the tool_use response. ' +
+					'Increase ANTHROPIC_MAX_TOKENS or reduce the prompt size.',
+				);
+			}
+			// block.input could be undefined if the block structure is unexpected —
+			// skip it and keep looking.
+			if (block.input !== undefined) {
+				return block.input;
+			}
 		}
 	}
 	return null;
@@ -475,24 +548,29 @@ function parseIssuesFromToolUse(raw: unknown): unknown | null {
 
 export function parseClaudeIssues(raw: unknown): ClaudeIssue[] {
 	const fromTool = parseIssuesFromToolUse(raw);
-	const payload = fromTool ?? (() => {
-		const content = (raw as { content?: Array<{ type?: string; text?: string }> })
-			?.content;
-		const text =
-			content
-				?.map((item) => (item.type === 'text' ? (item.text ?? '') : ''))
-				.join('') ?? '';
+	const payload =
+		fromTool ??
+		(() => {
+			const content = (
+				raw as {
+					content?: Array<{ type?: string; text?: string }>;
+				}
+			)?.content;
+			const text =
+				content
+					?.map((item) => (item.type === 'text' ? (item.text ?? '') : ''))
+					.join('') ?? '';
 
-		let parsedJson: unknown;
-		try {
-			parsedJson = JSON.parse(extractJsonPayload(text));
-		} catch {
-			throw new Error(
-				'Claude response did not contain tool_use input or parseable JSON.',
-			);
-		}
-		return parsedJson;
-	})();
+			let parsedJson: unknown;
+			try {
+				parsedJson = JSON.parse(extractJsonPayload(text));
+			} catch {
+				throw new Error(
+					'Claude response did not contain tool_use input or parseable JSON.',
+				);
+			}
+			return parsedJson;
+		})();
 
 	const normalized = normalizeClaudeIssuesPayload(payload);
 
@@ -513,7 +591,5 @@ export function parseClaudeIssues(raw: unknown): ClaudeIssue[] {
 		);
 	}
 
-	throw new Error(
-		`Invalid Claude issues payload: ${parsed.error.message}`,
-	);
+	throw new Error(`Invalid Claude issues payload: ${parsed.error.message}`);
 }
