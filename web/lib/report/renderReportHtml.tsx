@@ -118,7 +118,8 @@ function getPerformanceMetrics(pages: ReportScanPage[]) {
 	return { avgPerf: avg(perfScores), avgLcp: avg(lcpValues) };
 }
 
-const RING_C = 163.4;
+// Ring radius is 46px in a 120×120 SVG → circumference = 2π×46 ≈ 289
+const RING_C = 289;
 function scoreRingOffset(score: number) {
 	return Math.round(RING_C * (1 - score / 100));
 }
@@ -128,6 +129,33 @@ function scoreGradientId(score: number) {
 		: score >= 60 ? 'grad-amber'
 		: 'grad-red'
 	);
+}
+
+/** Human-readable label for a category key. */
+function categoryDisplayLabel(category: IssueCategory): string {
+	const found = CATEGORY_ORDER.find((c) => c.key === category);
+	if (found) return found.title;
+	switch (category) {
+		case 'security': return 'Security';
+		case 'content': return 'Content';
+		default: return String(category);
+	}
+}
+
+/** Background + text colour for a category chip. */
+function categoryChipStyle(category: IssueCategory): { bg: string; color: string } {
+	switch (category) {
+		case 'functionality': return { bg: '#fef2f2', color: '#dc2626' };
+		case 'ui_bugs': return { bg: '#fdf4ff', color: '#9333ea' };
+		case 'usability_ux': return { bg: '#eff6ff', color: '#2563eb' };
+		case 'responsiveness': return { bg: '#f0fdf4', color: '#16a34a' };
+		case 'performance': return { bg: '#fff7ed', color: '#ea580c' };
+		case 'seo': return { bg: '#fefce8', color: '#b45309' };
+		case 'accessibility': return { bg: '#f0f9ff', color: '#0284c7' };
+		case 'security': return { bg: '#fff1f2', color: '#be123c' };
+		case 'content': return { bg: '#f8fafc', color: '#475569' };
+		default: return { bg: '#f5f3ff', color: '#6366f1' };
+	}
 }
 function perfBarColor(score: number) {
 	return (
@@ -243,13 +271,14 @@ function programmaticFindingToHtml(
 	:	escapeHtml(f.category);
 	return `
 <div class="issue prog-issue">
-  <div class="issue-header">
+  <div class="issue-chips">
     <div class="sev-badge" style="background:${sev.bg};color:${sev.color};">
       <span class="sev-dot" style="background:${sev.dot};"></span>
       ${sev.label}
     </div>
-    <div class="issue-title">${escapeHtml(f.title)}</div>
+    <div class="cat-chip" style="background:#f1f5f9;color:#475569;">Automated</div>
   </div>
+  <div class="issue-title">${escapeHtml(f.title)}</div>
   <div class="issue-url">${escapeHtml(pageUrl)} <span class="url-sep">›</span> <span class="prog-id">${escapeHtml(f.id)}</span></div>
   <div class="issue-desc">${escapeHtml(f.summary)}</div>
   <div class="issue-fields">
@@ -299,21 +328,23 @@ function buildProgrammaticScanHtml(pages: ReportScanPage[]): string {
 
 function issueToHtml(issue: ReportIssue): string {
 	const sev = severityConfig(issue.severity);
+	const cat = categoryChipStyle(issue.category);
+	const catLabel = categoryDisplayLabel(issue.category);
 	return `
 <div class="issue">
-  <div class="issue-header">
+  <div class="issue-chips">
     <div class="sev-badge" style="background:${sev.bg};color:${sev.color};">
       <span class="sev-dot" style="background:${sev.dot};"></span>
       ${sev.label}
     </div>
-    <div class="issue-title">${escapeHtml(issue.title)}</div>
+    <div class="cat-chip" style="background:${cat.bg};color:${cat.color};">${escapeHtml(catLabel)}</div>
   </div>
+  <div class="issue-title">${escapeHtml(issue.title)}</div>
   <div class="issue-url">${escapeHtml(issue.page_url)}${issue.page_section ? ` <span class="url-sep">›</span> ${escapeHtml(issue.page_section)}` : ''}</div>
   <div class="issue-desc">${escapeHtml(issue.description)}</div>
   <div class="issue-fields">
-    ${issue.page_section ? `<div class="field-row"><span class="field-key">Section</span><span class="field-val">${escapeHtml(issue.page_section)}</span></div>` : ''}
     <div class="field-row"><span class="field-key">Impact</span><span class="field-val">${escapeHtml(issue.impact)}</span></div>
-    <div class="field-row"><span class="field-key">Fix</span><span class="field-val">${escapeHtml(issue.fix_instructions)}</span></div>
+    <div class="field-row"><span class="field-key">How to fix</span><span class="field-val">${escapeHtml(issue.fix_instructions)}</span></div>
   </div>
 </div>`;
 }
@@ -417,29 +448,34 @@ export function renderReportHtml(input: {
 	});
 
 	const breakdownHtml = CATEGORY_ORDER.map((s) => {
-		const count = issues.filter((i) => i.category === s.key).length;
-		const pct =
-			issues.length > 0 ? Math.round((count / issues.length) * 100) : 0;
-		const hasCritical = sorted.some(
-			(i) => i.category === s.key && i.severity === 'critical',
-		);
-		const hasHigh = sorted.some(
-			(i) => i.category === s.key && i.severity === 'high',
-		);
-		const dotColor =
+		const catIssues = issues.filter((i) => i.category === s.key);
+		const count = catIssues.length;
+		const criticalCount = catIssues.filter((i) => i.severity === 'critical').length;
+		const highCount = catIssues.filter((i) => i.severity === 'high').length;
+		// Proportion bar: fraction of total issues in this category
+		const pct = issues.length > 0 ? Math.round((count / issues.length) * 100) : 0;
+		const hasCritical = criticalCount > 0;
+		const hasHigh = highCount > 0;
+		const barColor =
 			hasCritical ? '#f43f5e'
 			: hasHigh ? '#f97316'
 			: count > 0 ? '#a78bfa'
 			: '#d1d5db';
+		const catStyle = categoryChipStyle(s.key);
+		// Severity breakdown label
+		const sevParts: string[] = [];
+		if (criticalCount > 0) sevParts.push(`${criticalCount} critical`);
+		if (highCount > 0) sevParts.push(`${highCount} high`);
+		const sevLabel = sevParts.length > 0 ? sevParts.join(', ') : (count > 0 ? `${count} total` : 'Clean');
 		return `
 <div class="breakdown-row">
   <div class="breakdown-left">
-    <span class="breakdown-dot" style="background:${dotColor};"></span>
-    <span class="breakdown-lbl">${escapeHtml(s.title)}</span>
+    <span class="cat-chip" style="background:${catStyle.bg};color:${catStyle.color};">${escapeHtml(s.title)}</span>
   </div>
   <div class="breakdown-track">
-    <div class="breakdown-fill" style="width:${pct}%;background:${dotColor};"></div>
+    <div class="breakdown-fill" style="width:${pct}%;background:${barColor};"></div>
   </div>
+  <span class="breakdown-sev">${escapeHtml(sevLabel)}</span>
   <span class="breakdown-n">${count}</span>
 </div>`;
 	}).join('');
@@ -581,7 +617,7 @@ body {
 .cover-inner {
   position: relative;
   z-index: 1;
-  padding: 32px 32px 28px;
+  padding: 32px 200px 28px 32px; /* right padding leaves room for the 120px score ring */
 }
 .cover-brand {
   display: flex;
@@ -652,12 +688,13 @@ body {
 }
 .cover-score {
   position: absolute;
-  top: 32px;
-  right: 32px;
+  top: 50%;
+  right: 28px;
+  transform: translateY(-50%);
   z-index: 2;
   text-align: center;
 }
-.score-ring-wrap { position: relative; width: 72px; height: 72px; }
+.score-ring-wrap { position: relative; width: 120px; height: 120px; }
 .score-ring-wrap svg { transform: rotate(-90deg); }
 .score-val {
   position: absolute;
@@ -665,24 +702,24 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 34px;
   font-weight: 600;
   color: #f1f5f9;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
 }
 .score-label {
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 500;
-  color: #475569;
+  color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .score-grade {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: #cbd5e1;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 /* ── Summary page inner ────────────────────────────────────── */
@@ -730,27 +767,17 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 7px;
+  margin-bottom: 8px;
 }
 .breakdown-left {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 164px;
-}
-.breakdown-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  min-width: 175px;
   flex-shrink: 0;
-}
-.breakdown-lbl {
-  font-size: 11px;
-  color: var(--ink-2);
 }
 .breakdown-track {
   flex: 1;
-  height: 3px;
+  height: 4px;
   background: var(--line-2);
   border-radius: 99px;
   overflow: hidden;
@@ -758,13 +785,19 @@ body {
 .breakdown-fill {
   height: 100%;
   border-radius: 99px;
-  transition: width 0s;
+}
+.breakdown-sev {
+  font-size: 10px;
+  color: var(--ink-4);
+  white-space: nowrap;
+  min-width: 90px;
+  text-align: right;
 }
 .breakdown-n {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--ink-3);
-  min-width: 18px;
+  min-width: 20px;
   text-align: right;
 }
 
@@ -841,11 +874,13 @@ body {
   break-inside: avoid;
   page-break-inside: avoid;
 }
-.issue-header {
+/* Row of severity + category chips above the title */
+.issue-chips {
   display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  margin-bottom: 5px;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+  flex-wrap: wrap;
 }
 .sev-badge {
   display: inline-flex;
@@ -859,12 +894,22 @@ body {
   letter-spacing: 0.05em;
   white-space: nowrap;
   flex-shrink: 0;
-  margin-top: 2px;
 }
 .sev-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
+  flex-shrink: 0;
+}
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 99px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 .issue-title {
@@ -873,12 +918,13 @@ body {
   color: var(--ink);
   line-height: 1.4;
   letter-spacing: -0.01em;
+  margin-bottom: 4px;
 }
 .issue-url {
   font-family: 'Geist Mono', monospace;
   font-size: 10px;
   color: var(--ink-4);
-  margin-bottom: 6px;
+  margin-bottom: 7px;
   word-break: break-all;
 }
 .url-sep {
@@ -894,7 +940,7 @@ body {
 .issue-fields {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 .field-row {
   display: flex;
@@ -907,7 +953,7 @@ body {
 .field-key {
   font-weight: 600;
   color: var(--ink-2);
-  min-width: 44px;
+  min-width: 60px;
   flex-shrink: 0;
 }
 .field-val {
@@ -1079,7 +1125,7 @@ body {
     </div>
     <div class="cover-score">
       <div class="score-ring-wrap">
-        <svg width="72" height="72" viewBox="0 0 72 72">
+        <svg width="120" height="120" viewBox="0 0 120 120">
           <defs>
             <linearGradient id="grad-green" x1="0%" y1="0%" x2="100%" y2="0%">
               <stop offset="0%" stop-color="#34d399"/>
@@ -1094,8 +1140,8 @@ body {
               <stop offset="100%" stop-color="#f43f5e"/>
             </linearGradient>
           </defs>
-          <circle cx="36" cy="36" r="26" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="6"/>
-          <circle cx="36" cy="36" r="26" fill="none" stroke="url(#${gradId})" stroke-width="6"
+          <circle cx="60" cy="60" r="46" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="8"/>
+          <circle cx="60" cy="60" r="46" fill="none" stroke="url(#${gradId})" stroke-width="8"
             stroke-dasharray="${RING_C}" stroke-dashoffset="${offset}" stroke-linecap="round"/>
         </svg>
         <div class="score-val">${score}</div>

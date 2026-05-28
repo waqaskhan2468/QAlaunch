@@ -69,4 +69,5 @@ export type ArtifactSliceName =
 	| 'broken_states'
 	| 'accessibility'
 	| 'responsive'
-	| 'response_security';
+	| 'response_security'
+	| 'diagnostics';

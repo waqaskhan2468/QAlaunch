@@ -20,6 +20,27 @@ const AUTH_NOTE =
 export const AUTH_PATH_PATTERN =
 	/\/(login|log-in|sign-in|signin|signup|sign-up|register|dashboard|account|settings|auth|logout|profile|my-account)(\/|$|\?|#)/i;
 
+/**
+ * URL path/query fragment keywords that indicate an auth-gated area.
+ * Exported so page-selection.ts can import the single source of truth.
+ */
+export const AUTH_KEYWORDS = [
+	'login',
+	'log-in',
+	'signin',
+	'sign-in',
+	'signup',
+	'sign-up',
+	'register',
+	'auth',
+	'account',
+	'dashboard',
+	'settings',
+	'logout',
+	'profile',
+	'my-account',
+];
+
 // ─────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────
@@ -123,7 +144,7 @@ function detectAuthPresence(
 	url: URL,
 	html: string,
 	nav: string,
-	body: string,
+	_body: string,
 	title: string,
 ): boolean {
 	// Layer 1: URL / hostname signals
@@ -189,7 +210,10 @@ function detectAuthPresence(
 		return true;
 	}
 
-	// Layer 4: Text signals
+	// Layer 4: Title and nav text only — NOT body.
+	// Checking body causes false-positives on marketing sites that mention
+	// "sign in" or "log in" anywhere in their copy (e.g. "Sign in to your account
+	// to get started" in a feature description).
 	const authWords = [
 		'log in',
 		'login',
@@ -199,28 +223,24 @@ function detectAuthPresence(
 		'signup',
 		'register',
 		'create account',
-		'welcome back',
 		'forgot password',
 	];
 
-	if (
-		includesAny(title, authWords) ||
-		includesAny(nav, authWords) ||
-		includesAny(body, authWords)
-	) {
+	if (includesAny(title, authWords) || includesAny(nav, authWords)) {
 		return true;
 	}
 
-	// Layer 5: Structural gated signals
+	// Layer 5: Unambiguous structural gated signals only.
+	// Removed 'dashboard' and 'workspace' — far too common in marketing copy
+	// ("manage your dashboard", "team workspace"). Only keep code-level attributes
+	// that a marketing page would never include.
 	const hasGatedSignal =
-		html.includes('dashboard') ||
 		html.includes('user-portal') ||
 		html.includes('"authenticated"') ||
 		html.includes("'authenticated'") ||
 		html.includes('data-auth') ||
 		html.includes('isloggedin') ||
 		html.includes('is-logged-in') ||
-		html.includes('workspace') ||
 		html.includes('admin panel');
 
 	if (hasGatedSignal) {
@@ -281,7 +301,212 @@ function signalEcommerce(
 	);
 }
 
-function signalSaas(html: string, nav: string, url: URL): boolean {
+function signalRestaurant(
+	$: cheerio.CheerioAPI,
+	html: string,
+	nav: string,
+	body: string,
+): boolean {
+	const hasMenuNav = includesAny(nav, [
+		'our menu',
+		'menu',
+		'reservations',
+		'book a table',
+		'order online',
+		'order now',
+	]);
+
+	const hasRestaurantBody = includesAny(body, [
+		'restaurant',
+		'cuisine',
+		'reservations',
+		'dining',
+		'dine with us',
+		'our chef',
+		'food menu',
+		'dinner menu',
+		'lunch menu',
+	]);
+
+	// Schema.org structured data or reservation platform embeds
+	const hasRestaurantSchema =
+		html.includes('"restaurant"') ||
+		html.includes('"foodestablishment"') ||
+		html.includes('opentable') ||
+		html.includes('resy.com') ||
+		$('[class*="reservation"], [id*="reservation"]').length > 0;
+
+	return hasMenuNav || hasRestaurantBody || hasRestaurantSchema;
+}
+
+function signalEvent(html: string, nav: string, body: string): boolean {
+	const hasEventNav = includesAny(nav, [
+		'schedule',
+		'speakers',
+		'agenda',
+		'register',
+		'tickets',
+		'get tickets',
+	]);
+
+	const hasEventBody = includesAny(body, [
+		'conference',
+		'summit',
+		'symposium',
+		'workshop',
+		'get tickets',
+		'buy tickets',
+		'early bird',
+		'register now',
+	]);
+
+	// Schema.org Event type
+	const hasEventSchema = html.includes('"event"');
+
+	return hasEventNav || hasEventBody || hasEventSchema;
+}
+
+function signalNonprofit(nav: string, body: string): boolean {
+	const hasDonateNav = includesAny(nav, [
+		'donate',
+		'give',
+		'get involved',
+		'volunteer',
+		'support us',
+	]);
+
+	const hasNonprofitBody = includesAny(body, [
+		'501(c)',
+		'nonprofit',
+		'non-profit',
+		'charity',
+		'make a difference',
+		'tax-deductible',
+		'fundraising',
+		'donation',
+	]);
+
+	return hasDonateNav || hasNonprofitBody;
+}
+
+function signalDirectory(
+	$: cheerio.CheerioAPI,
+	nav: string,
+	body: string,
+): boolean {
+	const hasDirectoryNav = includesAny(nav, [
+		'browse',
+		'categories',
+		'listings',
+		'directory',
+		'submit listing',
+	]);
+
+	const hasSearchWithListings =
+		$('input[type="search"], input[placeholder*="search" i]').length > 0 &&
+		includesAny(body, [
+			'browse listings',
+			'submit a listing',
+			'submit listing',
+			'search results',
+			'filter by',
+			'all categories',
+		]);
+
+	const hasListingMarkup =
+		$('[class*="listing-card"], [class*="directory-card"], [class*="listing-item"]')
+			.length > 2;
+
+	return hasDirectoryNav || hasSearchWithListings || hasListingMarkup;
+}
+
+function signalFreelancer(
+	$: cheerio.CheerioAPI,
+	nav: string,
+	body: string,
+): boolean {
+	// Strong hire-me signals in nav
+	const hasHireMeNav = includesAny(nav, [
+		'hire me',
+		'available for hire',
+		'work with me',
+		'get in touch',
+	]);
+
+	// Personal intro phrases
+	const hasPersonalIntro = includesAny(body, [
+		"i'm a ",
+		'i am a ',
+		"hello, i'm",
+		"hi, i'm",
+		"hey, i'm",
+		"i'm an ",
+		'i am an ',
+	]);
+
+	// Explicit freelance availability language
+	const hasHireMeBody = includesAny(body, [
+		'available for hire',
+		'hire me',
+		'open to opportunities',
+		'open to work',
+		'freelance designer',
+		'freelance developer',
+		'freelance writer',
+		'freelance illustrator',
+		'freelance photographer',
+	]);
+
+	// Social/portfolio platform links typical of personal sites
+	const hasCreativeSocials =
+		$('a[href*="github.com"], a[href*="dribbble.com"], a[href*="behance.net"], a[href*="codepen.io"]')
+			.length > 0;
+
+	// "freelance" anywhere + personal signals
+	const isFreelancePlusPersonal =
+		body.includes('freelance') &&
+		(hasPersonalIntro || hasCreativeSocials || hasHireMeNav);
+
+	return hasHireMeNav || hasHireMeBody || isFreelancePlusPersonal;
+}
+
+function signalAgency(
+	$: cheerio.CheerioAPI,
+	nav: string,
+	body: string,
+): boolean {
+	const hasAgencyNav = includesAny(nav, [
+		'our work',
+		'case studies',
+		'clients',
+		'what we do',
+		'our services',
+	]);
+
+	const hasAgencyBody = includesAny(body, [
+		'we are a',
+		"we're a",
+		'our agency',
+		'digital agency',
+		'creative agency',
+		'marketing agency',
+		'branding agency',
+		'design agency',
+		'award-winning',
+		'full-service',
+	]);
+
+	// Agency-specific page structure: team + services pages present
+	const hasAgencyStructure =
+		$('a[href*="team"], a[href*="our-team"], a[href*="work"], a[href*="case-studies"]')
+			.length > 1;
+
+	return hasAgencyNav || hasAgencyBody || (hasAgencyStructure && hasAgencyBody);
+}
+
+function signalSaas(html: string, nav: string): boolean {
+	// Removed: 'login', 'sign in', 'sign up' — those are auth signals, not SaaS signals.
+	// Removed: 'dashboard' from html check — too common in marketing copy.
 	return (
 		includesAny(nav, [
 			'pricing',
@@ -289,9 +514,6 @@ function signalSaas(html: string, nav: string, url: URL): boolean {
 			'start for free',
 			'features',
 			'solutions',
-			'login',
-			'sign in',
-			'sign up',
 		]) ||
 		includesAny(html, [
 			'free trial',
@@ -300,9 +522,25 @@ function signalSaas(html: string, nav: string, url: URL): boolean {
 			'per user',
 			'/month',
 			'subscription',
-			'dashboard',
-		]) ||
-		url.hostname.startsWith('app.')
+		])
+	);
+}
+
+function signalWebapp($: cheerio.CheerioAPI, html: string, nav: string, url: URL): boolean {
+	// Dedicated app subdomain (e.g. app.acme.com) that wasn't caught by ecommerce/restaurant
+	if (url.hostname.startsWith('app.')) return true;
+
+	// App-like primary navigation
+	if (
+		includesAny(nav, ['dashboard', 'projects', 'tasks', 'workspace', 'inbox', 'analytics'])
+	) {
+		return true;
+	}
+
+	// Web app manifest or app-shell patterns
+	return (
+		html.includes('application/manifest+json') ||
+		$('meta[name="apple-mobile-web-app-capable"]').length > 0
 	);
 }
 
@@ -311,6 +549,7 @@ function signalBusiness(
 	nav: string,
 	body: string,
 ): boolean {
+	// Removed: `$('form').length > 0` — contact/search forms appear on almost every site.
 	return (
 		includesAny(nav, ['services', 'about', 'contact', 'what we do']) ||
 		includesAny(body, [
@@ -318,8 +557,7 @@ function signalBusiness(
 			'book a call',
 			'book a demo',
 			'request a quote',
-		]) ||
-		$('form').length > 0
+		])
 	);
 }
 
@@ -364,15 +602,22 @@ function signalLanding($: cheerio.CheerioAPI, body: string): boolean {
 // MAIN EXPORT — WEBSITE TYPE DETECTION
 // ─────────────────────────────────────────────
 
+/**
+ * Detect the website type from homepage HTML.
+ *
+ * Pass `$` when you've already parsed the HTML with cheerio (e.g. in
+ * detectAndSelectPages) so the HTML is not parsed twice.
+ */
 export function detectWebsiteType(
 	homepageHtml: string,
 	baseUrl: string,
+	$?: cheerio.CheerioAPI,
 ): DetectionResult {
-	const $ = cheerio.load(homepageHtml);
-	const { html, nav, body, title } = normalisePage($);
+	const doc = $ ?? cheerio.load(homepageHtml);
+	const { html, nav, body, title } = normalisePage(doc);
 	const url = new URL(baseUrl);
 
-	const requiresAuth = detectAuthPresence($, url, html, nav, body, title);
+	const requiresAuth = detectAuthPresence(doc, url, html, nav, body, title);
 
 	const authPayload =
 		requiresAuth ?
@@ -383,21 +628,52 @@ export function detectWebsiteType(
 			}
 		:	{};
 
-	// Strong ecommerce signals first, then SaaS/business/content signals.
+	// Detection order: most-specific types first to avoid false-positive
+	// fallthrough into generic buckets (business, portfolio, landing).
 
-	if (signalEcommerce($, html, nav)) {
+	if (signalEcommerce(doc, html, nav)) {
 		return { type: 'ecommerce', requiresAuth, ...authPayload };
 	}
 
-	if (signalSaas(html, nav, url)) {
+	if (signalRestaurant(doc, html, nav, body)) {
+		return { type: 'restaurant', requiresAuth, ...authPayload };
+	}
+
+	if (signalEvent(html, nav, body)) {
+		return { type: 'event', requiresAuth, ...authPayload };
+	}
+
+	if (signalNonprofit(nav, body)) {
+		return { type: 'nonprofit', requiresAuth, ...authPayload };
+	}
+
+	if (signalDirectory(doc, nav, body)) {
+		return { type: 'directory', requiresAuth, ...authPayload };
+	}
+
+	if (signalFreelancer(doc, nav, body)) {
+		return { type: 'freelancer', requiresAuth, ...authPayload };
+	}
+
+	if (signalAgency(doc, nav, body)) {
+		return { type: 'agency', requiresAuth, ...authPayload };
+	}
+
+	// webapp before saas: app.* subdomains and app-shell pages are webapps,
+	// not marketing sites.
+	if (signalWebapp(doc, html, nav, url)) {
+		return { type: 'webapp', requiresAuth, ...authPayload };
+	}
+
+	if (signalSaas(html, nav)) {
 		return { type: 'saas', requiresAuth, ...authPayload };
 	}
 
-	if (signalBusiness($, nav, body)) {
+	if (signalBusiness(doc, nav, body)) {
 		return { type: 'business', requiresAuth, ...authPayload };
 	}
 
-	if (signalBlog($, html, body)) {
+	if (signalBlog(doc, html, body)) {
 		return { type: 'blog', requiresAuth, ...authPayload };
 	}
 
@@ -405,7 +681,7 @@ export function detectWebsiteType(
 		return { type: 'portfolio', requiresAuth, ...authPayload };
 	}
 
-	if (signalLanding($, body)) {
+	if (signalLanding(doc, body)) {
 		return { type: 'landing', requiresAuth, ...authPayload };
 	}
 

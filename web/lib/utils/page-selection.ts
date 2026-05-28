@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import type { WebsiteType, ScanPackage } from '@/types/zod';
-import { resolveUrl, isPublicPage, dedupe } from './detect';
+import { resolveUrl, isPublicPage, dedupe, AUTH_KEYWORDS } from './detect';
 
 export type PageRole =
 	| 'homepage'
@@ -14,6 +14,14 @@ export type PageRole =
 	| 'docs'
 	| 'blog'
 	| 'legal'
+	// ── New roles ────────────────────────────────────────────────────────────
+	| 'work'      // portfolio / case studies (agency, freelancer)
+	| 'services'  // services / what-we-do page (agency, business)
+	| 'menu'      // restaurant food menu
+	| 'team'      // team / people page
+	| 'donate'    // donate / give page (nonprofit)
+	| 'speakers'  // event speakers list
+	| 'listings'  // directory / search listings
 	| 'other';
 
 export type SelectedScanPage = {
@@ -29,26 +37,11 @@ type LinkCandidate = {
 	score: number;
 };
 
-const AUTH_KEYWORDS = [
-	'login',
-	'log-in',
-	'signin',
-	'sign-in',
-	'signup',
-	'sign-up',
-	'register',
-	'auth',
-	'account',
-	'dashboard',
-	'settings',
-	'logout',
-	'profile',
-	'my-account',
-];
+// AUTH_KEYWORDS is imported from detect.ts — single source of truth.
 
 const ROLE_PATTERNS: Record<PageRole, string[]> = {
 	homepage: [],
-	pricing: ['pricing', 'plans', 'packages'],
+	pricing:  ['pricing', 'plans', 'packages'],
 	features: ['features', 'solutions', 'platform', 'use-cases', 'storage'],
 	product: [
 		'product',
@@ -59,14 +52,22 @@ const ROLE_PATTERNS: Record<PageRole, string[]> = {
 		'collections',
 		'catalog',
 	],
-	cart: ['cart', 'basket'],
+	cart:     ['cart', 'basket'],
 	checkout: ['checkout'],
-	about: ['about', 'company', 'team', 'who-we-are', 'customers'],
-	contact: ['contact', 'demo', 'quote', 'book', 'get-in-touch', 'sales'],
-	docs: ['docs', 'documentation', 'help', 'faq', 'support'],
-	blog: ['blog', 'posts', 'articles', 'resources', 'news', 'insights'],
-	legal: ['privacy', 'terms', 'security', 'compliance'],
-	other: [],
+	about:    ['about', 'company', 'team', 'who-we-are', 'customers'],
+	contact:  ['contact', 'demo', 'quote', 'book', 'get-in-touch', 'sales'],
+	docs:     ['docs', 'documentation', 'help', 'faq', 'support'],
+	blog:     ['blog', 'posts', 'articles', 'resources', 'news', 'insights'],
+	legal:    ['privacy', 'terms', 'security', 'compliance'],
+	// New roles
+	work:     ['work', 'portfolio', 'projects', 'case-studies', 'casestudies', 'selected'],
+	services: ['services', 'what-we-do', 'our-services', 'service'],
+	menu:     ['menu', 'food', 'drinks', 'cuisine', 'our-menu'],
+	team:     ['team', 'people', 'meet-us', 'crew', 'staff', 'meet-the-team'],
+	donate:   ['donate', 'give', 'support-us', 'fundraising', 'donation'],
+	speakers: ['speakers', 'speaker'],
+	listings: ['listings', 'listing', 'directory', 'browse', 'search'],
+	other:    [],
 };
 
 const ROLE_PRIORITY: Record<WebsiteType, PageRole[]> = {
@@ -107,6 +108,7 @@ const ROLE_PRIORITY: Record<WebsiteType, PageRole[]> = {
 	business: [
 		'homepage',
 		'about',
+		'services',
 		'contact',
 		'pricing',
 		'features',
@@ -116,8 +118,66 @@ const ROLE_PRIORITY: Record<WebsiteType, PageRole[]> = {
 		'other',
 	],
 	blog: ['homepage', 'blog', 'about', 'contact', 'docs', 'legal', 'other'],
-	portfolio: ['homepage', 'features', 'about', 'contact', 'blog', 'other'],
+	portfolio: [
+		'homepage',
+		'work',
+		'about',
+		'contact',
+		'blog',
+		'other',
+	],
 	landing: ['homepage', 'features', 'pricing', 'contact', 'about', 'other'],
+	// ── New types ─────────────────────────────────────────────────────────────
+	freelancer: [
+		'homepage',
+		'work',      // portfolio / projects first
+		'contact',
+		'about',
+		'blog',
+		'other',
+	],
+	agency: [
+		'homepage',
+		'work',      // case studies / portfolio
+		'services',
+		'about',
+		'contact',
+		'blog',
+		'legal',
+		'other',
+	],
+	restaurant: [
+		'homepage',
+		'menu',      // food menu most important
+		'contact',   // reservations / address
+		'about',
+		'blog',
+		'other',
+	],
+	nonprofit: [
+		'homepage',
+		'donate',    // donation page first
+		'about',
+		'blog',
+		'contact',
+		'other',
+	],
+	event: [
+		'homepage',
+		'speakers',
+		'contact',   // register / tickets
+		'about',
+		'blog',
+		'other',
+	],
+	directory: [
+		'homepage',
+		'listings',
+		'about',
+		'contact',
+		'blog',
+		'other',
+	],
 	unknown: [
 		'homepage',
 		'pricing',
@@ -179,6 +239,10 @@ export function inferPageRole(
 	if (includesPattern(haystack, 'checkout')) return 'checkout';
 	if (includesPattern(haystack, 'cart')) return 'cart';
 	if (includesPattern(haystack, 'pricing')) return 'pricing';
+	if (includesPattern(haystack, 'donate')) return 'donate';
+	if (includesPattern(haystack, 'menu')) return 'menu';
+	if (includesPattern(haystack, 'speakers')) return 'speakers';
+	if (includesPattern(haystack, 'listings')) return 'listings';
 
 	if (
 		/\/products?\//i.test(path) ||
@@ -191,6 +255,10 @@ export function inferPageRole(
 		return 'product';
 	}
 
+	// 'work' before 'features' so /work pages don't fall through to other
+	if (includesPattern(haystack, 'work')) return 'work';
+	if (includesPattern(haystack, 'services')) return 'services';
+	if (includesPattern(haystack, 'team')) return 'team';
 	if (includesPattern(haystack, 'features')) return 'features';
 	if (includesPattern(haystack, 'about')) return 'about';
 	if (includesPattern(haystack, 'contact')) return 'contact';
@@ -240,8 +308,13 @@ function getPageLimit(pkg: ScanPackage): number {
 			return 10;
 		case 'enterprise':
 			return 15;
-		default:
+		default: {
+			// Exhaustive check — if a new package is added to ScanPackage without
+			// updating this switch, log a warning so it surfaces in CI/review.
+			const _exhaustive: never = pkg;
+			console.warn('[page-selection] Unknown scan package:', _exhaustive, '— defaulting to 1 page');
 			return 1;
+		}
 	}
 }
 
@@ -304,6 +377,41 @@ function scoreCandidate(
 		if (candidate.role === 'pricing') score += 18;
 		if (candidate.role === 'docs') score += 8;
 		if (candidate.role === 'cart' || candidate.role === 'checkout') score -= 30;
+	}
+
+	// Freelancer & agency: portfolio/case-studies are the most important pages
+	if (websiteType === 'freelancer') {
+		if (candidate.role === 'work') score += 25;
+	}
+
+	if (websiteType === 'agency') {
+		if (candidate.role === 'work') score += 22;
+		if (candidate.role === 'services') score += 18;
+	}
+
+	if (websiteType === 'business') {
+		if (candidate.role === 'services') score += 15;
+	}
+
+	// Restaurant: food menu is the key conversion page
+	if (websiteType === 'restaurant') {
+		if (candidate.role === 'menu') score += 28;
+		if (candidate.role === 'contact') score += 12; // reservations
+	}
+
+	// Nonprofit: donation page is the primary conversion
+	if (websiteType === 'nonprofit') {
+		if (candidate.role === 'donate') score += 28;
+	}
+
+	// Event: speakers and schedule are the draw
+	if (websiteType === 'event') {
+		if (candidate.role === 'speakers') score += 22;
+	}
+
+	// Directory: search/listings page is the core experience
+	if (websiteType === 'directory') {
+		if (candidate.role === 'listings') score += 28;
 	}
 
 	if (candidate.role === 'other') score -= 30;
@@ -385,11 +493,18 @@ function roleOrderForPackage(
 	return priority.filter((role) => role !== 'legal' && role !== 'other');
 }
 
+/**
+ * Select pages to scan, sorted by role importance for the given website type.
+ *
+ * Pass `$` when you've already parsed the HTML (e.g. in detectAndSelectPages)
+ * so cheerio does not parse the same string twice.
+ */
 export function selectPagesToTestWithRoles(
 	homepageHtml: string,
 	baseUrl: string,
 	websiteType: WebsiteType,
 	pkg: ScanPackage,
+	$?: cheerio.CheerioAPI,
 ): SelectedScanPage[] {
 	const maxCount = getPageLimit(pkg);
 	if (maxCount === 0) return [];
@@ -397,8 +512,8 @@ export function selectPagesToTestWithRoles(
 	const homepage = homepagePage(baseUrl);
 	if (maxCount === 1) return [homepage];
 
-	const $ = cheerio.load(homepageHtml);
-	const rawCandidates = collectLinkCandidates($, baseUrl);
+	const doc = $ ?? cheerio.load(homepageHtml);
+	const rawCandidates = collectLinkCandidates(doc, baseUrl);
 	const selectionType = resolveSelectionType(websiteType, rawCandidates);
 	const candidates = rankCandidates(rawCandidates, selectionType);
 
@@ -419,9 +534,10 @@ export function selectPagesToTest(
 	baseUrl: string,
 	websiteType: WebsiteType,
 	pkg: ScanPackage,
+	$?: cheerio.CheerioAPI,
 ): string[] {
 	return dedupe(
-		selectPagesToTestWithRoles(homepageHtml, baseUrl, websiteType, pkg).map(
+		selectPagesToTestWithRoles(homepageHtml, baseUrl, websiteType, pkg, $).map(
 			(page) => page.url,
 		),
 	);

@@ -15,6 +15,12 @@ export const websiteTypeSchema = z.enum([
 	'portfolio',
 	'webapp',
 	'landing',
+	'freelancer',
+	'agency',
+	'restaurant',
+	'nonprofit',
+	'event',
+	'directory',
 	'unknown',
 ]);
 export const scanStatusSchema = z.enum([

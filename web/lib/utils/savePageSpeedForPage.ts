@@ -1,3 +1,4 @@
+import pLimit from 'p-limit';
 import { runPageSpeedForUrl } from '@/lib/api/pagespeed';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import type { ScanPackage } from '@/types/zod';
@@ -101,13 +102,14 @@ export async function collectPageSpeedForPages(
 	pageUrls: string[],
 	pkg: ScanPackage,
 ): Promise<void> {
-	for (let index = 0; index < pageUrls.length; index += PAGESPEED_CONCURRENCY) {
-		const chunk = pageUrls.slice(index, index + PAGESPEED_CONCURRENCY);
+	// p-limit gives a true sliding window: the next URL starts the moment any
+	// slot frees, rather than waiting for the slowest URL in a fixed batch.
+	// Google PSI can take 15–75 s per call — the old batch loop wasted that gap.
+	const limit = pLimit(PAGESPEED_CONCURRENCY);
 
-		await Promise.all(
-			chunk.map((pageUrl) =>
-				savePageSpeedForPage(supabase, scanId, pageUrl, pkg),
-			),
-		);
-	}
+	await Promise.all(
+		pageUrls.map((pageUrl) =>
+			limit(() => savePageSpeedForPage(supabase, scanId, pageUrl, pkg)),
+		),
+	);
 }

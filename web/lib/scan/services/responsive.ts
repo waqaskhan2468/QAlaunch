@@ -1,21 +1,24 @@
 import { devices, type Browser, type Page } from 'playwright-core';
 import type { ResponsiveResult } from '../types/scan.types';
-import { closeContext, getNavTimeoutMs, safeGoto } from './navigation';
+import { closeContext, safeGoto } from './navigation';
 import { blockThirdPartyResources } from './resourceBlocklist';
 import { preparePageForScreenshot, takeScreenshot } from './screenshots';
 
 export const MOBILE_VIEWPORT_NAME = 'iPhone 14';
 
-// Viewport width threshold: ≤ this value uses the mobile capture branch.
-const MOBILE_WIDTH_THRESHOLD = 430;
+// Mobile navigation runs in the background while desktop collectors run.
+// Use a shorter timeout than desktop so a slow site doesn't hold up
+// Promise.allSettled for a full SCAN_NAV_TIMEOUT_MS × 2 window.
+// Reduced from 20 s → 15 s: mobile nav failing fast is fine — the outer
+// MOBILE_PHASE_TIMEOUT_MS (30 s) is the real ceiling and captures both
+// nav + screenshot. A 15 s nav timeout gives 15 s for the screenshot itself.
+const MOBILE_NAV_TIMEOUT_MS = 15_000;
 
 const RESPONSIVE_VIEWPORTS = [
 	{ name: MOBILE_VIEWPORT_NAME, width: 390, height: 844 },
 ];
 
 type ResponsiveViewport = (typeof RESPONSIVE_VIEWPORTS)[number];
-
-// ─── Internal: navigate a fresh context ───────────────────────────────────
 
 async function navigateForResponsiveCapture(
 	browser: Browser,
@@ -34,14 +37,13 @@ async function navigateForResponsiveCapture(
 
 	try {
 		const page = await context.newPage();
-		page.setDefaultTimeout(getNavTimeoutMs());
-		page.setDefaultNavigationTimeout(getNavTimeoutMs());
+		// Use MOBILE_NAV_TIMEOUT_MS for both defaults so they stay consistent
+		// with the explicit timeout passed to safeGoto below.
+		page.setDefaultTimeout(MOBILE_NAV_TIMEOUT_MS);
+		page.setDefaultNavigationTimeout(MOBILE_NAV_TIMEOUT_MS);
 		await blockThirdPartyResources(page);
 
-		// safeGoto already attempts domcontentloaded then commit internally.
-		// No additional fallback needed here — if safeGoto throws, both
-		// attempts already failed and a third commit attempt won't help.
-		await safeGoto(page, url);
+		await safeGoto(page, url, { timeout: MOBILE_NAV_TIMEOUT_MS });
 
 		return page;
 	} catch (error) {
@@ -50,35 +52,20 @@ async function navigateForResponsiveCapture(
 	}
 }
 
-// ─── Internal: capture from an already-navigated page ─────────────────────
-
 async function captureFromPage(
 	page: Page,
 	viewport: ResponsiveViewport,
 ): Promise<ResponsiveResult> {
-	// Keep animations enabled for responsive captures so IntersectionObserver-
-	// based reveals fire during the lazy-load scroll.
-	await preparePageForScreenshot(page, { disableAnimations: false });
+	// Mobile nav runs for ~30 s while desktop collectors work. By the time we
+	// screenshot, IntersectionObserver reveals have already fired and the page is
+	// settled — fast mode is safe and saves ~2-3 s of unnecessary prep.
+	await preparePageForScreenshot(page, { fast: true });
 
 	const hasHorizontalScroll = await page.evaluate(
 		() =>
 			document.documentElement.scrollWidth >
 			document.documentElement.clientWidth,
 	);
-
-	const isMobile = viewport.width <= MOBILE_WIDTH_THRESHOLD;
-
-	if (isMobile) {
-		const screenshot = await takeScreenshot(page);
-		return {
-			viewport: viewport.name,
-			width: viewport.width,
-			height: viewport.height,
-			hasHorizontalScroll,
-			screenshot,
-			sliceCount: 1,
-		};
-	}
 
 	return {
 		viewport: viewport.name,
@@ -90,20 +77,7 @@ async function captureFromPage(
 	};
 }
 
-// ─── Public API ────────────────────────────────────────────────────────────
-
-/**
- * Capture a responsive result from a **pre-navigated** mobile Page.
- *
- * Use this when you have already navigated the mobile page in a background
- * context (e.g. started in parallel with desktop data collection). This avoids
- * the cost of a second navigation to the same URL.
- *
- * The caller is responsible for closing the page/context after this returns.
- *
- * @param page    Already-navigated Playwright Page with mobile viewport set.
- * @param viewport Viewport metadata (name, width, height).
- */
+/** Capture a responsive result from a pre-navigated mobile Page. Caller closes the context. */
 export async function captureResponsiveFromPage(
 	page: Page,
 	viewport: ResponsiveViewport = RESPONSIVE_VIEWPORTS[0],
@@ -113,13 +87,8 @@ export async function captureResponsiveFromPage(
 
 /**
  * Start a mobile browser context and navigate to `url` in the background.
- *
- * Returns a Promise that resolves to `{ page, context }` once navigation
- * completes. The caller must close the context when done.
- *
- * Designed to be fired at the top of a scan and awaited only when the
- * screenshot is actually needed — so navigation happens concurrently with
- * desktop data collection (axe, links, seo, etc.).
+ * Fire at the top of a scan and await only when the screenshot is needed —
+ * navigation runs concurrently with desktop data collection.
  */
 export async function startMobileNavigation(
 	browser: Browser,

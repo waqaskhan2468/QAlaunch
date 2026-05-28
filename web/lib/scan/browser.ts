@@ -2,8 +2,9 @@ import Browserbase from '@browserbasehq/sdk';
 import type { SessionCreateParams } from '@browserbasehq/sdk/resources/sessions/sessions';
 import { chromium, type Browser } from 'playwright-core';
 
-// Scan wall-clock target is ~90–120s; 180s session timeout frees Browserbase slots sooner.
-const DEFAULT_SESSION_TIMEOUT_SEC = 180;
+// Page scan timeout is 240 s (services/index.ts) plus ~25 s setup overhead.
+// 300 s gives a 35 s safety margin so the session never expires mid-scan.
+const DEFAULT_SESSION_TIMEOUT_SEC = 300;
 
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 

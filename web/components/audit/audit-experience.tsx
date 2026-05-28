@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Clock, Lock, Zap } from 'lucide-react';
+import { Check, Clock, Lock, Zap } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { plans } from '@/components/pricing/pricing-plans';
@@ -185,9 +185,8 @@ function userFacingScanError(
 	raw: string | undefined | null,
 	fallback: string,
 ): string {
-	if (!raw || raw === 'not_found') {
-		return 'Scan not found. Check the link or start a new audit.';
-	}
+	if (!raw) return fallback;
+	if (raw === 'not_found') return 'Scan not found. Check the link or start a new audit.';
 	return raw;
 }
 
@@ -237,39 +236,6 @@ function loadingCopyForStatus(
 	};
 }
 
-// ─── Fallback findings ────────────────────────────────────────────────────────
-
-const fallbackFindings: ScanIssue[] = [
-	{
-		id: 'fallback-1',
-		severity: 'critical',
-		category: 'functionality',
-		title: 'Contact form submits with no confirmation or error message',
-		description:
-			'On the Homepage, in the Contact section, when the user submits the contact form the page reloads silently with no success or failure feedback. Users cannot tell if their message was received, which causes repeated attempts and trust loss.',
-		impact:
-			'Potential customers may abandon contact attempts, reducing leads and conversions.',
-	},
-	{
-		id: 'fallback-2',
-		severity: 'high',
-		category: 'usability_ux',
-		title: 'Navigation menu disappears when user scrolls down the page',
-		description:
-			'On long pages, the top navigation disappears after scrolling and users must return to the top to access other sections. This adds friction to normal browsing behavior and hurts discoverability of key pages.',
-		impact:
-			'Higher frustration and drop-off, especially for mobile visitors on long pages.',
-	},
-	{
-		id: 'fallback-3',
-		severity: 'high',
-		category: 'responsiveness',
-		title: 'Primary CTA button is hidden on smaller mobile screens',
-		description:
-			'On narrow viewports, the main call-to-action can be pushed below fold and partially obscured by sticky UI, making it hard to discover or tap for users on smaller devices.',
-		impact: 'Mobile conversion intent is blocked, directly impacting sales and signups.',
-	},
-];
 
 function deriveHost(raw?: string | null): string {
 	if (!raw) return 'yourwebsite.com';
@@ -343,31 +309,25 @@ function AuditExperienceInner() {
 	const freePreviewUsedParam = params.get('freePreviewUsed');
 	const host = deriveHost(inputUrl);
 
-	const [uiState, setUiState] = useState<UiState>('idle');
+	const [uiState, setUiState] = useState<UiState>(() => {
+		if (freePreviewUsedParam === '1') return 'free_preview_used';
+		return initialScanId ? 'processing' : 'idle';
+	});
 	const [statusData, setStatusData] = useState<ScanStatusResponse | null>(null);
 	const [analyzingStartedAt, setAnalyzingStartedAt] = useState<number | null>(null);
-	const [elapsedTick, setElapsedTick] = useState(0);
-	const [message, setMessage] = useState<string | null>(null);
+	const [analyzingElapsedSec, setAnalyzingElapsedSec] = useState<number | null>(null);
+	const [message, setMessage] = useState<string | null>(() =>
+		freePreviewUsedParam === '1' ? 'You already used your free preview for this website.' : null,
+	);
 	const [statusFetchNote, setStatusFetchNote] = useState<string | null>(null);
 	const [isRetrying, setIsRetrying] = useState(false);
-	const legacyPreviewMode = false;
 
 	useEffect(() => {
 		let cancelled = false;
 
-		setStatusData(null);
-		setAnalyzingStartedAt(null);
-		setElapsedTick(0);
-		setMessage(null);
-		setStatusFetchNote(null);
-
 		if (freePreviewUsedParam === '1') {
-			setUiState('free_preview_used');
-			setMessage('You already used your free preview for this website.');
 			return () => { cancelled = true; };
 		}
-
-		setUiState(initialScanId ? 'processing' : 'idle');
 
 		const delay = (ms: number) =>
 			new Promise<void>((resolve) => { setTimeout(resolve, ms); });
@@ -494,15 +454,11 @@ function AuditExperienceInner() {
 
 	useEffect(() => {
 		if (!loadingCopy.showAiStep || analyzingStartedAt == null) return;
-		const id = window.setInterval(() => setElapsedTick((t: number) => t + 1), 1_000);
+		const id = window.setInterval(() => {
+			setAnalyzingElapsedSec(Math.floor((Date.now() - analyzingStartedAt) / 1_000));
+		}, 1_000);
 		return () => window.clearInterval(id);
 	}, [loadingCopy.showAiStep, analyzingStartedAt]);
-
-	const analyzingElapsedSec =
-		loadingCopy.showAiStep && analyzingStartedAt != null ?
-			Math.floor((Date.now() - analyzingStartedAt) / 1_000)
-		:	null;
-	void elapsedTick;
 
 	const handleRetryScan = async () => {
 		if (!inputUrl || isRetrying) return;
@@ -666,24 +622,18 @@ function AuditExperienceInner() {
 	}
 
 	// ── Completed — build results props ────────────────────────────────────────
-	const findings =
-		legacyPreviewMode ? fallbackFindings : (statusForCurrentScan?.issues ?? []);
+	const findings = statusForCurrentScan?.issues ?? [];
 
-	const totalIssueCount =
-		legacyPreviewMode ? 12 : (statusForCurrentScan?.totalIssueCount ?? findings.length);
+	const totalIssueCount = statusForCurrentScan?.totalIssueCount ?? findings.length;
 
-	const lockedIssueCount =
-		legacyPreviewMode ? 9 : (statusForCurrentScan?.lockedIssueCount ?? 0);
+	const lockedIssueCount = statusForCurrentScan?.lockedIssueCount ?? 0;
 
-	const lockedIssues =
-		legacyPreviewMode ? [] : (statusForCurrentScan?.lockedIssues ?? []);
+	const lockedIssues = statusForCurrentScan?.lockedIssues ?? [];
 
-	const allKnownSeverities = legacyPreviewMode ?
-		fallbackFindings.map((f: ScanIssue) => f.severity)
-	:	[
-			...(statusForCurrentScan?.issues ?? []).map((f: ScanIssue) => f.severity),
-			...(statusForCurrentScan?.lockedIssues ?? []).map((f: LockedIssue) => f.severity),
-		];
+	const allKnownSeverities = [
+		...(statusForCurrentScan?.issues ?? []).map((f: ScanIssue) => f.severity),
+		...(statusForCurrentScan?.lockedIssues ?? []).map((f: LockedIssue) => f.severity),
+	];
 
 	const healthScore =
 		statusForCurrentScan?.healthScore ?? computeHealthScore(allKnownSeverities);
@@ -1268,7 +1218,7 @@ function ResultsView({
 							100% Money-Back Guarantee
 						</div>
 						<div className='mt-0.5 text-[13px] text-body'>
-							If the report doesn't help you find at least 3 actionable issues, we'll refund you in full — no questions asked.
+							If the report doesn&apos;t help you find at least 3 actionable issues, we&apos;ll refund you in full — no questions asked.
 						</div>
 					</div>
 				</div>

@@ -1,6 +1,9 @@
+import pLimit from 'p-limit';
 import {
 	analyzeWithClaude,
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT,
+	CLAUDE_SCAN_CACHEABLE_USER_TEXT_HYBRID_DESKTOP,
+	CLAUDE_SCAN_CACHEABLE_USER_TEXT_HYBRID_MOBILE,
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT_NO_SCREENSHOTS,
 	parseClaudeIssues,
 } from './claude';
@@ -29,6 +32,11 @@ type ServiceSupabase = ReturnType<typeof getServiceSupabase>;
 
 const CLAUDE_PROMPT_MAX_BROKEN_LINKS = 15;
 const CLAUDE_PROMPT_MAX_EXTERNAL_LINKS = 15;
+
+// Cap concurrent Claude calls per scan. Promise.all(all pages) fires N calls
+// simultaneously — with 5 pages that is 5 parallel requests, the primary cause
+// of 429 rate limits. 3 slots keeps scans fast while reducing API pressure.
+const CLAUDE_CONCURRENCY = 3;
 
 // ── Payload trimming constants ────────────────────────────────────────────
 // Sending the full axe dump for heavy pages adds thousands of tokens with
@@ -247,48 +255,113 @@ function buildWebsiteTypeFocus(
 	pageRole: string | null,
 ): string {
 	const lines: string[] = [];
-
 	const type = (websiteType ?? '').toLowerCase();
 	const role = (pageRole ?? '').toLowerCase();
 
-	if (
-		type.includes('ecommerce') ||
-		type.includes('shopify') ||
-		type.includes('shop')
-	) {
-		lines.push(
-			'ECOMMERCE FOCUS: Pay close attention to — product images (quality, consistency), pricing display (clarity, formatting), add-to-cart / buy CTA (prominence, contrast), trust badges and reviews (present and visible), checkout path entry (obvious next step).',
-		);
-	} else if (type.includes('saas') || type.includes('software')) {
-		lines.push(
-			'SAAS FOCUS: Pay close attention to — value proposition clarity above fold, pricing section (readable, plans clear), feature comparison (scannable), trial/sign-up CTA (prominent), social proof (logos, testimonials visible).',
-		);
-	} else if (type.includes('agency') || type.includes('portfolio')) {
-		lines.push(
-			'AGENCY/PORTFOLIO FOCUS: Pay close attention to — work showcase (images load, layout intact), contact CTA (clear and above fold or footer), case study links, client logos.',
-		);
-	} else if (
-		type.includes('blog') ||
-		type.includes('content') ||
-		type.includes('news')
-	) {
-		lines.push(
-			'CONTENT SITE FOCUS: Pay close attention to — article readability (font, line-height, measure), navigation to related content, ad placement (does it obstruct content?), mobile reading experience.',
-		);
+	// ── Website-type context (exact enum match) ────────────────────────────
+	switch (type) {
+		case 'ecommerce':
+			lines.push(
+				'ECOMMERCE FOCUS: Pay close attention to — product images (quality, consistency), pricing display (clarity, formatting), add-to-cart / buy CTA (prominence, contrast), trust badges and reviews (present and visible), checkout path entry (obvious next step).',
+			);
+			break;
+		case 'saas':
+			lines.push(
+				'SAAS FOCUS: Pay close attention to — value proposition clarity above fold, pricing section (readable, plans clear), feature comparison (scannable), trial/sign-up CTA (prominent), social proof (logos, testimonials visible).',
+			);
+			break;
+		case 'agency':
+			lines.push(
+				'AGENCY FOCUS: Pay close attention to — work/case-study showcase (images load, layout intact), contact CTA (clear, above fold or sticky footer), client logo strip (crisp, consistent sizing), team credibility signals.',
+			);
+			break;
+		case 'freelancer':
+			lines.push(
+				'FREELANCER FOCUS: Pay close attention to — "hire me" or contact CTA (above fold, prominent), portfolio samples (load correctly, variety shown), skills/services section (clear and scannable), testimonials or client logos (trust signals visible).',
+			);
+			break;
+		case 'portfolio':
+			lines.push(
+				'PORTFOLIO FOCUS: Pay close attention to — project thumbnails (load, consistent aspect ratio), project descriptions (readable, not truncated), case-study depth (enough detail for credibility), contact route (obvious).',
+			);
+			break;
+		case 'restaurant':
+			lines.push(
+				'RESTAURANT FOCUS: Pay close attention to — menu visibility and readability (easy to find and navigate), location and opening hours (prominent, correct format), reservation/order CTA (clear and functional), food photography (quality, correctly sized, appetising).',
+			);
+			break;
+		case 'nonprofit':
+			lines.push(
+				'NONPROFIT FOCUS: Pay close attention to — donation CTA (prominent, above fold or sticky), mission statement clarity (clear within 5 seconds), impact statistics (visible and credible), volunteer/get-involved path (discoverable).',
+			);
+			break;
+		case 'event':
+			lines.push(
+				'EVENT SITE FOCUS: Pay close attention to — event date, time, and location (immediately visible, unambiguous), registration/ticket CTA (prominent and functional), speaker or agenda section (scannable, properly formatted), countdown or urgency signals.',
+			);
+			break;
+		case 'directory':
+			lines.push(
+				'DIRECTORY FOCUS: Pay close attention to — search bar visibility and responsiveness, listing cards (consistent format, readable), category/filter navigation (clear and usable), individual listing detail (sufficient information shown).',
+			);
+			break;
+		case 'business':
+			lines.push(
+				'BUSINESS SITE FOCUS: Pay close attention to — service/product offering (clear above fold), contact information (phone, email, address visible), trust signals (years in business, certifications, testimonials), about section (humanises the business).',
+			);
+			break;
+		case 'blog':
+			lines.push(
+				'BLOG FOCUS: Pay close attention to — article readability (font size, line-height, measure), navigation to related content, ad placement (does it obstruct content?), mobile reading experience.',
+			);
+			break;
+		// 'webapp', 'landing', 'unknown' — no type-level checklist needed
 	}
 
-	if (role.includes('landing')) {
-		lines.push(
-			'LANDING PAGE: Single CTA priority — check that one action dominates. Verify headline, sub-headline, and CTA are all visible above the fold on desktop. On mobile, confirm CTA is reachable without scrolling far.',
-		);
-	} else if (role.includes('home')) {
-		lines.push(
-			'HOMEPAGE: Check that each major section has a clear purpose and a visible next-step link. Verify no section is an orphan (no CTA, no link out).',
-		);
-	} else if (role.includes('product') || role.includes('pricing')) {
-		lines.push(
-			'PRODUCT/PRICING PAGE: Verify that prices are readable and plans are visually distinguished. Check that the recommended / most popular plan is visually highlighted.',
-		);
+	// ── Page-role context ─────────────────────────────────────────────────
+	switch (role) {
+		case 'landing':
+			lines.push(
+				'LANDING PAGE: Single CTA priority — check that one action dominates. Verify headline, sub-headline, and CTA are all visible above the fold on desktop. On mobile, confirm CTA is reachable without scrolling far.',
+			);
+			break;
+		case 'homepage':
+		case 'home':
+			lines.push(
+				'HOMEPAGE: Check that each major section has a clear purpose and a visible next-step link. Verify no section is an orphan (no CTA, no link out).',
+			);
+			break;
+		case 'pricing':
+		case 'product':
+			lines.push(
+				'PRODUCT/PRICING PAGE: Verify that prices are readable and plans are visually distinguished. Check that the recommended / most popular plan is visually highlighted.',
+			);
+			break;
+		case 'menu':
+			lines.push(
+				'MENU PAGE: Verify all sections are readable (font, contrast), prices are clear and aligned, dietary tags are visible, and mobile scroll is smooth without horizontal overflow.',
+			);
+			break;
+		case 'donate':
+			lines.push(
+				'DONATE PAGE: Verify the donation CTA and amount selector are prominent, trust signals (charity registration, secure payment) are visible, and the form is accessible and functional.',
+			);
+			break;
+		case 'work':
+			lines.push(
+				'WORK/PORTFOLIO PAGE: Verify project thumbnails load correctly and are consistently sized, descriptions are readable, and case-study links are functional.',
+			);
+			break;
+		case 'team':
+			lines.push(
+				'TEAM PAGE: Verify headshots load and are consistently cropped, names and titles are readable at all viewports, and social/contact links are functional.',
+			);
+			break;
+		case 'services':
+			lines.push(
+				'SERVICES PAGE: Verify each service has a clear description and its own CTA, pricing or scope indication is present, and the mobile layout is readable without horizontal scroll.',
+			);
+			break;
 	}
 
 	return lines.join('\n');
@@ -350,7 +423,8 @@ function trimAxeViolations(raw: unknown): unknown {
 
 	return sorted
 		.slice(0, MAX_AXE_VIOLATIONS)
-		.map(({ nodes: _nodes, ...rest }) => rest);
+		// Strip nodes (verbose HTML) and tags (WCAG category codes) — useless to Claude.
+		.map(({ nodes: _nodes, tags: _tags, ...rest }) => rest);
 }
 
 /** Large JSON payload after screenshots (not prompt-cached). */
@@ -400,8 +474,6 @@ function buildAnalysisPromptAfterImages(input: {
 		responsiveResults: pd?.responsive ?? null,
 		httpErrors: pd?.httpErrors ?? [],
 		failedRequests: pd?.failedRequests ?? [],
-		scanOk: pd?.scanOk,
-		error: pd?.error,
 	};
 
 	const dataHeader =
@@ -452,8 +524,6 @@ function buildAnalysisPromptAfterImages(input: {
 			{
 				httpErrors: scanData.httpErrors,
 				failedRequests: scanData.failedRequests,
-				scanOk: scanData.scanOk,
-				error: scanData.error,
 			},
 			null,
 			2,
@@ -487,6 +557,18 @@ function pickFirstMatching(
 	return picked ?? null;
 }
 
+/**
+ * Pick the FREE_PREVIEW_ISSUE_COUNT issues most likely to convince a visitor
+ * that there are real problems worth fixing. Priority:
+ *  1. Broken functionality (critical OR high) — things that stop visitors cold
+ *  2. Visible UI bug     (critical OR high) — things visitors can clearly see
+ *  3. Mobile/responsive break (critical OR high) — reaches the widest audience
+ *  4. Any remaining critical or high severity issue (broadens coverage)
+ *  5. Anything left (sorted by display_order, already severity-ranked)
+ *
+ * Using pickFirstMatching removes the chosen item from `remaining` so the same
+ * issue can never appear twice and we always progress toward `count`.
+ */
 function selectBalancedPreview(
 	issues: IssueInsert[],
 	count: number,
@@ -494,29 +576,48 @@ function selectBalancedPreview(
 	const remaining = [...issues];
 	const selected: IssueInsert[] = [];
 
-	const criticalFunctionality = pickFirstMatching(
+	// 1. Broken functionality — functional or broken issues affect every visitor
+	const brokenFunctionality = pickFirstMatching(
 		remaining,
 		(issue) =>
-			issue.category === 'functionality' && issue.severity === 'critical',
-	);
-	if (criticalFunctionality) selected.push(criticalFunctionality);
-
-	const strongUsability = pickFirstMatching(
-		remaining,
-		(issue) =>
-			issue.category === 'usability_ux' &&
+			issue.category === 'functionality' &&
 			(issue.severity === 'critical' || issue.severity === 'high'),
 	);
-	if (strongUsability) selected.push(strongUsability);
+	if (brokenFunctionality) selected.push(brokenFunctionality);
 
-	const strongResponsiveness = pickFirstMatching(
-		remaining,
-		(issue) =>
-			issue.category === 'responsiveness' &&
-			(issue.severity === 'critical' || issue.severity === 'high'),
-	);
-	if (strongResponsiveness) selected.push(strongResponsiveness);
+	// 2. UI bug — visible defects build immediate distrust
+	if (selected.length < count) {
+		const uiBug = pickFirstMatching(
+			remaining,
+			(issue) =>
+				issue.category === 'ui_bugs' &&
+				(issue.severity === 'critical' || issue.severity === 'high'),
+		);
+		if (uiBug) selected.push(uiBug);
+	}
 
+	// 3. Responsiveness/mobile break — majority of traffic is mobile
+	if (selected.length < count) {
+		const mobileBreak = pickFirstMatching(
+			remaining,
+			(issue) =>
+				issue.category === 'responsiveness' &&
+				(issue.severity === 'critical' || issue.severity === 'high'),
+		);
+		if (mobileBreak) selected.push(mobileBreak);
+	}
+
+	// 4. Fill with any other critical/high issue (covers usability, seo, perf, etc.)
+	while (selected.length < count) {
+		const criticalOrHigh = pickFirstMatching(
+			remaining,
+			(issue) => issue.severity === 'critical' || issue.severity === 'high',
+		);
+		if (!criticalOrHigh) break;
+		selected.push(criticalOrHigh);
+	}
+
+	// 5. Fill with whatever remains (already sorted by display_order/severity)
 	while (selected.length < count && remaining.length > 0) {
 		const next = remaining.shift();
 		if (!next) break;
@@ -585,7 +686,7 @@ async function tryResolveScreenshotUrl(
 
 	try {
 		return await withRetry(() => resolveScreenshotUrl(supabase, ref), {
-			attempts: 3,
+			attempts: 2,
 			delayMs: 1_000,
 		});
 	} catch (error: unknown) {
@@ -640,10 +741,20 @@ export async function analyzeScanPageWithClaude(
 		hasMobile: Boolean(mobileSignedUrl),
 	});
 
-	const cachedUserText =
-		analysisMode === 'text_only' ?
-			CLAUDE_SCAN_CACHEABLE_USER_TEXT_NO_SCREENSHOTS
-		:	CLAUDE_SCAN_CACHEABLE_USER_TEXT;
+	// Pick the cached user-text prefix that matches exactly what Claude will see.
+	// Using the wrong prefix (e.g. "two images" when only one is attached) causes
+	// Claude to hallucinate observations for the missing viewport.
+	const cachedUserText = (() => {
+		if (analysisMode === 'text_only') {
+			return CLAUDE_SCAN_CACHEABLE_USER_TEXT_NO_SCREENSHOTS;
+		}
+		if (analysisMode === 'hybrid') {
+			return desktopSignedUrl ?
+					CLAUDE_SCAN_CACHEABLE_USER_TEXT_HYBRID_DESKTOP
+				:	CLAUDE_SCAN_CACHEABLE_USER_TEXT_HYBRID_MOBILE;
+		}
+		return CLAUDE_SCAN_CACHEABLE_USER_TEXT;
+	})();
 
 	try {
 		console.log('[runAiAnalysisForScan] starting claude analysis', {
@@ -729,16 +840,11 @@ export async function analyzeScanPageWithClaude(
 			error: message,
 		});
 
-		try {
-			await failScan(supabase, scanId, message);
-		} catch (markFailedError) {
-			console.error('[runAiAnalysisForScan] failScan after AI error', {
-				scanId,
-				pageUrl: page.page_url,
-				error: getErrorMessage(markFailedError),
-			});
-		}
-
+		// Do NOT call failScan here — that would flash the scan to 'failed'
+		// even for transient errors that Inngest will retry. The failure is
+		// already written to ai_analysis.status='failed' above.
+		// persistScanIssuesFromAnalysis will call failScan only when ALL
+		// pages have failed (no recoverable analysis).
 		throw error instanceof Error ? error : new Error(message);
 	}
 }
@@ -888,28 +994,33 @@ export async function runAiAnalysisForScan(
 
 	const urls = pagesToTest ?? [];
 
-	// ── Analyse all pages in parallel ────────────────────────────────────────
-	// Previously this was a sequential for-loop. For a 5-page scan where Claude
-	// takes 30–60 s each, the old approach added 2–4 minutes of avoidable serial
-	// waiting. Promise.all lets all pages hit the Anthropic API concurrently.
-	// Note: Inngest's ai-page:* steps run per page already enforce isolation, so a single page
-	// failure won't cascade. Each page gets its own try/catch.
+	// ── Analyse pages with bounded concurrency ───────────────────────────────
+	// p-limit(CLAUDE_CONCURRENCY) is a true sliding window: the next page starts
+	// the moment any slot frees, unlike a batch loop that waits for the slowest
+	// page per batch. This removes the primary cause of 429 rate limits while
+	// keeping scans fast (3 concurrent calls still parallelises most scans).
+	// Per-page errors are caught independently so one failure never blocks the rest.
+	const claudeLimit = pLimit(CLAUDE_CONCURRENCY);
 	await Promise.all(
 		urls.map((pageUrl) =>
-			analyzeScanPageWithClaude(supabase, scanId, pageUrl, websiteType, pkg).catch(
-				(error: unknown) => {
-					console.error(
-						JSON.stringify({
-							ts: new Date().toISOString(),
-							level: 'error',
-							event: 'ai:page_analysis_failed',
-							scanId,
-							pageUrl,
-							error: error instanceof Error ? error.message : String(error),
-						}),
-					);
-				},
-			),
+			claudeLimit(() =>
+				analyzeScanPageWithClaude(
+					supabase,
+					scanId,
+					pageUrl,
+					websiteType,
+					pkg,
+				),
+			).catch((error: unknown) => {
+				console.error(
+					JSON.stringify({
+						event: 'ai_page_analysis_error',
+						scanId,
+						pageUrl,
+						error: error instanceof Error ? error.message : String(error),
+					}),
+				);
+			}),
 		),
 	);
 }

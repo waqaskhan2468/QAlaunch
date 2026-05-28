@@ -38,7 +38,7 @@ export function buildPlaywrightPayloadFromArtifact(artifact: RawPageArtifact) {
 /** Minimal DB summary — full data lives in artifact storage. */
 export function buildPlaywrightIndexPayload(scanOk: boolean) {
 	return {
-		playwrightDaywrightDataVersion: 3 as const,
+		playwrightDataVersion: 3 as const,
 		scanOk,
 	};
 }

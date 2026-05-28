@@ -2,27 +2,24 @@ import type { BrowserContext, Page, Response } from 'playwright-core';
 import type { ScanResult, ScanStep } from '../types/scan.types';
 import { buildResponseSecurityMeta } from './responseMeta';
 
-// ─── Timing constants ──────────────────────────────────────────────────────
-//
-// These apply to every safeGoto call — desktop AND mobile context.
-// With our parallel mobile-navigation optimisation, mobile context navigation
-// runs concurrently with desktop data collection, so every ms saved here
-// directly shrinks total scan wall-clock time.
-//
-// 20 s default — override with SCAN_NAV_TIMEOUT_MS. Enough for Browserbase remote CDP.
-const DEFAULT_NAV_TIMEOUT_MS = 20_000;
-const NETWORK_IDLE_TIMEOUT = 3_000;  // short networkidle check post-nav; non-fatal on timeout
-const CONTENT_READY_TIMEOUT = 5_000; // DOM content check; non-fatal on timeout
-const SPA_HYDRATION_TIMEOUT = 6_000; // wait for #root/#app/#__next to gain children
-const CHALLENGE_CLEAR_TIMEOUT = 25_000; // max time to wait for a CDN challenge to resolve
-const EXTRA_WAIT_MS = 500;           // brief post-nav settle wait (browser-side evaluate)
+// 15 s default — override with SCAN_NAV_TIMEOUT_MS. Enough for Browserbase remote CDP.
+const DEFAULT_NAV_TIMEOUT_MS = 15_000;
+const NETWORK_IDLE_TIMEOUT = 1_000;
+// Single timeout for the merged content + SPA hydration check.
+const PAGE_READY_TIMEOUT_MS = 3_000;
+const CHALLENGE_CLEAR_TIMEOUT = 10_000;
 
 const MIN_BODY_TEXT_LENGTH = 500;
 const MIN_LINK_COUNT = 5;
 
-export function getNavTimeoutMs(): number {
+// Read once at module load — avoids re-parsing the env var on every safeGoto call.
+const NAV_TIMEOUT_MS = (() => {
 	const raw = Number.parseInt(process.env.SCAN_NAV_TIMEOUT_MS ?? '', 10);
 	return Number.isFinite(raw) && raw >= 10_000 ? raw : DEFAULT_NAV_TIMEOUT_MS;
+})();
+
+export function getNavTimeoutMs(): number {
+	return NAV_TIMEOUT_MS;
 }
 
 /**
@@ -97,9 +94,14 @@ async function waitForShortNetworkIdle(
 	}
 }
 
-async function waitForMeaningfulContent(
-	page: Page,
-): Promise<string | undefined> {
+/**
+ * Single waitForFunction combining meaningful-content + SPA-hydration checks.
+ * One polling loop instead of two halves the CDP round-trips during navigation.
+ *
+ * Resolves immediately on SSR sites (PHP, WordPress, static HTML) — no SPA root,
+ * content is server-rendered. Waits for root hydration on Vite / Next.js / React / Vue.
+ */
+async function waitForPageReady(page: Page): Promise<string | undefined> {
 	try {
 		await page.waitForFunction(
 			({
@@ -112,70 +114,28 @@ async function waitForMeaningfulContent(
 				const bodyText = document.body?.innerText?.trim() ?? '';
 				const linkCount = document.querySelectorAll('a[href]').length;
 				const headingCount = document.querySelectorAll('h1, h2').length;
-
-				return (
+				const hasContent =
 					bodyText.length >= minBodyTextLength ||
 					linkCount >= minLinkCount ||
-					headingCount > 0
+					headingCount > 0;
+				if (!hasContent) return false;
+
+				// SSR (PHP, WordPress, static) — no SPA root, pass immediately.
+				// SPAs (Next.js, Vite, React, Vue) must have root children before collectors run.
+				const roots = ['#root', '#app', '#__next', '[data-reactroot]'].map(
+					(s) => document.querySelector(s),
 				);
+				const hasRoot = roots.some(Boolean);
+				if (!hasRoot) return true;
+				return roots.some((n) => n !== null && n.children.length > 0);
 			},
-			{
-				minBodyTextLength: MIN_BODY_TEXT_LENGTH,
-				minLinkCount: MIN_LINK_COUNT,
-			},
-			{
-				timeout: CONTENT_READY_TIMEOUT,
-			},
+			{ minBodyTextLength: MIN_BODY_TEXT_LENGTH, minLinkCount: MIN_LINK_COUNT },
+			{ timeout: PAGE_READY_TIMEOUT_MS },
 		);
 
 		return undefined;
 	} catch (error) {
-		return `content readiness skipped after ${CONTENT_READY_TIMEOUT}ms: ${cleanError(error)}`;
-	}
-}
-
-/**
- * Wait for a SPA shell (#root / #app / #__next / [data-reactroot]) to gain
- * its first children. Without this, `domcontentloaded` returns against an
- * empty `<div id="root">` and every downstream collector (axe, links, seo, …)
- * runs against a half-rendered page.
- *
- * If none of the SPA root selectors exist, this resolves immediately — the
- * page is probably server-rendered and doesn't need hydration.
- *
- * Non-fatal: surfaces a warning string on timeout, never throws.
- */
-async function waitForSpaHydration(
-	page: Page,
-): Promise<string | undefined> {
-	try {
-		await page.waitForFunction(
-			() => {
-				const SPA_ROOT_SELECTORS = [
-					'#root',
-					'#app',
-					'#__next',
-					'[data-reactroot]',
-				];
-
-				const rootsPresent = SPA_ROOT_SELECTORS.map((selector) =>
-					document.querySelector(selector),
-				);
-
-				const hasAnyRoot = rootsPresent.some((node) => node !== null);
-				if (!hasAnyRoot) return true;
-
-				return rootsPresent.some(
-					(node) => node !== null && node.children.length > 0,
-				);
-			},
-			undefined,
-			{ timeout: SPA_HYDRATION_TIMEOUT },
-		);
-
-		return undefined;
-	} catch (error) {
-		return `spa hydration skipped after ${SPA_HYDRATION_TIMEOUT}ms: ${cleanError(error)}`;
+		return `page_ready skipped after ${PAGE_READY_TIMEOUT_MS}ms: ${cleanError(error)}`;
 	}
 }
 
@@ -186,36 +146,34 @@ type ChallengeKind =
 	| 'cloudflare_turnstile'
 	| 'cloudflare_challenge_platform';
 
+// Single source of truth — used by both detectCdnChallenge and handlePotentialChallenge.
+const CF_TITLE_PATTERN = 'Just a moment|Checking your browser|Attention Required';
+const CF_TURNSTILE_SEL = 'iframe[src*="challenges.cloudflare.com"]';
+const CF_PLATFORM_SEL = 'script[src*="/cdn-cgi/challenge-platform/"]';
+
 async function detectCdnChallenge(page: Page): Promise<ChallengeKind | null> {
 	try {
-		return await page.evaluate(() => {
-			const title = document.title || '';
-			if (/Just a moment|Checking your browser|Attention Required/i.test(title)) {
-				return 'cloudflare_title' as const;
-			}
-			if (document.querySelector('iframe[src*="challenges.cloudflare.com"]')) {
-				return 'cloudflare_turnstile' as const;
-			}
-			if (
-				document.querySelector(
-					'script[src*="/cdn-cgi/challenge-platform/"]',
-				)
-			) {
-				return 'cloudflare_challenge_platform' as const;
-			}
-			return null;
-		});
+		return await page.evaluate(
+			({ titlePattern, turnstileSel, platformSel }: {
+				titlePattern: string;
+				turnstileSel: string;
+				platformSel: string;
+			}) => {
+				const title = document.title || '';
+				if (new RegExp(titlePattern, 'i').test(title)) return 'cloudflare_title' as const;
+				if (document.querySelector(turnstileSel)) return 'cloudflare_turnstile' as const;
+				if (document.querySelector(platformSel)) return 'cloudflare_challenge_platform' as const;
+				return null;
+			},
+			{ titlePattern: CF_TITLE_PATTERN, turnstileSel: CF_TURNSTILE_SEL, platformSel: CF_PLATFORM_SEL },
+		);
 	} catch {
 		return null;
 	}
 }
 
-/**
- * If a CDN challenge is detected post-navigation, wait for it to clear using
- * waitForFunction (client-side polling — keeps CDP alive, avoids goIntervalTiming drops).
- *
- * @throws Error with message starting with `cloudflare_challenge`
- */
+// If a CDN challenge is detected, polls until it clears or times out.
+// Throws with CLOUDFLARE_CHALLENGE_ERROR prefix so the step can be marked non-retriable.
 async function handlePotentialChallenge(
 	page: Page,
 ): Promise<string | undefined> {
@@ -224,24 +182,18 @@ async function handlePotentialChallenge(
 
 	try {
 		await page.waitForFunction(
-			() => {
+			({ titlePattern, turnstileSel, platformSel }: {
+				titlePattern: string;
+				turnstileSel: string;
+				platformSel: string;
+			}) => {
 				const title = document.title || '';
-				if (
-					/Just a moment|Checking your browser|Attention Required/i.test(title)
-				)
-					return false;
-				if (
-					document.querySelector('iframe[src*="challenges.cloudflare.com"]')
-				)
-					return false;
-				if (
-					document.querySelector(
-						'script[src*="/cdn-cgi/challenge-platform/"]',
-					)
-				)
-					return false;
+				if (new RegExp(titlePattern, 'i').test(title)) return false;
+				if (document.querySelector(turnstileSel)) return false;
+				if (document.querySelector(platformSel)) return false;
 				return true;
 			},
+			{ titlePattern: CF_TITLE_PATTERN, turnstileSel: CF_TURNSTILE_SEL, platformSel: CF_PLATFORM_SEL },
 			{ timeout: CHALLENGE_CLEAR_TIMEOUT, polling: 1_000 },
 		);
 		return `${initial} cleared`;
@@ -257,46 +209,40 @@ async function handlePotentialChallenge(
 export async function safeGoto(
 	page: Page,
 	url: string,
+	options?: { timeout?: number },
 ): Promise<{ navigation: NavigationResult; response: Response | null }> {
-	let response: Response | null = null;
-	let commitFallbackUsed: string | undefined;
+	const navTimeout = options?.timeout ?? getNavTimeoutMs();
 
+	// Always use 'commit' so goto resolves as soon as the server responds —
+	// no second network round-trip if the page is slow to parse.
+	// Then try waitForLoadState('domcontentloaded') as a non-fatal follow-up,
+	// capped at 10 s — the page already committed so DOM should parse quickly.
+	const response = await page.goto(url, { waitUntil: 'commit', timeout: navTimeout });
+
+	let domWarning: string | undefined;
 	try {
-		response = await page.goto(url, {
-			waitUntil: 'domcontentloaded',
-			timeout: getNavTimeoutMs(),
+		await page.waitForLoadState('domcontentloaded', {
+			timeout: Math.min(navTimeout, 10_000),
 		});
-	} catch (domContentLoadedError) {
-		response = await page.goto(url, {
-			waitUntil: 'commit',
-			timeout: getNavTimeoutMs(),
-		});
-		commitFallbackUsed = `domcontentloaded timed out, commit fallback used: ${cleanError(domContentLoadedError)}`;
+	} catch (err) {
+		domWarning = `domcontentloaded skipped: ${cleanError(err)}`;
 	}
 
 	const challengeWarning = await handlePotentialChallenge(page);
 
-	const [networkIdleWarning, contentWarning, spaWarning] = await Promise.all([
+	const [networkIdleWarning, pageReadyWarning] = await Promise.all([
 		waitForShortNetworkIdle(page),
-		waitForMeaningfulContent(page),
-		waitForSpaHydration(page),
+		waitForPageReady(page),
 	]);
 
 	const warnings = [
-		commitFallbackUsed,
+		domWarning,
 		challengeWarning,
 		networkIdleWarning,
-		contentWarning,
-		spaWarning,
+		pageReadyWarning,
 	].filter(Boolean) as string[];
 
-	await page.evaluate(
-		(ms: number) => new Promise((r) => setTimeout(r, ms)),
-		EXTRA_WAIT_MS,
-	);
-
-	const baseStrategy = commitFallbackUsed ? 'commit' : 'domcontentloaded';
-	const strategy = warnings.length ? baseStrategy : `${baseStrategy}+ready`;
+	const strategy = warnings.length ? 'commit' : 'commit+ready';
 
 	return {
 		navigation: {
@@ -317,6 +263,16 @@ export async function navigatePage(
 
 		if (navigation.warning) {
 			result.warnings.push(navigation.warning);
+		}
+
+		// Warn on HTTP error responses so AI analysis can caveat its findings.
+		// We still run all collectors — the 4xx/5xx page content is worth analysing
+		// (broken routes, server errors, or misconfigured redirects are real issues).
+		const httpStatus = response?.status() ?? null;
+		if (httpStatus !== null && httpStatus >= 400) {
+			result.warnings.push(
+				`http_error_response: server returned ${httpStatus} — page content may be an error page rather than the intended destination`,
+			);
 		}
 
 		addStep(result.steps, `navigate:${navigation.strategy}`, true);

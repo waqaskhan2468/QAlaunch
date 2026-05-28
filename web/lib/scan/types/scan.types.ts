@@ -136,7 +136,7 @@ export type ProgrammaticPayload = {
 	findings: ProgrammaticFinding[];
 	stats: {
 		durationMs: number;
-		nodesScanned: number;
+		findingsCount: number;
 		truncated?: boolean;
 		rulesetVersion: string;
 	};

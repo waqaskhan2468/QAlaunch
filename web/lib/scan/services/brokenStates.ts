@@ -172,16 +172,14 @@ export async function collectBrokenStates(
 	// inlined function ES5-compatible (var/function, no optional chaining).
 	const expression = buildBrokenStatesExpression({ capFindings: maxFindings });
 	const evaluated = parseBrokenEvaluateResult(await page.evaluate(expression));
-
 	const durationMs = Date.now() - started;
-	const data = evaluated;
 
 	return {
-		findings: data.findings as ProgrammaticFinding[],
+		findings: evaluated.findings as ProgrammaticFinding[],
 		stats: {
 			durationMs,
-			nodesScanned: data.findings.length,
-			truncated: data.truncated,
+			findingsCount: evaluated.findings.length,
+			truncated: evaluated.truncated,
 			rulesetVersion: PROGRAMMATIC_RULESET_VERSION,
 		},
 	};

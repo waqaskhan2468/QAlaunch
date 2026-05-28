@@ -1,7 +1,5 @@
 import { getServiceSupabase } from '@/lib/db/supabase';
-import {
-	isRetryableNetworkError,
-} from '@/lib/db/supabase-retry';
+import { isRetryableNetworkError } from '@/lib/db/supabase-retry';
 import { withRetry } from '@/lib/scan/services/retry';
 import {
 	compressScreenshotBuffer,
@@ -44,8 +42,10 @@ export function getArtifactBucket(): string {
 	return ARTIFACT_BUCKET;
 }
 
-const UPLOAD_ATTEMPTS = 5;
+const UPLOAD_ATTEMPTS = 3;
 const UPLOAD_DELAY_MS = 2_000;
+const SCREENSHOT_UPLOAD_TIMEOUT_MS = 20_000;
+const ARTIFACT_UPLOAD_TIMEOUT_MS = 10_000;
 
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : 'unknown_error';
@@ -78,6 +78,7 @@ async function uploadScreenshotBuffer(
 			attempts: UPLOAD_ATTEMPTS,
 			delayMs: UPLOAD_DELAY_MS,
 			shouldRetry: shouldRetryUpload,
+			timeoutMs: SCREENSHOT_UPLOAD_TIMEOUT_MS,
 		},
 	);
 
@@ -109,6 +110,7 @@ async function uploadArtifactBuffer(
 			attempts: UPLOAD_ATTEMPTS,
 			delayMs: UPLOAD_DELAY_MS,
 			shouldRetry: shouldRetryUpload,
+			timeoutMs: ARTIFACT_UPLOAD_TIMEOUT_MS,
 		},
 	);
 
@@ -152,7 +154,11 @@ async function uploadScreenshot(
 		:	pageMobileScreenshotPath(scanId, pageUrl, extension);
 
 	// Public bucket → permanent public URL stored in DB and later passed to Claude.
-	const publicUrl = await uploadScreenshotBuffer(path, uploadBuffer_, contentType);
+	const publicUrl = await uploadScreenshotBuffer(
+		path,
+		uploadBuffer_,
+		contentType,
+	);
 	return { path, publicUrl };
 }
 

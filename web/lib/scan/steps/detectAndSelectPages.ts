@@ -1,3 +1,4 @@
+import * as cheerio from 'cheerio';
 import { NonRetriableError } from 'inngest';
 import { fetchHomepageHtml } from '@/lib/api/fetchHomePageHtml';
 import { detectWebsiteType } from '@/lib/utils/detect';
@@ -27,7 +28,8 @@ function buildHomepageFetchFallback(targetUrl: string): DetectAndSelectResult {
 	);
 
 	return {
-		detection: { type: 'other' as const, requiresAuth: false },
+		// 'unknown' is the correct WebsiteType fallback — 'other' is not a valid type.
+		detection: { type: 'unknown', requiresAuth: false },
 		pagesToTest: selectedPages.map((p) => p.url),
 		selectedPages,
 	};
@@ -49,8 +51,12 @@ export async function detectAndSelectPagesStep(
 		return buildHomepageFetchFallback(targetUrl);
 	}
 
-	const detection = detectWebsiteType(html ?? '', targetUrl);
-	const selectedPages = selectPagesToTestWithRoles(html ?? '', targetUrl, detection.type, pkg);
+	// Parse once — pass the same CheerioAPI instance to both functions so the
+	// HTML string is not loaded into the DOM twice.
+	const $ = cheerio.load(html);
+
+	const detection = detectWebsiteType(html, targetUrl, $);
+	const selectedPages = selectPagesToTestWithRoles(html, targetUrl, detection.type, pkg, $);
 
 	return {
 		detection,

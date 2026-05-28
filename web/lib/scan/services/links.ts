@@ -1,13 +1,23 @@
+import pLimit from 'p-limit';
 import type { Page } from 'playwright-core';
-import type {
-	LinkRecord,
-	ScanResult,
-	ValidatedLink,
-} from '../types/scan.types';
+import type { LinkRecord, ScanResult, ValidatedLink } from '../types/scan.types';
 import { cleanError } from './navigation';
 
-const MAX_LINKS = 50;
-const LINK_TIMEOUT = 3_000;
+// Reduced from 50 → 30: covers all meaningful navigation links without long tail
+// of footer/social links that rarely produce actionable broken-link findings.
+const MAX_LINKS = 30;
+// Reduced from 3 s → 2 s: genuine broken links time-out quickly; slow-but-alive
+// servers either respond in <2 s or aren't worth blocking the scan for.
+const LINK_TIMEOUT = 2_000;
+// True sliding-window concurrency: next link starts the moment any slot frees,
+// rather than waiting for the slowest link in a fixed batch.
+const LINK_CONCURRENCY = 25;
+
+// Mimic a real browser UA so servers don't 403/reject HEAD requests from scripts.
+const FETCH_HEADERS = {
+	'User-Agent':
+		'Mozilla/5.0 (compatible; QAlaunch-LinkChecker/1.0; +https://qalaunch.com)',
+};
 
 function normalizeLink(baseUrl: string, href: string): string | null {
 	try {
@@ -42,8 +52,8 @@ async function requestWithTimeout(url: string, method: 'HEAD' | 'GET') {
 			method,
 			signal: controller.signal,
 			redirect: 'follow',
+			headers: FETCH_HEADERS,
 		});
-
 		return { status: response.status, ok: response.ok };
 	} finally {
 		clearTimeout(timeout);
@@ -60,12 +70,7 @@ async function validateLink(link: LinkRecord): Promise<ValidatedLink> {
 
 		return { ...link, status: response.status, ok: response.ok };
 	} catch (error) {
-		return {
-			...link,
-			status: 0,
-			ok: false,
-			error: cleanError(error),
-		};
+		return { ...link, status: 0, ok: false, error: cleanError(error) };
 	}
 }
 
@@ -124,16 +129,17 @@ export async function collectLinks(
 		.filter((link): link is LinkRecord => link !== null);
 
 	const uniqueLinks: LinkRecord[] = Array.from(
-		new Map<string, LinkRecord>(normalizedLinks.map((link): [string, LinkRecord] => [link.href, link])).values(),
+		new Map(normalizedLinks.map((link) => [link.href, link])).values(),
 	);
 
 	const checkedLinks = uniqueLinks.slice(0, MAX_LINKS);
-	const LINK_CONCURRENCY = 10;
-	const validatedLinks: ValidatedLink[] = [];
-	for (let i = 0; i < checkedLinks.length; i += LINK_CONCURRENCY) {
-		const batch: LinkRecord[] = checkedLinks.slice(i, i + LINK_CONCURRENCY);
-		validatedLinks.push(...(await Promise.all((batch as LinkRecord[]).map(validateLink))));
-	}
+
+	// p-limit gives a true sliding window: the next link starts the moment any
+	// slot frees, unlike a batch loop that waits for the slowest link per batch.
+	const limit = pLimit(LINK_CONCURRENCY);
+	const validatedLinks = await Promise.all(
+		checkedLinks.map((link) => limit(() => validateLink(link))),
+	);
 
 	return {
 		totalLinks: uniqueLinks.length,

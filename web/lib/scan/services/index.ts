@@ -1,4 +1,4 @@
-import type { Browser, Page } from 'playwright-core';
+import type { Browser, BrowserContext, Page } from 'playwright-core';
 import type { IncrementalArtifactWriter } from '@/lib/artifacts/incremental';
 import { responsiveToArtifactMeta } from '@/lib/artifacts/serialize';
 import type { BrowserbaseSession } from '@/lib/scan/browser';
@@ -19,34 +19,50 @@ import {
 } from './navigation';
 import { collectInteractiveData, collectSeoData } from './seo';
 import { collectLinks } from './links';
-import {
-	captureResponsiveFromPage,
-	startMobileNavigation,
-} from './responsive';
+import { captureResponsiveFromPage, startMobileNavigation } from './responsive';
 import { blockThirdPartyResources } from './resourceBlocklist';
-import { withRetry } from './retry';
 import { captureDesktopScreenshot } from './screenshots';
 import { collectBrokenStates } from './brokenStates';
 
-const DEFAULT_PAGE_SCAN_TIMEOUT_MS = 180_000;
+// Raised from 180 s → 240 s. The 180 s budget was too tight once Phase 1
+// collectors (link HTTP-checks + axe) were run sequentially before screenshots.
+// Browserbase session timeout is set to 300 s in browser.ts, so 240 s leaves
+// a comfortable 60 s safety margin.
+const DEFAULT_PAGE_SCAN_TIMEOUT_MS = 240_000;
 
-const PAGE_DEFAULT_TIMEOUT_MS = 30_000;
+// Hard Node.js-level ceiling for Phase 2 (mobile nav + screenshot).
+// Playwright's own timeout is a CDP message — when Browserbase is congested
+// that message never arrives and page.screenshot() hangs indefinitely.
+// This setTimeout fires regardless of CDP state and force-closes the mobile
+// context, unblocking any stuck Playwright call.
+// Reduced from 55 s → 30 s: mobile nav takes ~15 s on a fast site + ~3 s screenshot
+// = ~18 s total. 30 s gives a 12 s safety margin while saving up to 25 s on slow
+// sites where mobile nav stalls, keeping the total scan within ~1 minute.
+const MOBILE_PHASE_TIMEOUT_MS = 30_000;
 
-/** Non-critical collectors (links, seo, interactive, broken_states): single attempt. */
-const COLLECTOR_RETRY = { attempts: 1, delayMs: 1_000 } as const;
+// Reduce from 10 s → 8 s. Individual page.evaluate() / waitFor* calls on
+// a live page rarely need more than a few seconds. The outer page-scan timeout
+// is the real ceiling; a per-operation ceiling prevents frozen collectors from
+// consuming the entire budget before failing.
+const PAGE_DEFAULT_TIMEOUT_MS = 8_000;
 
-/** Critical paths: keep 2 attempts. */
-const AXE_RETRY = { attempts: 2, delayMs: 1_000 } as const;
-const AXE_RETRY_SLOW = { attempts: 2, delayMs: 1_500 } as const;
-const SCREENSHOT_RETRY = { attempts: 2, delayMs: 1_000 } as const;
-const RESPONSIVE_RETRY = { attempts: 2, delayMs: 1_000 } as const;
+const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 
-/** Hard ceiling for one Browserbase pass (navigate + collectors + screenshots). */
-export function getPageScanTimeoutMs(): number {
+// Read once at module load so the env var is not re-parsed on every scan call.
+const PAGE_SCAN_TIMEOUT_MS = (() => {
 	const raw = Number.parseInt(process.env.SCAN_PAGE_TIMEOUT_MS ?? '', 10);
 	return Number.isFinite(raw) && raw >= 60_000 ?
 			raw
 		:	DEFAULT_PAGE_SCAN_TIMEOUT_MS;
+})();
+
+function settled<T>(r: PromiseSettledResult<T>): T | undefined {
+	return r.status === 'fulfilled' ? r.value : undefined;
+}
+
+/** Hard ceiling for one Browserbase pass (navigate + collectors + screenshots). */
+export function getPageScanTimeoutMs(): number {
+	return PAGE_SCAN_TIMEOUT_MS;
 }
 
 function withPageTimeout<T>(
@@ -55,6 +71,7 @@ function withPageTimeout<T>(
 	scanId: string,
 	onTimeout?: () => void,
 ): Promise<T> {
+	const timeoutMs = PAGE_SCAN_TIMEOUT_MS;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	const timeoutPromise = new Promise<T>((_, reject) => {
@@ -62,10 +79,10 @@ function withPageTimeout<T>(
 			onTimeout?.();
 			reject(
 				new Error(
-					`[scan] page timeout after ${getPageScanTimeoutMs()}ms: ${url} (scanId=${scanId})`,
+					`[scan] page timeout after ${timeoutMs}ms: ${url} (scanId=${scanId})`,
 				),
 			);
-		}, getPageScanTimeoutMs());
+		}, timeoutMs);
 	});
 
 	return Promise.race([
@@ -95,30 +112,9 @@ function hasSuccessfulNavigation(steps: ScanStep[]): boolean {
 
 function hasSuccessfulAxe(result: ScanResult): boolean {
 	return (
-		result.steps.some(
-			(step) => (step.name === 'axe' || step.name === 'axe_retry') && step.ok,
-		) && Array.isArray(result.axe)
+		result.steps.some((step) => step.name === 'axe' && step.ok) &&
+		Array.isArray(result.axe)
 	);
-}
-
-async function retryAxeOnSamePage(
-	page: Page,
-	result: ScanResult,
-	writer?: IncrementalArtifactWriter,
-): Promise<void> {
-	if (!hasSuccessfulNavigation(result.steps) || hasSuccessfulAxe(result)) {
-		return;
-	}
-
-	const axeRetry = await runStep(result.steps, 'axe_retry', () =>
-		withRetry(() => collectAxeViolations(page), AXE_RETRY_SLOW),
-	);
-
-	if (axeRetry !== undefined) {
-		result.axe = axeRetry;
-		result.warnings.push('Retried accessibility scan on the same page.');
-		await writer?.flushSlice('accessibility', axeRetry);
-	}
 }
 
 function getAxeFailureReason(result: ScanResult): string {
@@ -176,10 +172,7 @@ async function captureMobileFromNavigation(
 
 	try {
 		const responsiveResult = await runStep(result.steps, 'responsive', () =>
-			withRetry(
-				() => captureResponsiveFromPage(mobilePage, mobileNav.viewport),
-				RESPONSIVE_RETRY,
-			),
+			captureResponsiveFromPage(mobilePage, mobileNav.viewport),
 		);
 
 		if (responsiveResult) {
@@ -202,7 +195,7 @@ async function scanSingleUrl(
 	writer?: IncrementalArtifactWriter,
 	registerAbort?: (abort: () => Promise<void>) => void,
 ): Promise<ScanResult> {
-	const context = await browser.newContext();
+	const context = await browser.newContext({ viewport: DESKTOP_VIEWPORT });
 	const result = createEmptyScanResult(scanId, url);
 
 	registerAbort?.(() => closeContext(context));
@@ -217,8 +210,37 @@ async function scanSingleUrl(
 
 		await navigatePage(page, url, result);
 
-		// Start mobile only after desktop navigation succeeds (avoids ~30s dead nav
-		// running in parallel when the desktop page never loads).
+		if (result.responseSecurityMeta) {
+			await writer?.flushSlice(
+				'response_security',
+				result.responseSecurityMeta,
+			);
+		}
+
+		// Flush a diagnostics snapshot right after navigation settles so
+		// finalizePartial() has real data if a later collector timeout fires.
+		await writer?.flushSlice('diagnostics', {
+			consoleMessages: result.consoleMessages,
+			failedRequests: result.failedRequests,
+			httpErrors: result.httpErrors,
+		});
+
+		// ── Desktop screenshot — BEFORE collectors start ───────────────────────
+		// Captured immediately while the page is fresh and the CDP connection is
+		// uncontested (fast mode = ~200 ms prep + screenshot).  Stored on result
+		// immediately; upload runs concurrently with Phase 1 (see below) so it
+		// never adds to the critical path.
+		result.screenshots = {};
+		const earlyDesktop = await runStep(result.steps, 'screenshot:desktop', () =>
+			captureDesktopScreenshot(page, { fast: true }),
+		);
+		if (earlyDesktop) {
+			result.screenshots.desktop = earlyDesktop;
+		}
+
+		// Start mobile navigation IMMEDIATELY after desktop screenshot — before the
+		// upload — so it gets the maximum time to complete in the background while
+		// Phase 1 collectors and the desktop upload run concurrently.
 		const mobileNavigationPromise = startMobileNavigation(browser, url).catch(
 			(err) => {
 				console.warn('[scan] mobile navigation background start failed', {
@@ -230,135 +252,121 @@ async function scanSingleUrl(
 			},
 		);
 
-		if (result.responseSecurityMeta) {
-			await writer?.flushSlice(
-				'response_security',
-				result.responseSecurityMeta,
-			);
-		}
-
-		// ── Parallel collection (Promise.allSettled) ────────────────────────
-		// All seven tasks are fully independent — none needs another's output.
-		// Promise.allSettled is used instead of Promise.all so that even if any
-		// task rejects unexpectedly (bypassing runStep's internal guard), every
-		// other collector still runs to completion and its result is preserved.
-		//
-		// Screenshots and axe run concurrently: axe can take 60-90 s on heavy
-		// pages; blocking screenshots until axe finishes would risk the 120 s
-		// page-timeout firing before any image is saved.
-		function settled<T>(r: PromiseSettledResult<T>): T | undefined {
-			return r.status === 'fulfilled' ? r.value : undefined;
-		}
-
+		// ── Phase 1 — data collectors + desktop upload (all parallel) ─────────
+		// Desktop upload (≤ 20 s with timeout) runs alongside collectors (axe ≤ 20 s)
+		// so neither blocks the other.  Mobile navigation has already been running
+		// since before Phase 1 started, maximising its head-start.
 		const [
+			,
+			// desktop upload — result ignored; errors caught inside uploadScreenshot
 			r_brokenStates,
 			r_links,
 			r_interactive,
 			r_seoData,
 			r_axe,
-			r_desktopScreenshot,
-			r_mobileScreenshot,
 		] = await Promise.allSettled([
+			earlyDesktop ?
+				(writer?.uploadScreenshot('desktop', earlyDesktop) ?? Promise.resolve())
+			:	Promise.resolve(),
 			runStep(result.steps, 'broken_states', async () => {
-				const data = await withRetry(
-					() => collectBrokenStates(page),
-					COLLECTOR_RETRY,
-				);
+				const data = await collectBrokenStates(page);
 				await writer?.flushSlice('broken_states', data);
 				return data;
 			}),
 			runStep(result.steps, 'links', async () => {
-				const data = await withRetry(
-					() => collectLinks(page, url),
-					COLLECTOR_RETRY,
-				);
+				const data = await collectLinks(page, url);
 				await writer?.flushSlice('links', data);
 				return data;
 			}),
 			runStep(result.steps, 'interactive', async () => {
-				const data = await withRetry(
-					() => collectInteractiveData(page),
-					COLLECTOR_RETRY,
-				);
+				const data = await collectInteractiveData(page);
 				await writer?.flushSlice('interactive', data);
 				return data;
 			}),
 			runStep(result.steps, 'seo', async () => {
-				const data = await withRetry(
-					() => collectSeoData(page),
-					COLLECTOR_RETRY,
-				);
+				const data = await collectSeoData(page);
 				await writer?.flushSlice('seo', data);
 				return data;
 			}),
 			runStep(result.steps, 'axe', async () => {
-				const data = await withRetry(
-					() => collectAxeViolations(page),
-					AXE_RETRY,
-				);
+				const data = await collectAxeViolations(page);
 				await writer?.flushSlice('accessibility', data);
 				return data;
 			}),
-			// Desktop screenshot runs in parallel with all collectors above.
-			runStep(result.steps, 'screenshot:desktop', () =>
-				withRetry(() => captureDesktopScreenshot(page), SCREENSHOT_RETRY),
-			),
-			// Mobile screenshot: navigation started in the background above;
-			// capture runs parallel with the desktop screenshot and collectors.
-			mobileNavigationPromise.then((mobileNav) =>
-				captureMobileFromNavigation(mobileNav, result, writer),
-			),
 		]);
 
-		const brokenStates = settled(r_brokenStates);
-		const links = settled(r_links);
-		const interactive = settled(r_interactive);
-		const seoData = settled(r_seoData);
-		const axe = settled(r_axe);
-		const desktopScreenshot = settled(r_desktopScreenshot);
-		const mobileScreenshot = settled(r_mobileScreenshot);
+		result.brokenStates = settled(r_brokenStates);
+		result.links = settled(r_links);
+		result.interactive = settled(r_interactive);
+		result.seoData = settled(r_seoData);
+		result.axe = settled(r_axe);
 
-		result.brokenStates = brokenStates;
-		result.links = links;
-		result.interactive = interactive;
-		result.seoData = seoData;
-		result.axe = axe;
-
-		await retryAxeOnSamePage(page, result, writer);
-
-		result.screenshots = {};
-
-		console.log('[scan] desktop screenshot:', {
-			captured: !!desktopScreenshot,
-			size: desktopScreenshot?.length,
-		});
-
-		if (desktopScreenshot) {
-			result.screenshots.desktop = desktopScreenshot;
-			await writer?.uploadScreenshot('desktop', desktopScreenshot);
+		// ── Desktop upload retry ───────────────────────────────────────────────
+		// The upload ran concurrently with Phase 1 above.  If Supabase had a
+		// transient hiccup the upload failed silently (caught inside uploadScreenshot).
+		// The buffer is still in scope — no re-navigation needed — so retry once.
+		// Phase 1 took ~20 s, giving Supabase time to recover before this attempt.
+		if (earlyDesktop && writer && !writer.hasScreenshot('desktop')) {
+			await writer.uploadScreenshot('desktop', earlyDesktop);
 		}
 
+		// ── Phase 2 — mobile screenshot ───────────────────────────────────────
+		// Wrapped in a Node.js-level timeout (MOBILE_PHASE_TIMEOUT_MS).
+		// If Browserbase CDP becomes congested, page.screenshot()'s built-in
+		// timeout stops firing (it is itself a CDP message).  The Node.js timer
+		// runs outside the CDP channel — when it fires it force-closes the mobile
+		// context, which causes any pending Playwright call to throw immediately,
+		// unblocking the phase cleanly instead of burning the 240 s budget.
+		let mobileContextToClose: BrowserContext | null = null;
+
+		const mobileScreenshot = await Promise.race([
+			mobileNavigationPromise.then(async (mobileNav) => {
+				if (!mobileNav) return undefined;
+				// Store ref so the timeout can force-close it if needed.
+				mobileContextToClose = mobileNav.page.context();
+				return captureMobileFromNavigation(mobileNav, result, writer);
+			}),
+			new Promise<undefined>((resolve) => {
+				setTimeout(() => {
+					// Force-close the mobile context to unblock any hanging CDP call.
+					if (mobileContextToClose) void closeContext(mobileContextToClose);
+					result.warnings.push(
+						`mobile_phase_timeout: mobile screenshot skipped after ${MOBILE_PHASE_TIMEOUT_MS}ms`,
+					);
+					resolve(undefined);
+				}, MOBILE_PHASE_TIMEOUT_MS);
+			}),
+		]);
 		if (mobileScreenshot) {
 			result.screenshots.mobile = mobileScreenshot;
 			await writer?.uploadScreenshot('mobile', mobileScreenshot);
+			// Same retry safety-net for mobile: buffer still in scope.
+			if (writer && !writer.hasScreenshot('mobile')) {
+				await writer.uploadScreenshot('mobile', mobileScreenshot);
+			}
 		}
 
 		const navigationOk = hasSuccessfulNavigation(result.steps);
 		const axeOk = hasSuccessfulAxe(result);
-		const hasCoreCapture =
-			Boolean(result.screenshots?.desktop) &&
-			Boolean(result.screenshots?.mobile);
 
-		result.ok = navigationOk && (axeOk || hasCoreCapture);
+		// ok = navigation succeeded AND at least one collector returned useful data.
+		// Screenshots are valuable but not required — seo, links, brokenStates, or
+		// axe data alone is enough for a meaningful AI analysis.
+		const hasAnyCollectorData =
+			axeOk ||
+			Boolean(result.seoData) ||
+			Boolean(result.links) ||
+			Boolean(result.brokenStates) ||
+			Boolean(result.interactive) ||
+			Boolean(result.screenshots?.desktop);
+
+		result.ok = navigationOk && hasAnyCollectorData;
 
 		if (navigationOk && !axeOk) {
 			const axeReason = getAxeFailureReason(result);
 			result.warnings.push(
-				`Accessibility scan incomplete (${axeReason}). Other checks and screenshots were captured.`,
+				`Accessibility scan incomplete (${axeReason}). Other checks were still captured.`,
 			);
-			if (!hasCoreCapture) {
-				result.error = `accessibility_gate_fail: ${axeReason}`;
-			}
 		}
 
 		return result;
@@ -392,11 +400,6 @@ async function scanSingleUrlWithTimeout(
 
 	const missingData = getMissingScanData(result);
 	if (missingData.length > 0) {
-		console.log('[scan] incomplete page data:', {
-			url,
-			missingData,
-			ok: result.ok,
-		});
 		result.warnings.push(`Missing scan data: ${missingData.join(', ')}`);
 	}
 
@@ -422,7 +425,7 @@ export async function runPlaywrightScanOnSession(
 			options?.writer,
 		);
 	} finally {
-		// Contexts are closed inside scanSingleUrl; leave remote browser alive for other pages.
+		// Contexts are closed inside scanSingleUrl; remote browser stays alive for other pages.
 	}
 }
 

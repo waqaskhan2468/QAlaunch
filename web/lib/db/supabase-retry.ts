@@ -96,7 +96,7 @@ export async function updateScanPageRecord(
 			}
 		},
 		{
-			attempts: options?.attempts ?? 3,
+			attempts: options?.attempts ?? 2,
 			delayMs: 1_000,
 			shouldRetry: shouldRetrySupabaseMutation,
 		},

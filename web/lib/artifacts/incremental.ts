@@ -1,5 +1,8 @@
 import { getServiceSupabase } from '@/lib/db/supabase';
-import { isRetryableNetworkError, updateScanPageRecord } from '@/lib/db/supabase-retry';
+import {
+	isRetryableNetworkError,
+	updateScanPageRecord,
+} from '@/lib/db/supabase-retry';
 import { withRetry } from '@/lib/scan/services/retry';
 import type { ScanResult } from '@/lib/scan/types/scan.types';
 import {
@@ -21,8 +24,18 @@ import type {
 } from './types';
 import { getArtifactBucket, getScreenshotBucket } from './upload';
 
-const UPLOAD_ATTEMPTS = 5;
+// Reduced from 3 → 2: with the in-memory buffer retry in index.ts, a second
+// uploadScreenshot() call is made when hasScreenshot() is false after Phase 1.
+// Two attempts here + one manual retry = 4 total chances at ~26 s worst case
+// vs the old 3-attempt loop at up to 66 s per call.
+const UPLOAD_ATTEMPTS = 2;
 const UPLOAD_DELAY_MS = 2_000;
+// Per-attempt ceiling so a hung Supabase connection can't block the scan.
+// Reduced from 20 s → 12 s: genuine Supabase uploads finish in 1–4 s; 12 s is
+// a generous ceiling that still catches TCP-hang scenarios while saving up to
+// 8 s per attempt (16 s saved over 2 attempts vs the old 20 s cap).
+const SCREENSHOT_UPLOAD_TIMEOUT_MS = 12_000;
+const ARTIFACT_UPLOAD_TIMEOUT_MS = 10_000;
 
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : 'unknown_error';
@@ -50,6 +63,7 @@ async function uploadBytes(
 			attempts: UPLOAD_ATTEMPTS,
 			delayMs: UPLOAD_DELAY_MS,
 			shouldRetry: shouldRetryUpload,
+			timeoutMs: ARTIFACT_UPLOAD_TIMEOUT_MS,
 		},
 	);
 }
@@ -75,10 +89,13 @@ async function uploadScreenshotBytes(
 			attempts: UPLOAD_ATTEMPTS,
 			delayMs: UPLOAD_DELAY_MS,
 			shouldRetry: shouldRetryUpload,
+			timeoutMs: SCREENSHOT_UPLOAD_TIMEOUT_MS,
 		},
 	);
 	const supabase = getServiceSupabase();
-	const { data } = supabase.storage.from(getScreenshotBucket()).getPublicUrl(path);
+	const { data } = supabase.storage
+		.from(getScreenshotBucket())
+		.getPublicUrl(path);
 	return data.publicUrl;
 }
 
@@ -90,7 +107,6 @@ export class IncrementalArtifactWriter {
 	private readonly startedAt = new Date().toISOString();
 	private readonly artifactPath: string;
 	private readonly flushedSlices = new Set<ArtifactSliceName>();
-	private checkpointWritten = false;
 
 	private screenshotPaths = {
 		desktopPath: null as string | null,
@@ -101,11 +117,28 @@ export class IncrementalArtifactWriter {
 
 	private sliceData: Partial<Record<ArtifactSliceName, unknown>> = {};
 
+	// Track what was last written to the DB so we only issue a checkpoint when
+	// something actually changed (avoids redundant writes on every flushSlice).
+	private checkpointArtifactPathWritten = false;
+	private lastWrittenDesktopUrl: string | null = '__UNSET__';
+	private lastWrittenMobileUrl: string | null = '__UNSET__';
+
 	constructor(
 		private readonly scanId: string,
 		private readonly pageUrl: string,
 	) {
 		this.artifactPath = pageArtifactJsonPath(scanId, pageUrl);
+	}
+
+	/**
+	 * Returns true if the screenshot for the given label was successfully
+	 * uploaded (i.e. the public URL is set).  Used by callers to decide
+	 * whether a retry upload is needed with the still-in-memory buffer.
+	 */
+	hasScreenshot(label: 'desktop' | 'mobile'): boolean {
+		return label === 'desktop' ?
+				this.screenshotPaths.desktopPublicUrl !== null
+			:	this.screenshotPaths.mobilePublicUrl !== null;
 	}
 
 	async flushSlice(name: ArtifactSliceName, data: unknown): Promise<void> {
@@ -117,7 +150,10 @@ export class IncrementalArtifactWriter {
 			await uploadBytes(path, body, 'application/json');
 			this.flushedSlices.add(name);
 			this.sliceData[name] = data;
-			await this.maybeWriteCheckpoint();
+			// Fire-and-forget: DB checkpoint must never block the slice return.
+			// A slow or hung Supabase Postgres write would otherwise freeze the
+			// entire Phase 1 Promise.allSettled until PAGE_SCAN_TIMEOUT_MS fires.
+			void this.maybeWriteCheckpoint();
 		} catch (error) {
 			console.warn('[artifacts] incremental slice flush failed', {
 				scanId: this.scanId,
@@ -160,7 +196,11 @@ export class IncrementalArtifactWriter {
 					pageDesktopScreenshotPath(this.scanId, this.pageUrl, extension)
 				:	pageMobileScreenshotPath(this.scanId, this.pageUrl, extension);
 
-			const publicUrl = await uploadScreenshotBytes(path, uploadBuffer, contentType);
+			const publicUrl = await uploadScreenshotBytes(
+				path,
+				uploadBuffer,
+				contentType,
+			);
 
 			if (label === 'desktop') {
 				this.screenshotPaths.desktopPath = path;
@@ -170,7 +210,9 @@ export class IncrementalArtifactWriter {
 				this.screenshotPaths.mobilePublicUrl = publicUrl;
 			}
 
-			await this.maybeWriteCheckpoint();
+			// Fire-and-forget: same reason as flushSlice — DB write must never
+			// block the upload from returning so it can run in parallel with Phase 1.
+			void this.maybeWriteCheckpoint();
 		} catch (error) {
 			console.warn('[artifacts] incremental screenshot upload failed', {
 				scanId: this.scanId,
@@ -210,6 +252,10 @@ export class IncrementalArtifactWriter {
 		const finishedAt = new Date().toISOString();
 		const message = getErrorMessage(error);
 
+		// Recover diagnostics from the incremental flush (written right after
+		// navigation settled). Falls back to empty arrays if never flushed.
+		const savedDiagnostics = asDiagnosticsSlice(this.sliceData.diagnostics);
+
 		const artifact: RawPageArtifact = {
 			version: 1,
 			scanId: this.scanId,
@@ -235,9 +281,9 @@ export class IncrementalArtifactWriter {
 			diagnostics: {
 				steps: [],
 				warnings: [`scan_aborted: ${message}`],
-				consoleMessages: [],
-				failedRequests: [],
-				httpErrors: [],
+				consoleMessages: savedDiagnostics.consoleMessages,
+				failedRequests: savedDiagnostics.failedRequests,
+				httpErrors: savedDiagnostics.httpErrors,
 				error: message,
 			},
 		};
@@ -270,7 +316,17 @@ export class IncrementalArtifactWriter {
 	}
 
 	private async maybeWriteCheckpoint(): Promise<void> {
-		if (this.checkpointWritten) return;
+		const { desktopPublicUrl, mobilePublicUrl } = this.screenshotPaths;
+
+		const needsArtifactPath = !this.checkpointArtifactPathWritten;
+		const screenshotsChanged =
+			desktopPublicUrl !== this.lastWrittenDesktopUrl ||
+			mobilePublicUrl !== this.lastWrittenMobileUrl;
+
+		// Skip if nothing new to write.
+		if (!needsArtifactPath && !screenshotsChanged) return;
+
+		// Don't write at all until at least one slice or screenshot exists.
 		if (this.flushedSlices.size === 0 && !this.screenshotPaths.desktopPath) {
 			return;
 		}
@@ -279,13 +335,15 @@ export class IncrementalArtifactWriter {
 			await updateScanPageRecord(this.scanId, this.pageUrl, {
 				artifact_path: this.artifactPath,
 				artifact_status: 'partial',
-				screenshot_desktop_url: this.screenshotPaths.desktopPublicUrl,
-				screenshot_mobile_url: this.screenshotPaths.mobilePublicUrl,
+				screenshot_desktop_url: desktopPublicUrl,
+				screenshot_mobile_url: mobilePublicUrl,
 				playwright_data: buildPlaywrightIndexPayload(false),
 				raw_html: null,
 				axe_violations: null,
 			});
-			this.checkpointWritten = true;
+			this.checkpointArtifactPathWritten = true;
+			this.lastWrittenDesktopUrl = desktopPublicUrl;
+			this.lastWrittenMobileUrl = mobilePublicUrl;
 		} catch (error) {
 			console.warn('[artifacts] partial DB checkpoint failed', {
 				scanId: this.scanId,
@@ -294,4 +352,25 @@ export class IncrementalArtifactWriter {
 			});
 		}
 	}
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+type DiagnosticsSlice = {
+	consoleMessages: unknown[];
+	failedRequests: unknown[];
+	httpErrors: unknown[];
+};
+
+/** Safely cast the flushed diagnostics slice, falling back to empty arrays. */
+function asDiagnosticsSlice(v: unknown): DiagnosticsSlice {
+	if (!v || typeof v !== 'object') {
+		return { consoleMessages: [], failedRequests: [], httpErrors: [] };
+	}
+	const r = v as Record<string, unknown>;
+	return {
+		consoleMessages: Array.isArray(r.consoleMessages) ? r.consoleMessages : [],
+		failedRequests: Array.isArray(r.failedRequests) ? r.failedRequests : [],
+		httpErrors: Array.isArray(r.httpErrors) ? r.httpErrors : [],
+	};
 }
