@@ -1,10 +1,13 @@
 import type { Page } from 'playwright-core';
 import type { ScanResult } from '../types/scan.types';
+import { logScanTiming } from './scan-timing';
 
 export async function collectInteractiveData(
 	page: Page,
+	timing?: { scanId?: string; pageUrl?: string },
 ): Promise<NonNullable<ScanResult['interactive']>> {
-	return page.evaluate(() => {
+	const startedAt = Date.now();
+	const result = await page.evaluate(() => {
 		const buttons = Array.from(
 			document.querySelectorAll('button, [role="button"]'),
 		).map((node) => {
@@ -46,12 +49,21 @@ export async function collectInteractiveData(
 
 		return { buttons, forms };
 	});
+	logScanTiming('interactive', Date.now() - startedAt, {
+		...timing,
+		ok: true,
+		buttonCount: result.buttons.length,
+		formCount: result.forms.length,
+	});
+	return result;
 }
 
 export async function collectSeoData(
 	page: Page,
+	timing?: { scanId?: string; pageUrl?: string },
 ): Promise<NonNullable<ScanResult['seoData']>> {
-	return page.evaluate(() => ({
+	const startedAt = Date.now();
+	const result = await page.evaluate(() => ({
 		title: document.title,
 		metaDescription:
 			document
@@ -85,4 +97,11 @@ export async function collectSeoData(
 			!!document.querySelector('link[rel="shortcut icon"]'),
 		language: document.documentElement.lang || null,
 	}));
+	logScanTiming('seo', Date.now() - startedAt, {
+		...timing,
+		ok: true,
+		titleLength: result.title?.length ?? 0,
+		h1Count: result.h1Tags.length,
+	});
+	return result;
 }

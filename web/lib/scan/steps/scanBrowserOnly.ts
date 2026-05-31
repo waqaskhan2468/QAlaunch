@@ -1,5 +1,5 @@
 import { NonRetriableError } from 'inngest';
-import { IncrementalArtifactWriter } from '@/lib/artifacts/incremental';
+import { ScanWriter } from '@/lib/artifacts/incremental';
 import { formatErrorWithCause } from '@/lib/db/supabase-retry';
 import { toUserFacingScanError } from '@/lib/scan/fail-scan';
 import { runPlaywrightScanForUrl } from '@/lib/scan/services/index';
@@ -17,7 +17,7 @@ export async function scanBrowserOnlyStep(input: {
 	scanId: string;
 	pageUrl: string;
 }): Promise<PageBrowserStepResult> {
-	const writer = new IncrementalArtifactWriter(input.scanId, input.pageUrl);
+	const writer = new ScanWriter(input.scanId, input.pageUrl);
 
 	try {
 		slog('scan:browser_start', { scanId: input.scanId, pageUrl: input.pageUrl });
@@ -33,6 +33,7 @@ export async function scanBrowserOnlyStep(input: {
 			steps: result.steps.length,
 		});
 
+		// Writes all scan data to DB in one shot — no Storage artifact JSON.
 		return await writer.finalize(result);
 	} catch (error: unknown) {
 		slog('scan:browser_error', {
@@ -44,11 +45,6 @@ export async function scanBrowserOnlyStep(input: {
 
 		if (isBrowserRetriable(error)) {
 			throw error;
-		}
-
-		const partial = await writer.finalizePartial(error);
-		if (partial) {
-			return partial;
 		}
 
 		if (isBrowserNonRetriable(error)) {

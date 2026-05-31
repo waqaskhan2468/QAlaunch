@@ -82,7 +82,7 @@ async function fetchReportData(
 			.single(),
 		supabase
 			.from('scan_pages')
-			.select('page_url, page_speed_data, playwright_data, artifact_path')
+			.select('page_url, page_speed_data, playwright_data')
 			.eq('scan_id', scanId),
 		supabase
 			.from('issues')
@@ -135,9 +135,7 @@ async function fetchReportData(
 
 	const hydratedPages = await hydratePagesWithArtifacts(
 		(pages ?? []).map((p) => ({
-			scan_id: scanId,
 			page_url: (p as { page_url: string }).page_url,
-			artifact_path: (p as { artifact_path?: string | null }).artifact_path,
 			playwright_data: (p as { playwright_data?: unknown }).playwright_data,
 			page_speed_data: (p as { page_speed_data?: unknown }).page_speed_data,
 		})),

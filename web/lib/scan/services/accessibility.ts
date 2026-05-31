@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from 'playwright-core';
 import type { AxeViolation, ScanResult } from '../types/scan.types';
+import { logScanTiming } from './scan-timing';
 
 // 15 s safety net. legacyMode forces a single axe.run() CDP call instead of
 // many runPartial() round-trips. On Browserbase remote CDP each round-trip adds
@@ -17,7 +18,9 @@ function normalizeAxeTarget(target: (string | string[])[]): string[] {
 
 export async function collectAxeViolations(
 	page: Page,
+	timing?: { scanId?: string; pageUrl?: string },
 ): Promise<NonNullable<ScanResult['axe']>> {
+	const startedAt = Date.now();
 	const axePromise = new AxeBuilder({ page })
 		.include('body')
 		.setLegacyMode(true)
@@ -44,7 +47,7 @@ export async function collectAxeViolations(
 
 	try {
 		const result = await Promise.race([axePromise, timeoutPromise]);
-		return result.violations.map(
+		const violations = result.violations.map(
 			(v): AxeViolation => ({
 				id: v.id,
 				impact: v.impact ?? null,
@@ -60,6 +63,20 @@ export async function collectAxeViolations(
 				})),
 			}),
 		);
+		logScanTiming('axe', Date.now() - startedAt, {
+			...timing,
+			ok: true,
+			violationCount: violations.length,
+		});
+		return violations;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		logScanTiming('axe', Date.now() - startedAt, {
+			...timing,
+			ok: false,
+			error: message,
+		});
+		throw error;
 	} finally {
 		clearTimeout(timer);
 	}

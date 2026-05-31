@@ -1,6 +1,5 @@
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import type { IncrementalArtifactWriter } from '@/lib/artifacts/incremental';
-import { responsiveToArtifactMeta } from '@/lib/artifacts/serialize';
+import type { ScanWriter } from '@/lib/artifacts/incremental';
 import type { BrowserbaseSession } from '@/lib/scan/browser';
 import {
 	closeBrowserSession,
@@ -23,6 +22,7 @@ import { captureResponsiveFromPage, startMobileNavigation } from './responsive';
 import { blockThirdPartyResources } from './resourceBlocklist';
 import { captureDesktopScreenshot } from './screenshots';
 import { collectBrokenStates } from './brokenStates';
+import { logScanTiming } from './scan-timing';
 
 // Raised from 180 s → 240 s. The 180 s budget was too tight once Phase 1
 // collectors (link HTTP-checks + axe) were run sequentially before screenshots.
@@ -39,6 +39,14 @@ const DEFAULT_PAGE_SCAN_TIMEOUT_MS = 240_000;
 // = ~18 s total. 30 s gives a 12 s safety margin while saving up to 25 s on slow
 // sites where mobile nav stalls, keeping the total scan within ~1 minute.
 const MOBILE_PHASE_TIMEOUT_MS = 30_000;
+
+// Node.js-level ceiling for desktop screenshot capture.
+// Viewport JPEG budget: addStyleTag(0.1s) + fonts(3-5s) + capture(1-2s) ≈ 3-7s.
+// Playwright timeout inside captureScreenshot is 10s.
+// 14s ceiling = 10s Playwright + 4s safety margin.
+// Full-page was removed: it required CDP scroll commands that hung for 114s on
+// congested Browserbase, orphaning the goroutine and blocking context.close().
+const DESKTOP_SCREENSHOT_TIMEOUT_MS = 14_000;
 
 // Reduce from 10 s → 8 s. Individual page.evaluate() / waitFor* calls on
 // a live page rarely need more than a few seconds. The outer page-scan timeout
@@ -77,6 +85,12 @@ function withPageTimeout<T>(
 	const timeoutPromise = new Promise<T>((_, reject) => {
 		timer = setTimeout(() => {
 			onTimeout?.();
+			logScanTiming('scan:page_timeout', timeoutMs, {
+				scanId,
+				pageUrl: url,
+				ok: false,
+				timeoutMs,
+			});
 			reject(
 				new Error(
 					`[scan] page timeout after ${timeoutMs}ms: ${url} (scanId=${scanId})`,
@@ -153,7 +167,7 @@ type MobileNavResult = Awaited<ReturnType<typeof startMobileNavigation>>;
 async function captureMobileFromNavigation(
 	mobileNav: MobileNavResult | null,
 	result: ScanResult,
-	writer?: IncrementalArtifactWriter,
+	timing?: { scanId: string; pageUrl: string },
 ): Promise<Buffer | undefined> {
 	if (!mobileNav) {
 		result.warnings.push(
@@ -172,13 +186,11 @@ async function captureMobileFromNavigation(
 
 	try {
 		const responsiveResult = await runStep(result.steps, 'responsive', () =>
-			captureResponsiveFromPage(mobilePage, mobileNav.viewport),
+			captureResponsiveFromPage(mobilePage, mobileNav.viewport, timing),
 		);
 
 		if (responsiveResult) {
 			result.responsive = [responsiveResult];
-			const meta = responsiveToArtifactMeta([responsiveResult]);
-			await writer?.flushSlice('responsive', meta);
 			return responsiveResult.screenshot;
 		}
 	} finally {
@@ -192,11 +204,13 @@ async function scanSingleUrl(
 	browser: Browser,
 	url: string,
 	scanId: string,
-	writer?: IncrementalArtifactWriter,
+	writer?: ScanWriter,
 	registerAbort?: (abort: () => Promise<void>) => void,
 ): Promise<ScanResult> {
 	const context = await browser.newContext({ viewport: DESKTOP_VIEWPORT });
 	const result = createEmptyScanResult(scanId, url);
+	const scanStartedAt = Date.now();
+	const stepTiming = { scanId, pageUrl: url };
 
 	registerAbort?.(() => closeContext(context));
 
@@ -210,38 +224,11 @@ async function scanSingleUrl(
 
 		await navigatePage(page, url, result);
 
-		if (result.responseSecurityMeta) {
-			await writer?.flushSlice(
-				'response_security',
-				result.responseSecurityMeta,
-			);
-		}
-
-		// Flush a diagnostics snapshot right after navigation settles so
-		// finalizePartial() has real data if a later collector timeout fires.
-		await writer?.flushSlice('diagnostics', {
-			consoleMessages: result.consoleMessages,
-			failedRequests: result.failedRequests,
-			httpErrors: result.httpErrors,
-		});
-
-		// ── Desktop screenshot — BEFORE collectors start ───────────────────────
-		// Captured immediately while the page is fresh and the CDP connection is
-		// uncontested (fast mode = ~200 ms prep + screenshot).  Stored on result
-		// immediately; upload runs concurrently with Phase 1 (see below) so it
-		// never adds to the critical path.
 		result.screenshots = {};
-		const earlyDesktop = await runStep(result.steps, 'screenshot:desktop', () =>
-			captureDesktopScreenshot(page, { fast: true }),
-		);
-		if (earlyDesktop) {
-			result.screenshots.desktop = earlyDesktop;
-		}
 
-		// Start mobile navigation IMMEDIATELY after desktop screenshot — before the
-		// upload — so it gets the maximum time to complete in the background while
-		// Phase 1 collectors and the desktop upload run concurrently.
-		const mobileNavigationPromise = startMobileNavigation(browser, url).catch(
+		// Start mobile navigation IMMEDIATELY after navigation — before the desktop
+		// screenshot — so it gets the maximum head-start while Phase 1 runs.
+		const mobileNavigationPromise = startMobileNavigation(browser, url, stepTiming).catch(
 			(err) => {
 				console.warn('[scan] mobile navigation background start failed', {
 					url,
@@ -252,48 +239,69 @@ async function scanSingleUrl(
 			},
 		);
 
-		// ── Phase 1 — data collectors + desktop upload (all parallel) ─────────
-		// Desktop upload (≤ 20 s with timeout) runs alongside collectors (axe ≤ 20 s)
-		// so neither blocks the other.  Mobile navigation has already been running
-		// since before Phase 1 started, maximising its head-start.
+		// ── Phase 1 — data collectors + desktop screenshot (all parallel) ──────
+		// Desktop screenshot now runs INSIDE Phase 1, not before it.
+		//
+		// Root cause of scan 488712d7 failure: page.screenshot() hung for 89 s on
+		// Browserbase CDP (font-loading wait via document.fonts.ready never resolved
+		// because the CDP channel was congested).  Playwright's own timeout is also
+		// a CDP message — it never fired either.  Running screenshot before Phase 1
+		// meant axe, links, and seo never ran at all before the 120 s budget expired.
+		//
+		// Fix: screenshot runs in parallel with collectors, wrapped in a Node.js
+		// setTimeout ceiling (DESKTOP_SCREENSHOT_TIMEOUT_MS = 15 s).  The setTimeout
+		// fires on the Node.js event loop regardless of CDP state — when it fires,
+		// the race resolves with undefined, Phase 1 completes, and collectors are
+		// returned.  The stuck page.screenshot() call is abandoned in the background.
+		const phase1StartedAt = Date.now();
 		const [
-			,
-			// desktop upload — result ignored; errors caught inside uploadScreenshot
+			r_screenshot,
 			r_brokenStates,
 			r_links,
 			r_interactive,
 			r_seoData,
 			r_axe,
 		] = await Promise.allSettled([
-			earlyDesktop ?
-				(writer?.uploadScreenshot('desktop', earlyDesktop) ?? Promise.resolve())
-			:	Promise.resolve(),
-			runStep(result.steps, 'broken_states', async () => {
-				const data = await collectBrokenStates(page);
-				await writer?.flushSlice('broken_states', data);
-				return data;
+			new Promise<Buffer | undefined>((resolve) => {
+				const nodeTimer = setTimeout(() => {
+					result.warnings.push(
+						`desktop_screenshot_timeout: skipped after ${DESKTOP_SCREENSHOT_TIMEOUT_MS}ms`,
+					);
+					resolve(undefined);
+				}, DESKTOP_SCREENSHOT_TIMEOUT_MS);
+				runStep(result.steps, 'screenshot:desktop', () =>
+					captureDesktopScreenshot(page, { fast: true, timing: stepTiming }),
+				)
+					.then((buf) => {
+						clearTimeout(nodeTimer);
+						resolve(buf);
+					})
+					.catch(() => {
+						clearTimeout(nodeTimer);
+						resolve(undefined);
+					});
 			}),
-			runStep(result.steps, 'links', async () => {
-				const data = await collectLinks(page, url);
-				await writer?.flushSlice('links', data);
-				return data;
-			}),
-			runStep(result.steps, 'interactive', async () => {
-				const data = await collectInteractiveData(page);
-				await writer?.flushSlice('interactive', data);
-				return data;
-			}),
-			runStep(result.steps, 'seo', async () => {
-				const data = await collectSeoData(page);
-				await writer?.flushSlice('seo', data);
-				return data;
-			}),
-			runStep(result.steps, 'axe', async () => {
-				const data = await collectAxeViolations(page);
-				await writer?.flushSlice('accessibility', data);
-				return data;
-			}),
+			runStep(result.steps, 'broken_states', () =>
+				collectBrokenStates(page, { timing: stepTiming }),
+			),
+			runStep(result.steps, 'links', () =>
+				collectLinks(page, url, stepTiming),
+			),
+			runStep(result.steps, 'interactive', () =>
+				collectInteractiveData(page, stepTiming),
+			),
+			runStep(result.steps, 'seo', () =>
+				collectSeoData(page, stepTiming),
+			),
+			runStep(result.steps, 'axe', () =>
+				collectAxeViolations(page, stepTiming),
+			),
 		]);
+
+		const desktopScreenshot = settled(r_screenshot);
+		if (desktopScreenshot) {
+			result.screenshots.desktop = desktopScreenshot;
+		}
 
 		result.brokenStates = settled(r_brokenStates);
 		result.links = settled(r_links);
@@ -301,46 +309,57 @@ async function scanSingleUrl(
 		result.seoData = settled(r_seoData);
 		result.axe = settled(r_axe);
 
-		// ── Desktop upload retry ───────────────────────────────────────────────
-		// The upload ran concurrently with Phase 1 above.  If Supabase had a
-		// transient hiccup the upload failed silently (caught inside uploadScreenshot).
-		// The buffer is still in scope — no re-navigation needed — so retry once.
-		// Phase 1 took ~20 s, giving Supabase time to recover before this attempt.
-		if (earlyDesktop && writer && !writer.hasScreenshot('desktop')) {
-			await writer.uploadScreenshot('desktop', earlyDesktop);
+		logScanTiming('phase1_collectors', Date.now() - phase1StartedAt, {
+			...stepTiming,
+			ok: true,
+			hasDesktopScreenshot: Boolean(desktopScreenshot),
+		});
+
+		// ── Desktop upload (after Phase 1) ────────────────────────────────────
+		// Runs sequentially after Phase 1 so it never competes with collectors.
+		// Retry once if the first attempt failed silently — buffer still in scope.
+		if (desktopScreenshot) {
+			await writer?.uploadScreenshot('desktop', desktopScreenshot);
+			if (writer && !writer.hasScreenshot('desktop')) {
+				await writer.uploadScreenshot('desktop', desktopScreenshot);
+			}
 		}
 
 		// ── Phase 2 — mobile screenshot ───────────────────────────────────────
-		// Wrapped in a Node.js-level timeout (MOBILE_PHASE_TIMEOUT_MS).
-		// If Browserbase CDP becomes congested, page.screenshot()'s built-in
-		// timeout stops firing (it is itself a CDP message).  The Node.js timer
-		// runs outside the CDP channel — when it fires it force-closes the mobile
-		// context, which causes any pending Playwright call to throw immediately,
-		// unblocking the phase cleanly instead of burning the 240 s budget.
+		const phase2StartedAt = Date.now();
 		let mobileContextToClose: BrowserContext | null = null;
 
 		const mobileScreenshot = await Promise.race([
 			mobileNavigationPromise.then(async (mobileNav) => {
 				if (!mobileNav) return undefined;
-				// Store ref so the timeout can force-close it if needed.
 				mobileContextToClose = mobileNav.page.context();
-				return captureMobileFromNavigation(mobileNav, result, writer);
+				return captureMobileFromNavigation(mobileNav, result, stepTiming);
 			}),
 			new Promise<undefined>((resolve) => {
 				setTimeout(() => {
-					// Force-close the mobile context to unblock any hanging CDP call.
 					if (mobileContextToClose) void closeContext(mobileContextToClose);
 					result.warnings.push(
 						`mobile_phase_timeout: mobile screenshot skipped after ${MOBILE_PHASE_TIMEOUT_MS}ms`,
 					);
+					logScanTiming('phase2_mobile:timeout', MOBILE_PHASE_TIMEOUT_MS, {
+						...stepTiming,
+						ok: false,
+						error: 'mobile_phase_timeout',
+					});
 					resolve(undefined);
 				}, MOBILE_PHASE_TIMEOUT_MS);
 			}),
 		]);
+
+		logScanTiming('phase2_mobile', Date.now() - phase2StartedAt, {
+			...stepTiming,
+			ok: Boolean(mobileScreenshot),
+			hasMobileScreenshot: Boolean(mobileScreenshot),
+		});
+
 		if (mobileScreenshot) {
 			result.screenshots.mobile = mobileScreenshot;
 			await writer?.uploadScreenshot('mobile', mobileScreenshot);
-			// Same retry safety-net for mobile: buffer still in scope.
 			if (writer && !writer.hasScreenshot('mobile')) {
 				await writer.uploadScreenshot('mobile', mobileScreenshot);
 			}
@@ -369,13 +388,24 @@ async function scanSingleUrl(
 			);
 		}
 
+		logScanTiming('scan:browser_page', Date.now() - scanStartedAt, {
+			...stepTiming,
+			ok: result.ok,
+			hasDesktopScreenshot: Boolean(result.screenshots?.desktop),
+			hasMobileScreenshot: Boolean(result.screenshots?.mobile),
+		});
+
 		return result;
 	} catch (error) {
 		result.ok = false;
 		result.error = cleanError(error);
 		return result;
 	} finally {
-		await closeContext(context);
+		// Fire-and-forget: context.close() is a CDP message that hangs when Browserbase
+		// is congested. Awaiting it blocks scanSingleUrl from resolving, which consumes
+		// the withPageTimeout budget even after all scan work is done.
+		// The Browserbase session is cleaned up server-side when the step completes.
+		void closeContext(context);
 	}
 }
 
@@ -383,7 +413,7 @@ async function scanSingleUrlWithTimeout(
 	browser: Browser,
 	url: string,
 	scanId: string,
-	writer?: IncrementalArtifactWriter,
+	writer?: ScanWriter,
 ): Promise<ScanResult> {
 	let abortScan: (() => Promise<void>) | null = null;
 
@@ -414,7 +444,7 @@ export async function runPlaywrightScanOnSession(
 	connectUrl: string,
 	scanId: string,
 	url: string,
-	options?: { writer?: IncrementalArtifactWriter },
+	options?: { writer?: ScanWriter },
 ): Promise<ScanResult> {
 	const browser = await connectBrowserbase(connectUrl);
 	try {
@@ -433,7 +463,7 @@ export async function runPlaywrightScanOnSession(
 export async function runPlaywrightScanForUrl(
 	scanId: string,
 	pageUrl: string,
-	options?: { writer?: IncrementalArtifactWriter },
+	options?: { writer?: ScanWriter },
 ): Promise<ScanResult> {
 	const session: BrowserbaseSession = await createBrowserbaseSession(
 		scanId,

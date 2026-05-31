@@ -1,6 +1,7 @@
 import type { Page } from 'playwright-core';
 import { PROGRAMMATIC_RULESET_VERSION } from '../constants/programmatic';
 import type { ProgrammaticFinding, ProgrammaticPayload } from '../types/scan.types';
+import { logScanTiming } from './scan-timing';
 
 const DEFAULT_MAX_FINDINGS = 48;
 
@@ -162,7 +163,7 @@ function parseBrokenEvaluateResult(raw: unknown): BrokenEvaluateResult {
 
 export async function collectBrokenStates(
 	page: Page,
-	options?: { maxFindings?: number },
+	options?: { maxFindings?: number; timing?: { scanId?: string; pageUrl?: string } },
 ): Promise<ProgrammaticPayload> {
 	const maxFindings = options?.maxFindings ?? DEFAULT_MAX_FINDINGS;
 	const started = Date.now();
@@ -173,6 +174,13 @@ export async function collectBrokenStates(
 	const expression = buildBrokenStatesExpression({ capFindings: maxFindings });
 	const evaluated = parseBrokenEvaluateResult(await page.evaluate(expression));
 	const durationMs = Date.now() - started;
+
+	logScanTiming('broken_states', durationMs, {
+		...options?.timing,
+		ok: true,
+		findingsCount: evaluated.findings.length,
+		truncated: evaluated.truncated,
+	});
 
 	return {
 		findings: evaluated.findings as ProgrammaticFinding[],

@@ -30,18 +30,15 @@ const NON_RETRIABLE_PATTERNS = [
 	'invalid project id',
 	'Browserbase session missing connectUrl',
 	'cloudflare_challenge',
-	// Page timeout: finalizePartial() already ran before this check; if it
-	// returned null (nothing collected) there is nothing to save and retrying
-	// will hit the same wall — mark as non-retriable to stop the retry loop.
+	// Page timeout: no partial data is saved (ScanWriter only writes in finalize()).
+	// Retrying will hit the same wall — mark as non-retriable to stop the loop.
+	// persistFailedPageIndex is called by the run-scan.ts catch block instead.
 	'page timeout after',
 ];
 
 const BROWSER_RETRIABLE_PATTERNS = [
-	// NOTE: 'page timeout' is intentionally omitted here.
-	// When the internal page-scan timeout fires, scanBrowserOnly calls
-	// writer.finalizePartial() first so any collected data is saved.
-	// Only if finalizePartial returns null (nothing collected at all) does
-	// the raw error re-throw, which Inngest may then retry.
+	// NOTE: 'page timeout' is intentionally omitted — it is handled as non-retriable
+	// above so Inngest does not retry an already-timed-out scan.
 	'browser has been closed',
 	'Target page, context or browser has been closed',
 	'session not running',

@@ -15,7 +15,6 @@ import { prepareScannerStep } from '@/lib/scan/steps/prepareScanner';
 import { reloadScanStep } from '@/lib/scan/steps/reloadScan';
 import { scanBrowserOnlyStep } from '@/lib/scan/steps/scanBrowserOnly';
 import { persistFailedPageIndex } from '@/lib/scan/runner';
-import { scanPersistOnlyStep } from '@/lib/scan/steps/scanPersistOnly';
 import { sendReportEmailStep } from '@/lib/scan/steps/sendReportEmail';
 import type { ProcessPayload } from '@/lib/inngest/process.types';
 
@@ -92,11 +91,9 @@ export const runScan = inngest.createFunction(
 		const runPageScan = async (pageUrl: string) => {
 			const slug = stepIdFromPageUrl(pageUrl);
 			try {
-				const browserResult = await step.run(`scan-browser:${slug}`, () =>
+				// scan-browser writes all scan data directly to the DB row — no separate persist step.
+				await step.run(`scan-browser:${slug}`, () =>
 					scanBrowserOnlyStep({ scanId, pageUrl }),
-				);
-				await step.run(`scan-persist:${slug}`, () =>
-					scanPersistOnlyStep({ browserResult }),
 				);
 			} catch {
 				await step.run(`scan-persist-failed:${slug}`, () =>

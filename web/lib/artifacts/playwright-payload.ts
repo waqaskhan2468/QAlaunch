@@ -1,41 +1,45 @@
 import type { ScanResult } from '@/lib/scan/types/scan.types';
 import { buildProgrammaticRollup } from '@/lib/scan/utils/programmaticSummary';
-import type { RawPageArtifact } from './types';
+import { responsiveToArtifactMeta } from './serialize';
 
-export function buildPlaywrightPayloadFromArtifact(artifact: RawPageArtifact) {
-	const programmaticRollup = buildProgrammaticRollup(
-		artifact.brokenStates as ScanResult['brokenStates'],
-	);
+/**
+ * Build the full playwright payload directly from a ScanResult.
+ *
+ * Version 4 — stored in scan_pages.playwright_data JSONB and read by the AI analysis step.
+ * Field names match exactly what buildAnalysisPromptAfterImages() reads from playwrightData.
+ */
+export function buildPlaywrightPayloadFromScanResult(result: ScanResult) {
+	const programmaticRollup = buildProgrammaticRollup(result.brokenStates);
 
 	const payload = {
-		playwrightDataVersion: 3 as const,
-		links: artifact.links ?? null,
-		interactive: artifact.interactive ?? null,
-		consoleMessages: artifact.diagnostics.consoleMessages ?? [],
-		failedRequests: artifact.diagnostics.failedRequests ?? [],
-		httpErrors: artifact.diagnostics.httpErrors ?? [],
-		seoData: artifact.seo ?? null,
-		steps: artifact.diagnostics.steps ?? [],
-		warnings: artifact.diagnostics.warnings ?? [],
-		brokenStates: artifact.brokenStates ?? null,
+		playwrightDataVersion: 4 as const,
+		links: result.links ?? null,
+		interactive: result.interactive ?? null,
+		consoleMessages: result.consoleMessages ?? [],
+		failedRequests: result.failedRequests ?? [],
+		httpErrors: result.httpErrors ?? [],
+		seoData: result.seoData ?? null,
+		steps: result.steps ?? [],
+		warnings: result.warnings ?? [],
+		brokenStates: result.brokenStates ?? null,
 		programmaticRollup,
-		responseSecurity: artifact.responseSecurity ?? null,
-		responsive: artifact.responsive ?? null,
-		axeViolations: artifact.accessibility ?? null,
+		responseSecurity: result.responseSecurityMeta ?? null,
+		responsive: responsiveToArtifactMeta(result.responsive),
+		axeViolations: result.axe ?? null,
 	};
 
-	if (artifact.scanOk) {
+	if (result.ok) {
 		return { ...payload, scanOk: true as const };
 	}
 
 	return {
 		...payload,
 		scanOk: false as const,
-		error: artifact.diagnostics.error ?? artifact.reason ?? 'scan_failed',
+		error: result.error ?? 'scan_failed',
 	};
 }
 
-/** Minimal DB summary — full data lives in artifact storage. */
+/** Minimal index payload — used for failed-page records in persistFailedPageIndex. */
 export function buildPlaywrightIndexPayload(scanOk: boolean) {
 	return {
 		playwrightDataVersion: 3 as const,

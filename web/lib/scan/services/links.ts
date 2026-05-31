@@ -2,6 +2,7 @@ import pLimit from 'p-limit';
 import type { Page } from 'playwright-core';
 import type { LinkRecord, ScanResult, ValidatedLink } from '../types/scan.types';
 import { cleanError } from './navigation';
+import { logScanTiming } from './scan-timing';
 
 // Reduced from 50 → 30: covers all meaningful navigation links without long tail
 // of footer/social links that rarely produce actionable broken-link findings.
@@ -77,7 +78,9 @@ async function validateLink(link: LinkRecord): Promise<ValidatedLink> {
 export async function collectLinks(
 	page: Page,
 	pageUrl: string,
+	timing?: { scanId?: string; pageUrl?: string },
 ): Promise<NonNullable<ScanResult['links']>> {
+	const startedAt = Date.now();
 	const rawLinks = await page.evaluate(() => {
 		const origin = window.location.origin;
 
@@ -141,10 +144,21 @@ export async function collectLinks(
 		checkedLinks.map((link) => limit(() => validateLink(link))),
 	);
 
-	return {
+	const result = {
 		totalLinks: uniqueLinks.length,
 		checkedLinks: validatedLinks.length,
 		brokenLinks: validatedLinks.filter((link) => !link.ok),
 		links: validatedLinks,
 	};
+
+	logScanTiming('links', Date.now() - startedAt, {
+		...timing,
+		pageUrl,
+		ok: true,
+		totalLinks: result.totalLinks,
+		checkedLinks: result.checkedLinks,
+		brokenLinks: result.brokenLinks.length,
+	});
+
+	return result;
 }

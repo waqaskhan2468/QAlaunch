@@ -3,6 +3,7 @@ import type { ResponsiveResult } from '../types/scan.types';
 import { closeContext, safeGoto } from './navigation';
 import { blockThirdPartyResources } from './resourceBlocklist';
 import { preparePageForScreenshot, takeScreenshot } from './screenshots';
+import { logScanTiming, timedScanStep } from './scan-timing';
 
 export const MOBILE_VIEWPORT_NAME = 'iPhone 14';
 
@@ -24,65 +25,81 @@ async function navigateForResponsiveCapture(
 	browser: Browser,
 	url: string,
 	viewport: ResponsiveViewport,
+	timing?: { scanId?: string; pageUrl?: string },
 ): Promise<Page> {
-	const context = await browser.newContext({
-		...(viewport.name === MOBILE_VIEWPORT_NAME ?
-			devices[MOBILE_VIEWPORT_NAME]
-		:	{}),
-		viewport: {
-			width: viewport.width,
-			height: viewport.height,
+	return timedScanStep(
+		'mobile:navigate',
+		async () => {
+			const context = await browser.newContext({
+				...(viewport.name === MOBILE_VIEWPORT_NAME ?
+					devices[MOBILE_VIEWPORT_NAME]
+				:	{}),
+				viewport: {
+					width: viewport.width,
+					height: viewport.height,
+				},
+			});
+
+			try {
+				const page = await context.newPage();
+				page.setDefaultTimeout(MOBILE_NAV_TIMEOUT_MS);
+				page.setDefaultNavigationTimeout(MOBILE_NAV_TIMEOUT_MS);
+				await blockThirdPartyResources(page);
+
+				await safeGoto(page, url, {
+					timeout: MOBILE_NAV_TIMEOUT_MS,
+					timing: { ...timing, viewport: viewport.name },
+				});
+
+				return page;
+			} catch (error) {
+				await closeContext(context);
+				throw error;
+			}
 		},
-	});
-
-	try {
-		const page = await context.newPage();
-		// Use MOBILE_NAV_TIMEOUT_MS for both defaults so they stay consistent
-		// with the explicit timeout passed to safeGoto below.
-		page.setDefaultTimeout(MOBILE_NAV_TIMEOUT_MS);
-		page.setDefaultNavigationTimeout(MOBILE_NAV_TIMEOUT_MS);
-		await blockThirdPartyResources(page);
-
-		await safeGoto(page, url, { timeout: MOBILE_NAV_TIMEOUT_MS });
-
-		return page;
-	} catch (error) {
-		await closeContext(context);
-		throw error;
-	}
+		{ ...timing, viewport: viewport.name },
+	);
 }
 
 async function captureFromPage(
 	page: Page,
 	viewport: ResponsiveViewport,
+	timing?: { scanId?: string; pageUrl?: string },
 ): Promise<ResponsiveResult> {
-	// Mobile nav runs for ~30 s while desktop collectors work. By the time we
-	// screenshot, IntersectionObserver reveals have already fired and the page is
-	// settled — fast mode is safe and saves ~2-3 s of unnecessary prep.
-	await preparePageForScreenshot(page, { fast: true });
+	return timedScanStep(
+		'screenshot:mobile',
+		async () => {
+			const shotTiming = { ...timing, viewport: viewport.name };
+			await preparePageForScreenshot(page, { fast: true, timing: shotTiming });
 
-	const hasHorizontalScroll = await page.evaluate(
-		() =>
-			document.documentElement.scrollWidth >
-			document.documentElement.clientWidth,
+			const hasHorizontalScroll = await page.evaluate(
+				() =>
+					document.documentElement.scrollWidth >
+					document.documentElement.clientWidth,
+			);
+
+			const screenshot = await takeScreenshot(page, shotTiming);
+
+			return {
+				viewport: viewport.name,
+				width: viewport.width,
+				height: viewport.height,
+				hasHorizontalScroll,
+				screenshot,
+				sliceCount: 1,
+			};
+		},
+		{ ...timing, viewport: viewport.name },
 	);
-
-	return {
-		viewport: viewport.name,
-		width: viewport.width,
-		height: viewport.height,
-		hasHorizontalScroll,
-		screenshot: await takeScreenshot(page),
-		sliceCount: 1,
-	};
 }
 
 /** Capture a responsive result from a pre-navigated mobile Page. Caller closes the context. */
 export async function captureResponsiveFromPage(
 	page: Page,
 	viewport: ResponsiveViewport = RESPONSIVE_VIEWPORTS[0],
+	timing?: { scanId?: string; pageUrl?: string },
 ): Promise<ResponsiveResult> {
-	return captureFromPage(page, viewport);
+	return captureFromPage(page, viewport, timing);
 }
 
 /**
@@ -93,8 +110,15 @@ export async function captureResponsiveFromPage(
 export async function startMobileNavigation(
 	browser: Browser,
 	url: string,
+	timing?: { scanId?: string; pageUrl?: string },
 ): Promise<{ page: Page; viewport: ResponsiveViewport }> {
+	const startedAt = Date.now();
 	const viewport = RESPONSIVE_VIEWPORTS[0];
-	const page = await navigateForResponsiveCapture(browser, url, viewport);
+	const page = await navigateForResponsiveCapture(browser, url, viewport, timing);
+	logScanTiming('mobile:navigation_start', Date.now() - startedAt, {
+		...timing,
+		ok: true,
+		viewport: viewport.name,
+	});
 	return { page, viewport };
 }

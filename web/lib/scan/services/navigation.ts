@@ -1,6 +1,7 @@
 import type { BrowserContext, Page, Response } from 'playwright-core';
 import type { ScanResult, ScanStep } from '../types/scan.types';
 import { buildResponseSecurityMeta } from './responseMeta';
+import { logScanTiming, type ScanTimingFields } from './scan-timing';
 
 // 15 s default — override with SCAN_NAV_TIMEOUT_MS. Enough for Browserbase remote CDP.
 const DEFAULT_NAV_TIMEOUT_MS = 15_000;
@@ -55,13 +56,26 @@ export async function runStep<T>(
 	steps: ScanStep[],
 	name: string,
 	task: () => Promise<T>,
+	timing?: ScanTimingFields,
 ): Promise<T | undefined> {
+	const startedAt = Date.now();
 	try {
 		const result = await task();
 		addStep(steps, name, true);
+		if (timing) {
+			logScanTiming(name, Date.now() - startedAt, { ...timing, ok: true });
+		}
 		return result;
 	} catch (error) {
-		addStep(steps, name, false, cleanError(error));
+		const message = cleanError(error);
+		addStep(steps, name, false, message);
+		if (timing) {
+			logScanTiming(name, Date.now() - startedAt, {
+				...timing,
+				ok: false,
+				error: message,
+			});
+		}
 		return undefined;
 	}
 }
@@ -209,9 +223,11 @@ async function handlePotentialChallenge(
 export async function safeGoto(
 	page: Page,
 	url: string,
-	options?: { timeout?: number },
+	options?: { timeout?: number; timing?: ScanTimingFields },
 ): Promise<{ navigation: NavigationResult; response: Response | null }> {
+	const startedAt = Date.now();
 	const navTimeout = options?.timeout ?? getNavTimeoutMs();
+	const timing = options?.timing;
 
 	// Always use 'commit' so goto resolves as soon as the server responds —
 	// no second network round-trip if the page is slow to parse.
@@ -244,6 +260,15 @@ export async function safeGoto(
 
 	const strategy = warnings.length ? 'commit' : 'commit+ready';
 
+	if (timing) {
+		logScanTiming('navigate:safeGoto', Date.now() - startedAt, {
+			...timing,
+			ok: true,
+			strategy,
+			httpStatus: response?.status() ?? null,
+		});
+	}
+
 	return {
 		navigation: {
 			strategy,
@@ -258,8 +283,14 @@ export async function navigatePage(
 	url: string,
 	result: ScanResult,
 ): Promise<void> {
+	const startedAt = Date.now();
+	const timing: ScanTimingFields = {
+		scanId: result.scanId,
+		pageUrl: url,
+	};
+
 	try {
-		const { navigation, response } = await safeGoto(page, url);
+		const { navigation, response } = await safeGoto(page, url, { timing });
 
 		if (navigation.warning) {
 			result.warnings.push(navigation.warning);
@@ -281,9 +312,20 @@ export async function navigatePage(
 			response,
 			url,
 		);
+		logScanTiming('navigate', Date.now() - startedAt, {
+			...timing,
+			ok: true,
+			strategy: navigation.strategy,
+			httpStatus: response?.status() ?? null,
+		});
 	} catch (error) {
 		const message = cleanError(error);
 		addStep(result.steps, 'navigate', false, message);
+		logScanTiming('navigate', Date.now() - startedAt, {
+			...timing,
+			ok: false,
+			error: message,
+		});
 		throw new Error(`Navigation failed: ${message}`);
 	}
 }

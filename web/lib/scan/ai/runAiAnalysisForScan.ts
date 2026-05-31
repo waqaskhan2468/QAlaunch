@@ -22,9 +22,7 @@ import {
 	updateScanPageAiAnalysis,
 } from '@/lib/db/supabase-retry';
 import { resolvePageScanData } from '@/lib/artifacts';
-import { getArtifactBucket, getScreenshotBucket } from '@/lib/artifacts/upload';
 import { failScan, toUserFacingScanError } from '@/lib/scan/fail-scan';
-import { withRetry } from '@/lib/scan/services/retry';
 import type { ClaudeIssue } from './types';
 import type { ScanPackage } from '@/types/zod';
 
@@ -62,10 +60,6 @@ const AXE_IMPACT_RANK: Record<string, number> = {
 
 const FREE_PREVIEW_ISSUE_COUNT = 3;
 
-const DEFAULT_SCREENSHOT_SIGNED_URL_TTL_SEC = 3600;
-const MIN_SCREENSHOT_SIGNED_URL_TTL_SEC = 60;
-const MAX_SCREENSHOT_SIGNED_URL_TTL_SEC = 86400;
-
 type ScanPageRow = {
 	id: string;
 	page_url: string;
@@ -75,12 +69,6 @@ type ScanPageRow = {
 	axe_violations: unknown;
 	screenshot_desktop_url: string | null;
 	screenshot_mobile_url: string | null;
-	artifact_path?: string | null;
-};
-
-type SupabaseStorageObjectRef = {
-	bucket: string;
-	path: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -89,128 +77,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getErrorMessage(error: unknown): string {
 	return formatErrorWithCause(error);
-}
-
-function getScreenshotSignedUrlTtlSec(): number {
-	const raw = Number.parseInt(
-		process.env.SCREENSHOT_SIGNED_URL_TTL_SEC ??
-			`${DEFAULT_SCREENSHOT_SIGNED_URL_TTL_SEC}`,
-		10,
-	);
-
-	if (!Number.isFinite(raw)) {
-		return DEFAULT_SCREENSHOT_SIGNED_URL_TTL_SEC;
-	}
-
-	return Math.min(
-		MAX_SCREENSHOT_SIGNED_URL_TTL_SEC,
-		Math.max(MIN_SCREENSHOT_SIGNED_URL_TTL_SEC, raw),
-	);
-}
-
-function parseSupabasePublicStorageUrl(
-	publicUrl: string,
-): SupabaseStorageObjectRef {
-	const parsed = new URL(publicUrl);
-	const marker = '/storage/v1/object/public/';
-	const markerIndex = parsed.pathname.indexOf(marker);
-
-	if (markerIndex === -1) {
-		throw new Error(`Invalid Supabase public screenshot URL: ${publicUrl}`);
-	}
-
-	const objectRef = parsed.pathname.slice(markerIndex + marker.length);
-	const [bucket, ...pathParts] = objectRef.split('/');
-
-	if (!bucket || pathParts.length === 0) {
-		throw new Error(`Invalid Supabase public screenshot URL: ${publicUrl}`);
-	}
-
-	return {
-		bucket: decodeURIComponent(bucket),
-		path: pathParts.map((part) => decodeURIComponent(part)).join('/'),
-	};
-}
-
-/** Keep only origin + pathname for safe logging; drop query params entirely. */
-function maskSignedUrl(url: string): string {
-	try {
-		const { origin, pathname } = new URL(url);
-		return `${origin}${pathname}`;
-	} catch {
-		return '[unparseable-url]';
-	}
-}
-
-/**
- * Resolves a screenshot reference into a URL that Claude can fetch.
- *
- * Bucket layout:
- *   scan-screenshots  → PUBLIC  → getPublicUrl() works, URL returned as-is.
- *   scan-artifacts    → PRIVATE → getPublicUrl() generates a URL that looks
- *                                  public but returns 403. Must be signed.
- *
- * Input formats handled:
- *   1. Full https:// URL from the public scan-screenshots bucket
- *      → contains "/scan-screenshots/" in the path → return as-is.
- *   2. Full https:// URL from scan-artifacts or any other bucket
- *      → looks like /object/public/ but the bucket is private → sign it.
- *   3. Bare storage path (legacy, no http prefix)
- *      → sign using the screenshot bucket.
- */
-async function resolveScreenshotUrl(
-	supabase: ServiceSupabase,
-	screenshotRef: string,
-): Promise<string> {
-	if (screenshotRef.startsWith('http')) {
-		// Check if this URL is from the actual public screenshot bucket.
-		// We match on the bucket name in the URL path rather than just
-		// "/object/public/" because getPublicUrl() generates that prefix for
-		// ALL buckets — including private ones — so the prefix alone is not
-		// a reliable indicator of accessibility.
-		const publicBucket = getScreenshotBucket(); // e.g. "scan-screenshots"
-		if (screenshotRef.includes(`/${publicBucket}/`)) {
-			// Confirmed public bucket URL — Claude can fetch it directly.
-			return screenshotRef;
-		}
-
-		// URL is from a different bucket (e.g. old scan-artifacts scans).
-		// Parse bucket + path and create a signed URL so Anthropic can access it.
-		const parsed = parseSupabasePublicStorageUrl(screenshotRef);
-		const ttlSec = getScreenshotSignedUrlTtlSec();
-		console.log('[runAiAnalysisForScan] signing non-public-bucket screenshot', {
-			bucket: parsed.bucket,
-			path: parsed.path.slice(0, 60),
-			ttlSec,
-		});
-		const { data, error } = await supabase.storage
-			.from(parsed.bucket)
-			.createSignedUrl(parsed.path, ttlSec);
-		if (error || !data?.signedUrl) {
-			throw new Error(
-				`Failed to create signed screenshot URL: ${error?.message ?? 'missing signedUrl'}`,
-			);
-		}
-		return data.signedUrl;
-	}
-
-	// Bare storage path (legacy format — old scans stored just the path).
-	// Sign it using the screenshot bucket.
-	const ttlSec = getScreenshotSignedUrlTtlSec();
-	console.log('[runAiAnalysisForScan] signing legacy bare-path screenshot', {
-		path: screenshotRef.slice(0, 60),
-		bucket: getScreenshotBucket(),
-		ttlSec,
-	});
-	const { data, error } = await supabase.storage
-		.from(getScreenshotBucket())
-		.createSignedUrl(screenshotRef, ttlSec);
-	if (error || !data?.signedUrl) {
-		throw new Error(
-			`Failed to create signed screenshot URL: ${error?.message ?? 'missing signedUrl'}`,
-		);
-	}
-	return data.signedUrl;
 }
 
 /** Mobile screenshot URL for Claude analysis. */
@@ -663,7 +529,7 @@ async function loadScanPageRow(
 	const { data: page, error } = await supabase
 		.from('scan_pages')
 		.select(
-			'id, page_url, page_role, page_speed_data, playwright_data, axe_violations, screenshot_desktop_url, screenshot_mobile_url, artifact_path',
+			'id, page_url, page_role, page_speed_data, playwright_data, axe_violations, screenshot_desktop_url, screenshot_mobile_url',
 		)
 		.eq('scan_id', scanId)
 		.eq('page_url', pageUrl)
@@ -678,24 +544,9 @@ async function loadScanPageRow(
 	return page as ScanPageRow;
 }
 
-async function tryResolveScreenshotUrl(
-	supabase: ServiceSupabase,
-	ref: string | null,
-): Promise<string | null> {
-	if (!ref) return null;
-
-	try {
-		return await withRetry(() => resolveScreenshotUrl(supabase, ref), {
-			attempts: 2,
-			delayMs: 1_000,
-		});
-	} catch (error: unknown) {
-		console.warn('[runAiAnalysisForScan] screenshot sign failed (non-fatal)', {
-			ref: ref.slice(0, 80),
-			error: getErrorMessage(error),
-		});
-		return null;
-	}
+/** Screenshots are in the public scan-screenshots bucket — return URL directly. */
+function resolveScreenshotUrl(ref: string | null): string | null {
+	return ref ?? null;
 }
 
 export async function analyzeScanPageWithClaude(
@@ -707,11 +558,7 @@ export async function analyzeScanPageWithClaude(
 ): Promise<void> {
 	const page = await loadScanPageRow(supabase, scanId, pageUrl);
 	const scanData = await resolvePageScanData({
-		artifact_path: page.artifact_path,
 		playwright_data: page.playwright_data,
-		axe_violations: page.axe_violations,
-		scan_id: scanId,
-		page_url: pageUrl,
 	});
 	const desktop = page.screenshot_desktop_url;
 	const mobileUrl = getPrimaryMobileScreenshotUrl(page);
@@ -731,10 +578,8 @@ export async function analyzeScanPageWithClaude(
 		return;
 	}
 
-	const [desktopSignedUrl, mobileSignedUrl] = await Promise.all([
-		tryResolveScreenshotUrl(supabase, desktop),
-		tryResolveScreenshotUrl(supabase, mobileUrl),
-	]);
+	const desktopSignedUrl = resolveScreenshotUrl(desktop);
+	const mobileSignedUrl = resolveScreenshotUrl(mobileUrl);
 
 	const analysisMode: AiAnalysisMode = resolveAiAnalysisMode({
 		hasDesktop: Boolean(desktopSignedUrl),
@@ -761,8 +606,8 @@ export async function analyzeScanPageWithClaude(
 			scanId,
 			pageUrl: page.page_url,
 			analysisMode,
-			desktop: desktopSignedUrl ? maskSignedUrl(desktopSignedUrl) : null,
-			mobile: mobileSignedUrl ? maskSignedUrl(mobileSignedUrl) : null,
+			desktop: desktopSignedUrl ? desktopSignedUrl.slice(0, 80) : null,
+			mobile: mobileSignedUrl ? mobileSignedUrl.slice(0, 80) : null,
 		});
 
 		const dynamicBeforeImagesText = buildAnalysisPromptBeforeImages({
@@ -770,17 +615,13 @@ export async function analyzeScanPageWithClaude(
 			pageRole: page.page_role,
 			websiteType,
 		});
-		// scanData = buildPlaywrightPayloadFromArtifact() result (new artifact format)
-		// OR page.playwright_data (legacy DB column for old scans)
-		// Either way it is the correct object to pass as playwrightData.
-		// axeViolations: new artifact format includes it as .axeViolations;
-		// legacy format falls back to page.axe_violations DB column.
+		// axeViolations: read from playwright_data.axeViolations (v4),
+		// fall back to the dedicated axe_violations DB column for older rows.
 		const sdRecord =
 			scanData && typeof scanData === 'object' ?
 				(scanData as Record<string, unknown>)
 			:	null;
-		const axeViolationsData =
-			sdRecord?.axeViolations ?? page.axe_violations ?? null;
+		const axeViolationsData = sdRecord?.axeViolations ?? page.axe_violations ?? null;
 		const dynamicAfterImagesText = buildAnalysisPromptAfterImages({
 			pageSpeedData: page.page_speed_data,
 			playwrightData: scanData,

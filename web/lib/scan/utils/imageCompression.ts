@@ -74,11 +74,16 @@ export async function compressScreenshotBuffer(
 	const needsResizeForClaude =
 		width > maxDimensionPx || height > maxDimensionPx;
 
+	// Detect actual input format so fallback cases return the correct content type.
+	const inputIsJpeg = metadata.format === 'jpeg' || metadata.format === 'jpg';
+	const inputContentType = inputIsJpeg ? 'image/jpeg' : 'image/png';
+	const inputExtension = inputIsJpeg ? 'jpg' : 'png';
+
 	if (input.length < MIN_BYTES_FOR_COMPRESSION && !needsResizeForClaude) {
 		return {
 			buffer: input,
-			contentType: 'image/png',
-			extension: 'png',
+			contentType: inputContentType,
+			extension: inputExtension,
 			compressed: false,
 		};
 	}
@@ -102,8 +107,8 @@ export async function compressScreenshotBuffer(
 	if (!needsResizeForClaude && (!output.length || output.length >= input.length)) {
 		return {
 			buffer: input,
-			contentType: 'image/png',
-			extension: 'png',
+			contentType: inputContentType,
+			extension: inputExtension,
 			compressed: false,
 		};
 	}
