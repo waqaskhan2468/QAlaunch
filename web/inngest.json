@@ -1,5 +1,8 @@
 {
-	"sdk-url": ["https://qalaunch.vercel.app/api/inngest"],
+	"sdk-url": [
+		"https://getqalaunch.com/api/inngest",
+		"http://localhost:3000/api/inngest"
+	],
 	"no-discovery": true,
 	"stepTimeout": "3m"
 }

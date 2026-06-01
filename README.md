@@ -69,9 +69,15 @@ App: http://localhost:3000
 
 ## Deployment (Vercel)
 
-- Root directory: `web/`
-- Env vars: see `web/.env.example` (required: `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, Inngest keys, Supabase, Claude)
-- Inngest serve URL: `{NEXT_PUBLIC_APP_URL}/api/inngest`
+- Root directory: **`web/`**
+- Env vars: see `web/.env.example`
+- **Inngest (required or scans stay on "Queued"):**
+  - `INNGEST_EVENT_KEY` — send events from `/api/scan/start`
+  - `INNGEST_SIGNING_KEY` — Inngest Cloud invokes `/api/inngest`
+  - `NEXT_PUBLIC_APP_URL` — e.g. `https://getqalaunch.com` (your live domain)
+  - Do **not** set `INNGEST_DEV=1` on Vercel
+- After deploy: [Inngest dashboard](https://app.inngest.com) → Apps → sync app to `{NEXT_PUBLIC_APP_URL}/api/inngest`
+- Vercel **Pro** recommended (`maxDuration` 300s on `/api/inngest` for long scan steps)
 
 ---
 
