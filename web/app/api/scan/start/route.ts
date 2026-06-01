@@ -122,6 +122,24 @@ export const POST = asyncHandler(async (req: Request) => {
 		targetUrl: normalized,
 		package: pkg,
 		userEmail: email ?? null,
+	}).catch(async (error: unknown) => {
+		console.error('[scan/start] queue publish failed', {
+			scanId: scan.id,
+			error: error instanceof Error ? error.message : String(error),
+		});
+		await supabase
+			.from('scans')
+			.update({
+				status: 'failed',
+				error_message:
+					'Scan could not be queued. Server background jobs are not configured.',
+			})
+			.eq('id', scan.id);
+		throw new AppError(
+			503,
+			'queue_failed',
+			'Could not start the scan queue. Please try again in a moment.',
+		);
 	});
 
 	return NextResponse.json(

@@ -1,15 +1,8 @@
 import { Inngest } from 'inngest';
 
 /**
- * Dev vs Cloud mode (Inngest client + INNGEST_DEV):
- * https://www.inngest.com/docs/reference/typescript/client/create
- * https://www.inngest.com/docs/sdk/environment-variables#inngest-dev
- *
- * - Cloud: signature verification on, talks to Inngest Cloud (production on Vercel).
- * - Dev: verification off, talks to Inngest Dev Server (local `pnpm dev` + `inngest dev`).
- *
- * `INNGEST_DEV` overrides: `1` / `true` / dev server URL → dev; `0` / `false` → cloud.
- * If unset, we use Next's NODE_ENV (`development` → dev, `production` → cloud).
+ * Local: run `pnpm dev` + `pnpm dev:inngest` with INNGEST_DEV=1 (optional).
+ * Vercel: INNGEST_EVENT_KEY + INNGEST_SIGNING_KEY, INNGEST_DEV unset or 0.
  */
 function getInngestIsDev(): boolean {
 	const raw = process.env.INNGEST_DEV;
@@ -23,6 +16,13 @@ function getInngestIsDev(): boolean {
 	) {
 		return true;
 	}
+	// Cloud keys present → production worker mode even if NODE_ENV is wrong.
+	if (
+		process.env.INNGEST_EVENT_KEY?.trim() &&
+		process.env.INNGEST_SIGNING_KEY?.trim()
+	) {
+		return false;
+	}
 	return process.env.NODE_ENV !== 'production';
 }
 
@@ -30,4 +30,5 @@ export const inngest = new Inngest({
 	id: 'qalaunch',
 	name: 'QA Launch',
 	isDev: getInngestIsDev(),
+	eventKey: process.env.INNGEST_EVENT_KEY,
 });

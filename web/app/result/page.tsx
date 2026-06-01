@@ -12,12 +12,20 @@ export const metadata: Metadata = {
   robots: { index: false, follow: true },
 }
 
-export default function ResultPage() {
+// Server component reads searchParams — always the correct values for the
+// current request, never stale.  Passing them as props to AuditExperience
+// eliminates the useSearchParams() staleness window that caused wrong-site
+// data to flash during client-side navigation.
+export default async function ResultPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ scanId?: string; url?: string; freePreviewUsed?: string }>
+}) {
+  const params = await searchParams
   return (
     <>
       <SiteNav />
       <main className="pt-16">
-        {/* Suspense is required because AuditExperience uses useSearchParams. */}
         <Suspense
           fallback={
             <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-surface-soft">
@@ -25,7 +33,11 @@ export default function ResultPage() {
             </div>
           }
         >
-          <AuditExperience />
+          <AuditExperience
+            serverScanId={params.scanId ?? null}
+            serverUrl={params.url ?? null}
+            serverFreePreviewUsed={params.freePreviewUsed ?? null}
+          />
         </Suspense>
       </main>
       <SiteFooter />

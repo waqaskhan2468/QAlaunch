@@ -289,24 +289,54 @@ function ChecklistRow({
 
 // ─── AuditExperience (public wrapper) ────────────────────────────────────────
 
-export function AuditExperience() {
+type AuditExperienceProps = {
+	/** Server-resolved scanId — avoids useSearchParams() staleness during navigation. */
+	serverScanId?: string | null;
+	serverUrl?: string | null;
+	serverFreePreviewUsed?: string | null;
+};
+
+export function AuditExperience({
+	serverScanId,
+	serverUrl,
+	serverFreePreviewUsed,
+}: AuditExperienceProps = {}) {
 	const params = useSearchParams();
-	const remountKey = [
-		params.get('scanId') ?? '',
-		params.get('url') ?? '',
-		params.get('freePreviewUsed') ?? '',
-	].join('|');
-	return <AuditExperienceInner key={remountKey} />;
+
+	// Prefer server-resolved values (always fresh) over client useSearchParams()
+	// which can be stale for ~50-100ms during a route transition, causing a brief
+	// flash of the previous scan's data.
+	const scanId = serverScanId ?? params.get('scanId') ?? '';
+	const url = serverUrl ?? params.get('url') ?? '';
+	const freePreviewUsed = serverFreePreviewUsed ?? params.get('freePreviewUsed') ?? '';
+
+	const remountKey = [scanId, url, freePreviewUsed].join('|');
+	return (
+		<AuditExperienceInner
+			key={remountKey}
+			resolvedScanId={scanId || null}
+			resolvedUrl={url || null}
+			resolvedFreePreviewUsed={freePreviewUsed || null}
+		/>
+	);
 }
 
 // ─── AuditExperienceInner ─────────────────────────────────────────────────────
 
-function AuditExperienceInner() {
+function AuditExperienceInner({
+	resolvedScanId,
+	resolvedUrl,
+	resolvedFreePreviewUsed,
+}: {
+	resolvedScanId: string | null;
+	resolvedUrl: string | null;
+	resolvedFreePreviewUsed: string | null;
+}) {
 	const router = useRouter();
-	const params = useSearchParams();
-	const inputUrl = params.get('url');
-	const initialScanId = params.get('scanId');
-	const freePreviewUsedParam = params.get('freePreviewUsed');
+	// Use server-resolved values — never stale
+	const inputUrl = resolvedUrl;
+	const initialScanId = resolvedScanId;
+	const freePreviewUsedParam = resolvedFreePreviewUsed;
 	const host = deriveHost(inputUrl);
 
 	const [uiState, setUiState] = useState<UiState>(() => {
@@ -316,6 +346,8 @@ function AuditExperienceInner() {
 	const [statusData, setStatusData] = useState<ScanStatusResponse | null>(null);
 	const [analyzingStartedAt, setAnalyzingStartedAt] = useState<number | null>(null);
 	const [analyzingElapsedSec, setAnalyzingElapsedSec] = useState<number | null>(null);
+	const [pendingSince, setPendingSince] = useState<number | null>(null);
+	const [queuedStuckSec, setQueuedStuckSec] = useState<number | null>(null);
 	const [message, setMessage] = useState<string | null>(() =>
 		freePreviewUsedParam === '1' ? 'You already used your free preview for this website.' : null,
 	);
@@ -367,6 +399,12 @@ function AuditExperienceInner() {
 					hadSuccessfulStatus = true;
 					setStatusFetchNote(null);
 					setStatusData(data);
+					if (data.scan.status === 'pending') {
+						setPendingSince((prev) => prev ?? Date.now());
+					} else {
+						setPendingSince(null);
+						setQueuedStuckSec(null);
+					}
 					if (data.scan.status === 'analyzing') {
 						setAnalyzingStartedAt((prev: number | null) => prev ?? Date.now());
 					}
@@ -453,6 +491,17 @@ function AuditExperienceInner() {
 	const loadingCopy = loadingCopyForStatus(loadingStatus);
 
 	useEffect(() => {
+		if (loadingStatus !== 'pending' || pendingSince == null) {
+			setQueuedStuckSec(null);
+			return;
+		}
+		const id = window.setInterval(() => {
+			setQueuedStuckSec(Math.floor((Date.now() - pendingSince) / 1_000));
+		}, 1_000);
+		return () => window.clearInterval(id);
+	}, [loadingStatus, pendingSince]);
+
+	useEffect(() => {
 		if (!loadingCopy.showAiStep || analyzingStartedAt == null) return;
 		const id = window.setInterval(() => {
 			setAnalyzingElapsedSec(Math.floor((Date.now() - analyzingStartedAt) / 1_000));
@@ -530,6 +579,13 @@ function AuditExperienceInner() {
 						</div>
 						{statusFetchNote ?
 							<p className='text-xs text-muted-ink'>{statusFetchNote}</p>
+						:	null}
+						{loadingStatus === 'pending' && queuedStuckSec != null && queuedStuckSec >= 45 ?
+							<p className='max-w-md text-xs text-warn'>
+								Still queued after {queuedStuckSec}s — background jobs may not be
+								connected on production. Check Inngest env vars on Vercel
+								(INNGEST_EVENT_KEY, INNGEST_SIGNING_KEY, NEXT_PUBLIC_APP_URL).
+							</p>
 						:	null}
 						{analyzingElapsedSec != null ?
 							<p className='text-xs text-muted-ink'>
@@ -946,11 +1002,19 @@ function ResultsView({
 							/>
 						</svg>
 						<div className='absolute inset-0 flex flex-col items-center justify-center'>
-							<span
-								className='font-heading font-black leading-none'
-								style={{ fontSize: 62, letterSpacing: -2, color: textColor }}>
-								{displayScore}
-							</span>
+							{healthScore === 0 ? (
+								<span
+									className='font-heading font-black leading-none'
+									style={{ fontSize: 34, letterSpacing: -1, color: '#FCA5A5' }}>
+									CRIT
+								</span>
+							) : (
+								<span
+									className='font-heading font-black leading-none'
+									style={{ fontSize: 62, letterSpacing: -2, color: textColor }}>
+									{displayScore}
+								</span>
+							)}
 							<span className='mt-1 text-[13px] text-white/40'>out of 100</span>
 						</div>
 					</div>
@@ -1014,6 +1078,11 @@ function ResultsView({
 			<div className='mx-auto grid max-w-5xl grid-cols-4 gap-3 sm:grid-cols-7'>
 				{categoryScores.map(({ key, label, score }) => {
 					const tone = catTone(score);
+					// A score of exactly 100 means no issues were found in this category.
+					// Show "✓" instead of "100" so users understand it's "no issues", not
+					// a performance measurement — especially important for free scans where
+					// most categories have no visible issues in the 3-issue preview.
+					const noIssues = score === 100;
 					return (
 						<div
 							key={key}
@@ -1021,17 +1090,23 @@ function ResultsView({
 							<div className='mb-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-ink'>
 								{label}
 							</div>
-							<div
-								className='font-heading text-xl font-black leading-none'
-								style={{ color: catBarColor[tone] }}>
-								{score}
-							</div>
+							{noIssues ? (
+								<div className='font-heading text-xl font-black leading-none' style={{ color: '#22C55E' }}>
+									✓
+								</div>
+							) : (
+								<div
+									className='font-heading text-xl font-black leading-none'
+									style={{ color: catBarColor[tone] }}>
+									{score}
+								</div>
+							)}
 							<div className='mt-2 h-1 overflow-hidden rounded-full bg-border-soft'>
 								<div
 									className='h-full rounded-full transition-all duration-[1.5s] ease-out'
 									style={{
-										width: catsAnimated ? `${score}%` : '0%',
-										background: catBarColor[tone],
+										width: noIssues ? '100%' : catsAnimated ? `${score}%` : '0%',
+										background: noIssues ? '#22C55E' : catBarColor[tone],
 									}}
 								/>
 							</div>
