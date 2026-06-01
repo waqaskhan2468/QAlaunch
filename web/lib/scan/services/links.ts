@@ -1,4 +1,4 @@
-import pLimit from 'p-limit';
+import { createConcurrencyLimit } from '@/lib/utils/concurrency-limit';
 import type { Page } from 'playwright-core';
 import type { LinkRecord, ScanResult, ValidatedLink } from '../types/scan.types';
 import { cleanError } from './navigation';
@@ -139,7 +139,7 @@ export async function collectLinks(
 
 	// p-limit gives a true sliding window: the next link starts the moment any
 	// slot frees, unlike a batch loop that waits for the slowest link per batch.
-	const limit = pLimit(LINK_CONCURRENCY);
+	const limit = createConcurrencyLimit(LINK_CONCURRENCY);
 	const validatedLinks = await Promise.all(
 		checkedLinks.map((link) => limit(() => validateLink(link))),
 	);

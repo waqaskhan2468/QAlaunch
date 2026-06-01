@@ -1,4 +1,4 @@
-import pLimit from 'p-limit';
+import { createConcurrencyLimit } from '@/lib/utils/concurrency-limit';
 import { runPageSpeedForUrl } from '@/lib/api/pagespeed';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import type { ScanPackage } from '@/types/zod';
@@ -105,7 +105,7 @@ export async function collectPageSpeedForPages(
 	// p-limit gives a true sliding window: the next URL starts the moment any
 	// slot frees, rather than waiting for the slowest URL in a fixed batch.
 	// Google PSI can take 15–75 s per call — the old batch loop wasted that gap.
-	const limit = pLimit(PAGESPEED_CONCURRENCY);
+	const limit = createConcurrencyLimit(PAGESPEED_CONCURRENCY);
 
 	await Promise.all(
 		pageUrls.map((pageUrl) =>

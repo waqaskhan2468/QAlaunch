@@ -1,4 +1,4 @@
-import pLimit from 'p-limit';
+import { createConcurrencyLimit } from '@/lib/utils/concurrency-limit';
 import {
 	analyzeWithClaude,
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT,
@@ -838,7 +838,7 @@ export async function runAiAnalysisForScan(
 	// page per batch. This removes the primary cause of 429 rate limits while
 	// keeping scans fast (3 concurrent calls still parallelises most scans).
 	// Per-page errors are caught independently so one failure never blocks the rest.
-	const claudeLimit = pLimit(CLAUDE_CONCURRENCY);
+	const claudeLimit = createConcurrencyLimit(CLAUDE_CONCURRENCY);
 	await Promise.all(
 		urls.map((pageUrl) =>
 			claudeLimit(() =>
