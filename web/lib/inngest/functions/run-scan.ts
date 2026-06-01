@@ -14,6 +14,7 @@ import { persistScanMetadataStep } from '@/lib/scan/steps/persistScanMetadata';
 import { prepareScannerStep } from '@/lib/scan/steps/prepareScanner';
 import { reloadScanStep } from '@/lib/scan/steps/reloadScan';
 import { scanBrowserOnlyStep } from '@/lib/scan/steps/scanBrowserOnly';
+import { discoverAdditionalPagesStep } from '@/lib/scan/steps/discoverAdditionalPages';
 import { persistFailedPageIndex } from '@/lib/scan/runner';
 import { sendReportEmailStep } from '@/lib/scan/steps/sendReportEmail';
 import type { ProcessPayload } from '@/lib/inngest/process.types';
@@ -103,11 +104,60 @@ export const runScan = inngest.createFunction(
 			}
 		};
 
+		// Always scan the homepage first and in isolation so its playwright_data.links
+		// is available for post-scan page discovery (needed when server-side HTML fetch
+		// fails and only 1 page was selected despite a paid package).
+		const homepageUrl = pagesToTest[0];
+		const remainingFromDetect = pagesToTest.slice(1);
+
+		await runPageScan(homepageUrl);
+
+		// ── Post-scan page discovery ──────────────────────────────────────
+		// For paid packages where detect-and-select-pages fell back to homepage-only
+		// (server-side fetch failed, website_type = 'unknown'), read the links that
+		// Playwright discovered on the homepage and queue additional page scans.
+		let allPagesToScan = remainingFromDetect;
+
+		if (remainingFromDetect.length === 0 && pkg !== 'free' && pkg !== 'basic') {
+			const discovered = (await step.run('discover-additional-pages', () =>
+				discoverAdditionalPagesStep({
+					scanId,
+					homepageUrl,
+					alreadySelectedUrls: pagesToTest,
+					pkg,
+				}),
+			)) as string[];
+
+			if (discovered.length > 0) {
+				// Persist the newly discovered pages as scan_pages rows so the AI
+				// step and finalize step can see them.
+				await step.run('persist-discovered-pages', async () => {
+					const { getServiceSupabase } = await import('@/lib/db/supabase');
+					const supabase = getServiceSupabase();
+					await supabase.from('scan_pages').upsert(
+						discovered.map((url: string) => ({
+							scan_id: scanId,
+							page_url: url,
+							page_role: 'other',
+						})),
+						{ onConflict: 'scan_id,page_url' },
+					);
+					await supabase
+						.from('scans')
+						.update({ pages_to_test: [...pagesToTest, ...discovered] })
+						.eq('id', scanId);
+				});
+
+				allPagesToScan = discovered;
+			}
+		}
+
+		// Run remaining page scans + PageSpeed collection in parallel.
 		await Promise.allSettled([
 			step.run('collect-pagespeed', () =>
-				collectPageSpeedStep(scanId, pagesToTest, pkg),
+				collectPageSpeedStep(scanId, [homepageUrl, ...allPagesToScan], pkg),
 			),
-			...pagesToTest.map((pageUrl) => runPageScan(pageUrl)),
+			...allPagesToScan.map((pageUrl) => runPageScan(pageUrl)),
 		]);
 
 		// ── Phase 3: Finalize browser phase ──────────────────────────────────
@@ -146,10 +196,14 @@ export const runScan = inngest.createFunction(
 		}
 
 		// ── Phase 4: Claude AI analysis (all pages parallel) ─────────────────
+		// allScannedPages includes both the original pagesToTest AND any pages
+		// discovered post-scan (when server-side fetch failed for paid packages).
+		const allScannedPages = [homepageUrl, ...allPagesToScan];
+
 		await step.run('clear-ai-issues', () => clearAiAnalysisStep(scanId));
 
 		await Promise.all(
-			pagesToTest.map((pageUrl) =>
+			allScannedPages.map((pageUrl) =>
 				step.run(`ai-page:${stepIdFromPageUrl(pageUrl)}`, () =>
 					analyzePageStep({
 						scanId,
@@ -162,7 +216,7 @@ export const runScan = inngest.createFunction(
 		);
 
 		await step.run('persist-ai-issues', () =>
-			persistAiIssuesStep({ scanId, pkg, pagesToTest }),
+			persistAiIssuesStep({ scanId, pkg, pagesToTest: allScannedPages }),
 		);
 
 		// ── Phase 5: Report + email (paid packages only) ──────────────────────
