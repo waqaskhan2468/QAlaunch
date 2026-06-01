@@ -2,7 +2,6 @@ import { Resend } from 'resend';
 import { generatePdfFromHtml } from '@/lib/scan/pdf';
 import { renderReportHtml } from './renderReportHtml';
 import type { ReportIssue, ReportScan, ReportScanPage } from './report.types';
-import { hydratePagesWithArtifacts } from '@/lib/artifacts';
 import type { getServiceSupabase } from '@/lib/db/supabase';
 
 type ServiceSupabase = ReturnType<typeof getServiceSupabase>;
@@ -133,17 +132,15 @@ async function fetchReportData(
 		};
 	});
 
-	const hydratedPages = await hydratePagesWithArtifacts(
-		(pages ?? []).map((p) => ({
-			page_url: (p as { page_url: string }).page_url,
-			playwright_data: (p as { playwright_data?: unknown }).playwright_data,
-			page_speed_data: (p as { page_speed_data?: unknown }).page_speed_data,
-		})),
-	);
+	const reportPages: ReportScanPage[] = (pages ?? []).map((p) => ({
+		page_url: (p as { page_url: string }).page_url,
+		playwright_data: (p as { playwright_data?: unknown }).playwright_data,
+		page_speed_data: (p as { page_speed_data?: unknown }).page_speed_data,
+	}));
 
 	return {
 		scan: scan as ReportScan,
-		pages: hydratedPages as unknown as ReportScanPage[],
+		pages: reportPages,
 		issues: normalizedIssues,
 	};
 }

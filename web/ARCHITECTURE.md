@@ -53,8 +53,7 @@ Steps run in `lib/inngest/functions/run-scan.ts`:
 3. **persist-metadata** — detection + selected pages on `scans`
 4. **prepare-scanner** — env + scanner row prep
 5. **collect-pagespeed** — PSI scores per URL → `scan_pages.page_speed_data`
-6. **scan-browser:{url}** — Playwright + artifact upload to storage (`lib/artifacts`)
-7. **scan-persist:{url}** — DB index only (`artifact_path`, screenshots; no browser rerun)
+6. **scan-browser:{url}** — Playwright scan; screenshots → storage, payload → `scan_pages` (`lib/scan/scan-writer`). On failure: **scan-persist-failed:{url}** writes a minimal `playwright_data` stub only.
 8. **finalize-scanner** — aggregate scanner status; exit early if failed
 9. **reload-scan** — fresh scan row for AI inputs
 10. **clear-ai-issues** — reset prior AI issues

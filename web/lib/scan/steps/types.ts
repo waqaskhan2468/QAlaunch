@@ -7,6 +7,15 @@ export type DetectAndSelectResult = {
 	selectedPages: SelectedScanPage[];
 };
 
+/** Returned from the per-page browser Inngest step. */
+export type PageBrowserStepResult = {
+	scanId: string;
+	pageUrl: string;
+	scanOk: boolean;
+	screenshotDesktopUrl: string | null;
+	screenshotMobileUrl: string | null;
+};
+
 /** Subset of `scans` row returned after PageSpeed + scanner steps. */
 export type ScanRowAfterReload = {
 	status: string | null;

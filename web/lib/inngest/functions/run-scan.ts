@@ -17,6 +17,7 @@ import { scanBrowserOnlyStep } from '@/lib/scan/steps/scanBrowserOnly';
 import { persistFailedPageIndex } from '@/lib/scan/runner';
 import { sendReportEmailStep } from '@/lib/scan/steps/sendReportEmail';
 import type { ProcessPayload } from '@/lib/inngest/process.types';
+import type { DetectAndSelectResult } from '@/lib/scan/steps/types';
 
 function getScanConcurrencyLimit(): number {
 	const raw = Number.parseInt(process.env.INNGEST_SCAN_CONCURRENCY ?? '', 10);
@@ -32,8 +33,8 @@ function getScanConcurrencyLimit(): number {
  *   3.  persist-metadata         — save detection result to DB
  *   4.  prepare-scanner          — pre-flight checks
  *   5a. collect-pagespeed        — Google PSI for all pages   ─┐ parallel
- *   5b. scan-browser:{url}        — Browserbase + Playwright + artifact upload ─┐
- *   5c. scan-persist:{url}        — DB index only (retries without browser)     ─┘
+ *   5b. scan-browser:{url}        — Browserbase + Playwright → DB + screenshots ─┐
+ *       scan-persist-failed:{url} — minimal DB stub when browser step fails       ─┘
  *   6.  finalize-scanner         — aggregate page statuses; early-exit if all failed
  *   7.  reload-scan              — re-fetch scan row for AI input
  *   8.  clear-ai-issues          — wipe stale AI results
@@ -69,10 +70,10 @@ export const runScan = inngest.createFunction(
 		// ── Phase 1: Discover pages ─────────────────────────────────────────
 		await step.run('mark-crawling', () => markCrawlingStep(scanId));
 
-		const { detection, pagesToTest, selectedPages } = await step.run(
+		const { detection, pagesToTest, selectedPages } = (await step.run(
 			'detect-and-select-pages',
 			() => detectAndSelectPagesStep(targetUrl, pkg),
-		);
+		)) as DetectAndSelectResult;
 
 		await step.run('persist-metadata', () =>
 			persistScanMetadataStep({

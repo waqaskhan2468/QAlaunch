@@ -1,6 +1,6 @@
 import type { ServiceSupabase } from '@/lib/db/supabase';
 import { updateScanPageRecord } from '@/lib/db/supabase-retry';
-import { buildPlaywrightIndexPayload } from '@/lib/artifacts';
+import { buildPlaywrightIndexPayload } from '@/lib/scan/playwright-payload';
 import type { ScanStatus } from '@/types/zod';
 
 class ScannerError extends Error {

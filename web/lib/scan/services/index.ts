@@ -1,5 +1,5 @@
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import type { ScanWriter } from '@/lib/artifacts/incremental';
+import type { ScanWriter } from '@/lib/scan/scan-writer';
 import type { BrowserbaseSession } from '@/lib/scan/browser';
 import {
 	closeBrowserSession,
@@ -22,6 +22,7 @@ import { captureResponsiveFromPage, startMobileNavigation } from './responsive';
 import { blockThirdPartyResources } from './resourceBlocklist';
 import { captureDesktopScreenshot } from './screenshots';
 import { collectBrokenStates } from './brokenStates';
+import { collectInteractionTests } from './interactionTests';
 import { logScanTiming } from './scan-timing';
 
 // Raised from 180 s → 240 s. The 180 s budget was too tight once Phase 1
@@ -261,6 +262,7 @@ async function scanSingleUrl(
 			r_interactive,
 			r_seoData,
 			r_axe,
+			r_interactionTests,
 		] = await Promise.allSettled([
 			new Promise<Buffer | undefined>((resolve) => {
 				const nodeTimer = setTimeout(() => {
@@ -296,6 +298,9 @@ async function scanSingleUrl(
 			runStep(result.steps, 'axe', () =>
 				collectAxeViolations(page, stepTiming),
 			),
+			runStep(result.steps, 'interaction_tests', () =>
+				collectInteractionTests(page, url, stepTiming),
+			),
 		]);
 
 		const desktopScreenshot = settled(r_screenshot);
@@ -308,6 +313,7 @@ async function scanSingleUrl(
 		result.interactive = settled(r_interactive);
 		result.seoData = settled(r_seoData);
 		result.axe = settled(r_axe);
+		result.interactionTests = settled(r_interactionTests);
 
 		logScanTiming('phase1_collectors', Date.now() - phase1StartedAt, {
 			...stepTiming,

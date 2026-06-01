@@ -1,28 +1,38 @@
+
+
+
+
+
+
 import { getServiceSupabase } from '@/lib/db/supabase';
 import {
 	isRetryableNetworkError,
 	updateScanPageRecord,
 } from '@/lib/db/supabase-retry';
+import { buildPlaywrightPayloadFromScanResult } from '@/lib/scan/playwright-payload';
+import {
+	pageDesktopScreenshotPath,
+	pageMobileScreenshotPath,
+} from '@/lib/scan/screenshot-paths';
 import { withRetry } from '@/lib/scan/services/retry';
+import { logScanTiming } from '@/lib/scan/services/scan-timing';
+import type { PageBrowserStepResult } from '@/lib/scan/steps/types';
 import type { ScanResult } from '@/lib/scan/types/scan.types';
 import {
 	compressScreenshotBuffer,
 	type ImageCompressionProfile,
 } from '@/lib/scan/utils/imageCompression';
-import { buildPlaywrightPayloadFromScanResult } from './playwright-payload';
-import {
-	pageDesktopScreenshotPath,
-	pageMobileScreenshotPath,
-} from './paths';
-import type { PageBrowserStepResult } from './types';
-import { getScreenshotBucket } from './upload';
-import { logScanTiming } from '@/lib/scan/services/scan-timing';
+
+const SCREENSHOT_BUCKET =
+	process.env.SUPABASE_SCREENSHOT_BUCKET || 'scan-screenshots';
 
 const UPLOAD_ATTEMPTS = 2;
 const UPLOAD_DELAY_MS = 1_000;
-// Per-attempt ceiling kept short so upload retries can't consume the page budget.
-// Genuine Supabase uploads finish in 1–4 s; 8 s catches TCP hangs without over-spending.
 const SCREENSHOT_UPLOAD_TIMEOUT_MS = 8_000;
+
+function getScreenshotBucket(): string {
+	return SCREENSHOT_BUCKET;
+}
 
 function getErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : 'unknown_error';
@@ -60,15 +70,7 @@ async function uploadScreenshotBytes(
 }
 
 /**
- * Lightweight scan writer.
- *
- * Uploads screenshots to the public screenshot bucket during the scan, then
- * writes ALL scan data directly to the scan_pages DB row in finalize() — no
- * Storage JSON files (no slices, no artifact.json).
- *
- * DB write happens once, at the very end, so there are no incremental partial
- * checkpoints. The trade-off is simpler code and fewer Storage round-trips at
- * the cost of losing incremental recovery for partially-completed scans.
+ * Uploads screenshots during the scan, then writes scan_pages in finalize().
  */
 export class ScanWriter {
 	private desktopPublicUrl: string | null = null;
@@ -79,10 +81,6 @@ export class ScanWriter {
 		private readonly pageUrl: string,
 	) {}
 
-	/**
-	 * Returns true if the screenshot for the given label was successfully
-	 * uploaded. Used by index.ts to decide whether a retry upload is needed.
-	 */
 	hasScreenshot(label: 'desktop' | 'mobile'): boolean {
 		return label === 'desktop' ?
 				this.desktopPublicUrl !== null
@@ -158,12 +156,6 @@ export class ScanWriter {
 		}
 	}
 
-	/**
-	 * Write all scan data to the DB row in one shot, return the step result.
-	 *
-	 * playwright_data (version 4) holds the complete payload that the AI analysis
-	 * step reads directly from the DB — no Storage download needed.
-	 */
 	async finalize(result: ScanResult): Promise<PageBrowserStepResult> {
 		const playwrightData = buildPlaywrightPayloadFromScanResult(result);
 

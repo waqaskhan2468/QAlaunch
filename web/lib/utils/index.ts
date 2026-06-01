@@ -1,5 +1,2 @@
+/** Client-safe utilities only. Import server helpers from their module paths. */
 export { cn } from './cn';
-export * from './detect';
-export * from './page-selection';
-export * from './url';
-export * from './savePageSpeedForPage';

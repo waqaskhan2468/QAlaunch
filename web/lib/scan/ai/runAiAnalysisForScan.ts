@@ -21,7 +21,6 @@ import {
 	formatErrorWithCause,
 	updateScanPageAiAnalysis,
 } from '@/lib/db/supabase-retry';
-import { resolvePageScanData } from '@/lib/artifacts';
 import { failScan, toUserFacingScanError } from '@/lib/scan/fail-scan';
 import type { ClaudeIssue } from './types';
 import type { ScanPackage } from '@/types/zod';
@@ -557,9 +556,7 @@ export async function analyzeScanPageWithClaude(
 	pkg?: ScanPackage,
 ): Promise<void> {
 	const page = await loadScanPageRow(supabase, scanId, pageUrl);
-	const scanData = await resolvePageScanData({
-		playwright_data: page.playwright_data,
-	});
+	const scanData = page.playwright_data ?? null;
 	const desktop = page.screenshot_desktop_url;
 	const mobileUrl = getPrimaryMobileScreenshotUrl(page);
 

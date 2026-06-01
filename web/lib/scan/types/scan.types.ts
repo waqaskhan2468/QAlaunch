@@ -205,6 +205,8 @@ export type ScanResult = {
 	/** Stuck loading, bad text tokens, empty lists, etc. */
 	brokenStates?: ProgrammaticPayload;
 	responseSecurityMeta?: ResponseSecurityMeta;
+	/** Active interaction tests: 404, form validation, search, CTA, nav links. */
+	interactionTests?: import('@/lib/scan/services/interactionTests').InteractionTestsPayload;
 };
 
 // ─── Axe ───────────────────────────────────────────────────────────────────

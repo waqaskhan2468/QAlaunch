@@ -1,13 +1,13 @@
 import { NonRetriableError } from 'inngest';
-import { ScanWriter } from '@/lib/artifacts/incremental';
 import { formatErrorWithCause } from '@/lib/db/supabase-retry';
 import { toUserFacingScanError } from '@/lib/scan/fail-scan';
+import { ScanWriter } from '@/lib/scan/scan-writer';
 import { runPlaywrightScanForUrl } from '@/lib/scan/services/index';
 import {
 	isBrowserNonRetriable,
 	isBrowserRetriable,
 } from '@/lib/scan/steps/scan-errors';
-import type { PageBrowserStepResult } from '@/lib/artifacts/types';
+import type { PageBrowserStepResult } from '@/lib/scan/steps/types';
 
 function slog(event: string, fields: Record<string, unknown>): void {
 	console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...fields }));
@@ -33,7 +33,6 @@ export async function scanBrowserOnlyStep(input: {
 			steps: result.steps.length,
 		});
 
-		// Writes all scan data to DB in one shot — no Storage artifact JSON.
 		return await writer.finalize(result);
 	} catch (error: unknown) {
 		slog('scan:browser_error', {

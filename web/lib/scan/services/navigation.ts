@@ -223,7 +223,7 @@ async function handlePotentialChallenge(
 export async function safeGoto(
 	page: Page,
 	url: string,
-	options?: { timeout?: number; timing?: ScanTimingFields },
+	options?: { timeout?: number; timing?: ScanTimingFields & Record<string, unknown> },
 ): Promise<{ navigation: NavigationResult; response: Response | null }> {
 	const startedAt = Date.now();
 	const navTimeout = options?.timeout ?? getNavTimeoutMs();
