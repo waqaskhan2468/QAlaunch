@@ -306,6 +306,7 @@ function buildAnalysisPromptAfterImages(input: {
 	const brokenStates = pd?.brokenStates ?? null;
 	const programmaticRollup = pd?.programmaticRollup ?? null;
 	const responseSecurity = pd?.responseSecurity ?? null;
+	const interactionTests = pd?.interactionTests ?? null;
 
 	const externalLinksSameTab = allLinks
 		.filter((link) => {
@@ -393,6 +394,12 @@ function buildAnalysisPromptAfterImages(input: {
 			null,
 			2,
 		),
+		'',
+		'INTERACTION TEST RESULTS (automated checks — treat status="fail" as high-signal findings):',
+		'Each entry: { id, name, status (pass/fail/skip/error), detail }.',
+		'Report a finding for every status="fail" entry not already covered by brokenStates or axe above.',
+		'Do NOT report skip or pass entries as issues.',
+		JSON.stringify(interactionTests, null, 2),
 		'',
 	].join('\n');
 }

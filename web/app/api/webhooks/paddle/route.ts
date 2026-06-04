@@ -6,6 +6,16 @@ import { scanPackageSchema } from "@/types/zod";
 
 export const runtime = "nodejs";
 
+const PAID_TRANSACTION_EVENTS = new Set([
+	'transaction.paid',
+	'transaction.completed',
+]);
+
+function isPaidTransaction(eventType: string | undefined, status: string | undefined): boolean {
+	if (!eventType || !PAID_TRANSACTION_EVENTS.has(eventType)) return false;
+	return status === 'paid' || status === 'completed';
+}
+
 export async function POST(req: Request) {
   const body = await req.text();
   const signature = req.headers.get("paddle-signature") ?? "";
@@ -37,11 +47,11 @@ export async function POST(req: Request) {
 
   const supabase = getServiceSupabase();
 
-  if (eventType !== "transaction.completed") {
-    return NextResponse.json({ ok: true, ignored: true });
+  if (!isPaidTransaction(eventType, eventData?.status)) {
+    return NextResponse.json({ ok: true, ignored: true, eventType });
   }
 
-  if (!eventData?.id || eventData.status !== "completed") {
+  if (!eventData?.id) {
     return NextResponse.json({ error: "invalid_transaction_data" }, { status: 400 });
   }
 
