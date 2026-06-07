@@ -37,18 +37,22 @@ export function toUserFacingScanError(error: unknown): string {
 	if (message.includes('all_responsive_viewports_failed')) {
 		return 'Mobile layout capture failed. The desktop scan may still be partial.';
 	}
+	// These two checks use specific literal substrings unique to their throw
+	// sites — check them before the broad timeout/abort regex below, since
+	// "Invalid Claude issues payload: <zod error message>" can otherwise
+	// coincidentally match /timed?\s*out/i and mask the real cause.
+	if (message.includes('claude_tool_use_truncated')) {
+		return 'AI response was cut short (token limit). Please try again.';
+	}
+	if (message.includes('Invalid Claude issues payload')) {
+		return 'Could not build the report from AI output. Please try again.';
+	}
 	if (
 		message.includes('This operation was aborted') ||
 		message.includes('AbortError') ||
 		/timed?\s*out/i.test(message)
 	) {
 		return 'Report generation timed out. Please try again.';
-	}
-	if (message.includes('claude_tool_use_truncated')) {
-		return 'AI response was cut short (token limit). Please try again.';
-	}
-	if (message.includes('Invalid Claude issues payload')) {
-		return 'Could not build the report from AI output. Please try again.';
 	}
 	if (/Claude API error:\s*429/.test(message)) {
 		return 'AI service is busy. Please wait a moment and try again.';

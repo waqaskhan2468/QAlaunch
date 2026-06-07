@@ -678,5 +678,29 @@ export function parseClaudeIssues(raw: unknown): ClaudeIssue[] {
 		);
 	}
 
+	// Both schemas rejected the payload — log enough to diagnose schema drift
+	// (which fields/paths failed and what shape Claude actually returned)
+	// without dumping potentially large issue text into logs.
+	const issuesSummary = Array.isArray((normalized as { issues?: unknown[] })?.issues)
+		? (normalized as { issues: Array<Record<string, unknown>> }).issues.map(
+				(issue: Record<string, unknown>) => ({
+					category: issue?.category,
+					severity: issue?.severity,
+					evidence: issue?.evidence,
+					confidence: issue?.confidence,
+				}),
+			)
+		: normalized;
+
+	const summarizeZodIssues = (
+		issues: Array<{ path: Array<string | number>; message: string }>,
+	) => issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }));
+
+	console.error('[claude] issues payload failed validation', {
+		primaryErrors: summarizeZodIssues(parsed.error.issues),
+		legacyErrors: summarizeZodIssues(legacy.error.issues),
+		issuesSummary,
+	});
+
 	throw new Error(`Invalid Claude issues payload: ${parsed.error.message}`);
 }

@@ -3,7 +3,7 @@ import { SCAN_PROCESS_REQUESTED } from '@/lib/inngest/events';
 import { stepIdFromPageUrl } from '@/lib/inngest/step-id';
 import { analyzePageStep } from '@/lib/scan/steps/analyzePage';
 import { clearAiAnalysisStep } from '@/lib/scan/steps/clearAiAnalysis';
-import { collectPageSpeedStep } from '@/lib/scan/steps/collectPageSpeed';
+import { collectPageSpeedForPageStep } from '@/lib/scan/steps/collectPageSpeed';
 import { detectAndSelectPagesStep } from '@/lib/scan/steps/detectAndSelectPages';
 import { finalizeScannerStep } from '@/lib/scan/steps/finalizeScanner';
 import { generatePdfStep } from '@/lib/scan/steps/generatePdf';
@@ -33,9 +33,9 @@ function getScanConcurrencyLimit(): number {
  *   2.  detect-and-select-pages  — homepage HTML → page list + website type
  *   3.  persist-metadata         — save detection result to DB
  *   4.  prepare-scanner          — pre-flight checks
- *   5a. collect-pagespeed        — Google PSI for all pages   ─┐ parallel
- *   5b. scan-browser:{url}        — Browserbase + Playwright → DB + screenshots ─┐
- *       scan-persist-failed:{url} — minimal DB stub when browser step fails       ─┘
+ *   5a. collect-pagespeed:{url}   — Google PSI per page, isolated + best-effort ─┐
+ *   5b. scan-browser:{url}        — Browserbase + Playwright → DB + screenshots ─┤ parallel
+ *       scan-persist-failed:{url} — minimal DB stub when browser step fails     ─┘
  *   6.  finalize-scanner         — aggregate page statuses; early-exit if all failed
  *   7.  reload-scan              — re-fetch scan row for AI input
  *   8.  clear-ai-issues          — wipe stale AI results
@@ -104,6 +104,21 @@ export const runScan = inngest.createFunction(
 			}
 		};
 
+		// PageSpeed is supplementary report data — isolate each page in its own
+		// step so one slow site can't stack PSI latency into a single invocation
+		// and trip Vercel's FUNCTION_INVOCATION_TIMEOUT. A failed page simply
+		// keeps page_speed_data null; it never fails the scan.
+		const runPageSpeedScan = async (pageUrl: string) => {
+			const slug = stepIdFromPageUrl(pageUrl);
+			try {
+				await step.run(`collect-pagespeed:${slug}`, () =>
+					collectPageSpeedForPageStep(scanId, pageUrl, pkg),
+				);
+			} catch {
+				// best-effort: leave page_speed_data null for this page
+			}
+		};
+
 		// Always scan the homepage first and in isolation so its playwright_data.links
 		// is available for post-scan page discovery (needed when server-side HTML fetch
 		// fails and only 1 page was selected despite a paid package).
@@ -152,10 +167,10 @@ export const runScan = inngest.createFunction(
 			}
 		}
 
-		// Run remaining page scans + PageSpeed collection in parallel.
+		// Run remaining page scans + per-page PageSpeed collection in parallel.
 		await Promise.allSettled([
-			step.run('collect-pagespeed', () =>
-				collectPageSpeedStep(scanId, [homepageUrl, ...allPagesToScan], pkg),
+			...[homepageUrl, ...allPagesToScan].map((pageUrl) =>
+				runPageSpeedScan(pageUrl),
 			),
 			...allPagesToScan.map((pageUrl) => runPageScan(pageUrl)),
 		]);

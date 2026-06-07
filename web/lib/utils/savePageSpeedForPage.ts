@@ -1,4 +1,3 @@
-import { createConcurrencyLimit } from '@/lib/utils/concurrency-limit';
 import { runPageSpeedForUrl } from '@/lib/api/pagespeed';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import type { ScanPackage } from '@/types/zod';
@@ -6,12 +5,6 @@ import type { ScanPackage } from '@/types/zod';
 /** Free scans use the same mobile + desktop strategies as paid; slightly shorter per-call timeout. */
 const FREE_PAGESPEED_TIMEOUT_MS = 75_000;
 
-function getPageSpeedConcurrency(): number {
-	const raw = Number.parseInt(process.env.PAGESPEED_CONCURRENCY ?? '', 10);
-	return Number.isFinite(raw) && raw >= 1 ? raw : 3;
-}
-
-const PAGESPEED_CONCURRENCY = getPageSpeedConcurrency();
 const PAGE_SPEED_DB_RETRIES = 2;
 const PAGE_SPEED_DB_RETRY_DELAY_MS = 1_000;
 
@@ -94,22 +87,4 @@ export async function savePageSpeedForPage(
 	);
 
 	await updatePageSpeedDataWithRetry(supabase, scanId, pageUrl, pageSpeedData);
-}
-
-export async function collectPageSpeedForPages(
-	supabase: SupabaseClient,
-	scanId: string,
-	pageUrls: string[],
-	pkg: ScanPackage,
-): Promise<void> {
-	// p-limit gives a true sliding window: the next URL starts the moment any
-	// slot frees, rather than waiting for the slowest URL in a fixed batch.
-	// Google PSI can take 15–75 s per call — the old batch loop wasted that gap.
-	const limit = createConcurrencyLimit(PAGESPEED_CONCURRENCY);
-
-	await Promise.all(
-		pageUrls.map((pageUrl) =>
-			limit(() => savePageSpeedForPage(supabase, scanId, pageUrl, pkg)),
-		),
-	);
 }

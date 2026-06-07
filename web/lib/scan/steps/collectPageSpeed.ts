@@ -1,12 +1,12 @@
 import { getServiceSupabase } from '@/lib/db/supabase';
-import { collectPageSpeedForPages } from '@/lib/utils/savePageSpeedForPage';
+import { savePageSpeedForPage } from '@/lib/utils/savePageSpeedForPage';
 import type { ScanPackage } from '@/types/zod';
 
-export async function collectPageSpeedStep(
+export async function collectPageSpeedForPageStep(
 	scanId: string,
-	pagesToTest: string[],
+	pageUrl: string,
 	pkg: ScanPackage,
 ): Promise<void> {
 	const supabase = getServiceSupabase();
-	await collectPageSpeedForPages(supabase, scanId, pagesToTest, pkg);
+	await savePageSpeedForPage(supabase, scanId, pageUrl, pkg);
 }
