@@ -96,6 +96,20 @@ export async function collectSeoData(
 			!!document.querySelector('link[rel="icon"]') ||
 			!!document.querySelector('link[rel="shortcut icon"]'),
 		language: document.documentElement.lang || null,
+		// ── Enriched SEO fields ──────────────────────────────────────────────
+		titleLength: document.title.length,
+		metaDescriptionLength: (document.querySelector('meta[name="description"]')?.getAttribute('content') ?? '').length,
+		multipleH1: document.querySelectorAll('h1').length > 1,
+		h1Count: document.querySelectorAll('h1').length,
+		robotsMeta: document.querySelector('meta[name="robots"]')?.getAttribute('content') ?? null,
+		hasNoIndex: (document.querySelector('meta[name="robots"]')?.getAttribute('content') ?? '').toLowerCase().includes('noindex'),
+		hasSchemaOrg: !!(document.querySelector('script[type="application/ld+json"]') || document.querySelector('[itemtype]')),
+		hasTwitterCard: !!document.querySelector('meta[name="twitter:card"]'),
+		openGraphComplete: !!(
+			document.querySelector('meta[property="og:title"]') &&
+			document.querySelector('meta[property="og:description"]') &&
+			document.querySelector('meta[property="og:image"]')
+		),
 	}));
 	logScanTiming('seo', Date.now() - startedAt, {
 		...timing,

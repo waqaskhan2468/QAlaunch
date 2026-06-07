@@ -396,10 +396,18 @@ function buildAnalysisPromptAfterImages(input: {
 		),
 		'',
 		'INTERACTION TEST RESULTS (automated checks — treat status="fail" as high-signal findings):',
-		'Each entry: { id, name, status (pass/fail/skip/error), detail }.',
-		'Report a finding for every status="fail" entry not already covered by brokenStates or axe above.',
-		'Do NOT report skip or pass entries as issues.',
-		JSON.stringify(interactionTests, null, 2),
+		'Each entry: { id, name, status, detail }. Only failed/errored tests are listed.',
+		'Report a finding for every entry not already covered by brokenStates or axe above.',
+		JSON.stringify(
+			(Array.isArray((interactionTests as Record<string, unknown> | null)?.results)
+				? ((interactionTests as Record<string, unknown>).results as Array<Record<string, unknown>>)
+						.filter((r) => r.status === 'fail' || r.status === 'error')
+						.map(({ id, name, status, detail }) => ({ id, name, status, detail }))
+				: []
+			),
+			null,
+			2,
+		),
 		'',
 	].join('\n');
 }

@@ -706,6 +706,188 @@ async function testLayoutShift(page: Page): Promise<InteractionTestResult> {
 	}
 }
 
+// ─── Test 13: Placeholder / lorem-ipsum text ─────────────────────────────────
+
+async function testPlaceholderText(page: Page): Promise<InteractionTestResult> {
+	const id = 'test-placeholder-text';
+	const name = 'Placeholder / dummy text';
+	const startedAt = Date.now();
+	const PATTERNS = ['lorem ipsum', 'coming soon', 'placeholder', 'sample text', 'your text here', 'todo', 'fixme'];
+
+	try {
+		const found = await page.evaluate((patterns) => {
+			const body = (document.body?.innerText ?? '').toLowerCase();
+			return patterns.filter((p) => body.includes(p));
+		}, PATTERNS);
+
+		if (found.length === 0)
+			return makeResult(id, name, 'pass', startedAt, 'No placeholder text detected');
+
+		return makeResult(id, name, 'fail', startedAt,
+			`Placeholder text found on page: "${found.slice(0, 3).join('", "')}". Looks unfinished to visitors.`);
+	} catch (error) {
+		return makeResult(id, name, 'error', startedAt, error instanceof Error ? error.message : 'test error');
+	}
+}
+
+// ─── Test 14: Missing legal links ────────────────────────────────────────────
+
+async function testLegalLinks(page: Page): Promise<InteractionTestResult> {
+	const id = 'test-missing-legal-links';
+	const name = 'Legal links (Privacy / Terms)';
+	const startedAt = Date.now();
+
+	try {
+		const { hasPrivacy, hasTerms } = await page.evaluate(() => {
+			const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+				.map((a) => a.innerText.toLowerCase());
+			const bodyText = document.body.innerText.toLowerCase();
+			return {
+				hasPrivacy: links.some((t) => t.includes('privacy')) || bodyText.includes('privacy policy'),
+				hasTerms:   links.some((t) => t.includes('terms'))   || bodyText.includes('terms of service') || bodyText.includes('terms & conditions'),
+			};
+		});
+
+		const missing: string[] = [];
+		if (!hasPrivacy) missing.push('Privacy Policy');
+		if (!hasTerms)   missing.push('Terms of Service');
+
+		if (missing.length === 0)
+			return makeResult(id, name, 'pass', startedAt, 'Privacy Policy and Terms of Service links present');
+
+		return makeResult(id, name, 'fail', startedAt,
+			`Missing legal page link(s): ${missing.join(', ')}. Required for GDPR compliance and visitor trust.`);
+	} catch (error) {
+		return makeResult(id, name, 'error', startedAt, error instanceof Error ? error.message : 'test error');
+	}
+}
+
+// ─── Test 15: Stale copyright year ───────────────────────────────────────────
+
+async function testStaleCopyright(page: Page): Promise<InteractionTestResult> {
+	const id = 'test-stale-copyright';
+	const name = 'Stale copyright year';
+	const startedAt = Date.now();
+	const currentYear = new Date().getFullYear();
+
+	try {
+		const copyrightYear = await page.evaluate(() => {
+			const text = document.body?.innerText ?? '';
+			const match = text.match(/©\s*(\d{4})/);
+			return match ? parseInt(match[1], 10) : null;
+		});
+
+		if (copyrightYear === null)
+			return makeResult(id, name, 'skip', startedAt, 'No copyright year found');
+
+		if (currentYear - copyrightYear <= 1)
+			return makeResult(id, name, 'pass', startedAt, `Copyright year ${copyrightYear} is current`);
+
+		return makeResult(id, name, 'fail', startedAt,
+			`Copyright shows © ${copyrightYear} — ${currentYear - copyrightYear} year(s) out of date. Makes the site look abandoned and unmaintained.`);
+	} catch (error) {
+		return makeResult(id, name, 'error', startedAt, error instanceof Error ? error.message : 'test error');
+	}
+}
+
+// ─── Test 16: Phone / email not tappable ─────────────────────────────────────
+
+async function testTappableContacts(page: Page): Promise<InteractionTestResult> {
+	const id = 'test-tappable-contacts';
+	const name = 'Tappable phone & email links';
+	const startedAt = Date.now();
+
+	try {
+		const issues = await page.evaluate(() => {
+			const phoneRe = /(\+?\d[\d\s\-(). ]{7,}\d)/g;
+			const emailRe = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+			const bad: string[] = [];
+
+			document.querySelectorAll<HTMLElement>('p, li, span, div, footer, address').forEach((el) => {
+				if (el.closest('a')) return;
+				// Only check direct text content, not full innerHTML
+				const text = Array.from(el.childNodes)
+					.filter((n) => n.nodeType === Node.TEXT_NODE)
+					.map((n) => n.textContent ?? '')
+					.join('');
+				if (phoneRe.test(text)) bad.push(`Phone not linked: "${text.trim().slice(0, 40)}"`);
+				phoneRe.lastIndex = 0;
+				if (emailRe.test(text)) bad.push(`Email not linked: "${text.trim().slice(0, 40)}"`);
+				emailRe.lastIndex = 0;
+			});
+			return bad.slice(0, 4);
+		});
+
+		if (issues.length === 0)
+			return makeResult(id, name, 'pass', startedAt, 'All phone numbers and emails are tappable links');
+
+		return makeResult(id, name, 'fail', startedAt,
+			`${issues.length} contact detail(s) are plain text — mobile visitors cannot tap to call or email. ${issues[0]}`);
+	} catch (error) {
+		return makeResult(id, name, 'error', startedAt, error instanceof Error ? error.message : 'test error');
+	}
+}
+
+// ─── Test 17: Dead social media links ────────────────────────────────────────
+
+async function testSocialLinks(page: Page): Promise<InteractionTestResult> {
+	const id = 'test-social-links';
+	const name = 'Social media link health';
+	const startedAt = Date.now();
+	const SOCIAL_DOMAINS = ['facebook.com', 'twitter.com', 'x.com', 'instagram.com', 'linkedin.com', 'youtube.com', 'tiktok.com'];
+
+	try {
+		const links = await page.evaluate((domains) =>
+			Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+				.filter((a) => domains.some((d) => (a.getAttribute('href') ?? '').includes(d)))
+				.map((a) => ({ href: a.getAttribute('href') ?? '', text: a.innerText.trim().slice(0, 30) })),
+			SOCIAL_DOMAINS,
+		);
+
+		if (links.length === 0)
+			return makeResult(id, name, 'skip', startedAt, 'No social media links found');
+
+		const dead = links.filter((l) =>
+			l.href === '#' ||
+			/^https?:\/\/(www\.)?(facebook|twitter|x|instagram|linkedin|youtube|tiktok)\.com\/?$/.test(l.href),
+		);
+
+		if (dead.length === 0)
+			return makeResult(id, name, 'pass', startedAt, `${links.length} social link(s) appear to point to real profiles`);
+
+		return makeResult(id, name, 'fail', startedAt,
+			`${dead.length} social link(s) point to a domain root or placeholder — no real profile linked: ${dead.map((l) => l.href).join(', ')}`);
+	} catch (error) {
+		return makeResult(id, name, 'error', startedAt, error instanceof Error ? error.message : 'test error');
+	}
+}
+
+// ─── Test 18: Favicon presence ───────────────────────────────────────────────
+
+async function testFavicon(page: Page): Promise<InteractionTestResult> {
+	const id = 'test-favicon';
+	const name = 'Favicon presence';
+	const startedAt = Date.now();
+
+	try {
+		const has = await page.evaluate(() =>
+			!!(
+				document.querySelector('link[rel="icon"]') ||
+				document.querySelector('link[rel="shortcut icon"]') ||
+				document.querySelector('link[rel="apple-touch-icon"]')
+			),
+		);
+
+		if (has)
+			return makeResult(id, name, 'pass', startedAt, 'Favicon is present');
+
+		return makeResult(id, name, 'fail', startedAt,
+			'No favicon found. Browser tabs show a blank icon, making the site look unfinished and hard to identify when users have multiple tabs open.');
+	} catch (error) {
+		return makeResult(id, name, 'error', startedAt, error instanceof Error ? error.message : 'test error');
+	}
+}
+
 // ─── Main collector ───────────────────────────────────────────────────────────
 
 /**
@@ -741,6 +923,13 @@ export async function collectInteractionTests(
 		() => testFontSizeReadability(page),
 		() => testAboveFoldCta(page),
 		() => testLayoutShift(page),
+		// ── Content & trust tests ────────────────────────────────────────────
+		() => testPlaceholderText(page),
+		() => testLegalLinks(page),
+		() => testStaleCopyright(page),
+		() => testTappableContacts(page),
+		() => testSocialLinks(page),
+		() => testFavicon(page),
 	];
 
 	for (const test of tests) {
