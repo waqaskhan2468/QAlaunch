@@ -29,6 +29,37 @@ function getErrorMessage(error: unknown): string {
 }
 
 /**
+ * Serialises an unknown error (including Supabase `StorageError` /
+ * `StorageApiError`, which carry useful non-enumerable extras like
+ * `status` / `statusCode`) into a plain object safe for structured logging.
+ * `Error.message`/`.name`/`.stack` are non-enumerable, so a bare `{...error}`
+ * spread loses them — pull them out explicitly.
+ */
+function describeError(error: unknown): Record<string, unknown> {
+	if (error instanceof Error) {
+		const extras: Record<string, unknown> = {};
+		for (const key of Object.keys(error)) {
+			extras[key] = (error as unknown as Record<string, unknown>)[key];
+		}
+		// Supabase storage errors expose these but they are not always own-keys.
+		const maybe = error as unknown as {
+			status?: unknown;
+			statusCode?: unknown;
+		};
+		if (maybe.status !== undefined) extras.status = maybe.status;
+		if (maybe.statusCode !== undefined) extras.statusCode = maybe.statusCode;
+
+		return {
+			name: error.name,
+			message: error.message,
+			stack: error.stack,
+			...extras,
+		};
+	}
+	return { message: String(error) };
+}
+
+/**
  * Converts a URL or an already-sanitized path into a safe storage path segment.
  * e.g. "https://example.com/foo" → "example-com-foo"
  */
@@ -163,6 +194,13 @@ async function uploadPdfToStorage(
 	targetUrl: string,
 	pdfBuffer: Buffer,
 ): Promise<string> {
+	if (!REPORT_BUCKET) {
+		throw new Error(
+			'SUPABASE_REPORT_BUCKET is not set — cannot upload report PDF. ' +
+				'Set the env var to an existing Supabase storage bucket (e.g. "reports").',
+		);
+	}
+
 	const filePath = `${scanId}/${sanitizeForPath(targetUrl)}-qa-report.pdf`;
 
 	const { error } = await supabase.storage
@@ -172,7 +210,19 @@ async function uploadPdfToStorage(
 			upsert: true,
 		});
 
-	if (error) throw new Error(`Failed to upload PDF: ${error.message}`);
+	if (error) {
+		// Log the full storage error — `.message` alone hides the status code
+		// ("Bucket not found" → 404, RLS/permission → 403) that pinpoints whether
+		// the bucket is missing or the service-role key lacks access.
+		console.error('[report] PDF upload to storage failed', {
+			scanId,
+			bucket: REPORT_BUCKET,
+			filePath,
+			pdfBytes: pdfBuffer.byteLength,
+			error: describeError(error),
+		});
+		throw new Error(`Failed to upload PDF: ${error.message}`);
+	}
 
 	return filePath;
 }
@@ -268,11 +318,21 @@ export async function generateAndStorePdfReport(
 	targetUrl: string;
 	userEmail: string | null;
 }> {
+	// Track which stage we're in so a failure log names the real culprit.
+	// toUserFacingScanError() later flattens everything to a generic phrase,
+	// so this structured log is the only place the true cause is visible.
+	let stage: 'fetch-data' | 'render-html' | 'generate-pdf' | 'upload' | 'persist-url' =
+		'fetch-data';
 	try {
 		const { scan, pages, issues } = await fetchReportData(supabase, scanId);
 
+		stage = 'render-html';
 		const html = renderReportHtml({ scan, pages, issues });
+
+		stage = 'generate-pdf';
 		const pdfBuffer = await requestPdfFromBrowser(html);
+
+		stage = 'upload';
 		const pdfStoragePath = await uploadPdfToStorage(
 			supabase,
 			scanId,
@@ -280,6 +340,7 @@ export async function generateAndStorePdfReport(
 			pdfBuffer,
 		);
 
+		stage = 'persist-url';
 		const { error: updateError } = await supabase
 			.from('scans')
 			.update({ report_pdf_url: pdfStoragePath })
@@ -297,8 +358,14 @@ export async function generateAndStorePdfReport(
 			userEmail: scan.user_email,
 		};
 	} catch (error: unknown) {
+		console.error('[report] generateAndStorePdfReport failed', {
+			scanId,
+			stage,
+			reportBucket: REPORT_BUCKET || '(unset)',
+			error: describeError(error),
+		});
 		throw new Error(
-			`PDF generation failed: ${error instanceof Error ? error.message : String(error)}`,
+			`PDF generation failed at ${stage}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
 }
