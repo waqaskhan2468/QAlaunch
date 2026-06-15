@@ -4,3 +4,9 @@ ignoredBuiltDependencies:
   - esbuild
   - sharp
   - unrs-resolver
+allowBuilds:
+  esbuild: true
+  inngest-cli: true
+  protobufjs: true
+  sharp: true
+  unrs-resolver: true
