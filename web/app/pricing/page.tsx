@@ -6,9 +6,9 @@ import { PricingGrid } from '@/components/pricing/pricing-grid';
 import { FAQ, type FAQItem } from '@/components/home/faq';
 
 export const metadata: Metadata = {
-	title: 'Pricing — QAlaunch Website Audit Reports from $9',
+	title: 'Pricing — Website Audit Reports from $9',
 	description:
-		'Simple one-time pricing for expert website audit reports. Basic from $9, Standard $24, Premium $59. No subscriptions. PDF delivered instantly.',
+		'Simple one-time pricing. Basic $9 (1 page), Standard $24 (2-5 pages), Premium $59 (6-10 pages). No subscriptions. PDF report delivered instantly.',
 };
 
 const pricingFaqs: FAQItem[] = [

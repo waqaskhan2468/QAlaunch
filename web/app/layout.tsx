@@ -30,19 +30,73 @@ const jetbrains = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "QAlaunch — Free Website Audit Tool | UI, UX & Functionality Testing",
+  title: {
+    default: "QAlaunch — AI Website Audit Tool | Find Bugs in 60 Seconds",
+    template: "%s | QAlaunch",
+  },
   description:
-    "Get a free expert website audit in 60 seconds. QAlaunch tests your website for usability issues, UI bugs, broken functionality, mobile responsiveness, and SEO — and delivers an actionable PDF report starting from $9.",
+    "AI-powered website auditing tool built by a senior QA engineer with 9+ years experience. Find UI bugs, broken buttons, mobile issues, and usability problems on any website in 60 seconds. Reports from $9.",
   keywords: [
-    "free website audit",
-    "website testing tool",
-    "usability testing",
-    "UI testing",
-    "website quality checker",
     "website audit tool",
-    "free website checker",
-    "website QA",
+    "free website audit",
+    "website QA testing",
+    "website bug checker",
+    "AI website audit",
+    "website usability testing",
+    "mobile responsiveness test",
+    "website quality checker",
+    "Lovable website testing",
+    "Bolt website audit",
+    "Shopify store audit",
+    "website accessibility checker",
   ],
+  authors: [{ name: "QAlaunch", url: "https://getqalaunch.com" }],
+  creator: "QAlaunch",
+  publisher: "QAlaunch",
+  metadataBase: new URL("https://getqalaunch.com"),
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: "https://getqalaunch.com",
+    siteName: "QAlaunch",
+    title: "QAlaunch — AI Website Audit Tool | Find Bugs in 60 Seconds",
+    description:
+      "Find UI bugs, broken buttons, mobile issues, and usability problems on any website in 60 seconds. Built by a QA engineer with 9+ years experience. Reports from $9.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "QAlaunch — AI Website Audit Tool",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "QAlaunch — Find What's Broken on Your Website in 60 Seconds",
+    description:
+      "AI-powered website audit tool. Find UI bugs, broken buttons, mobile issues instantly. From $9.",
+    images: ["/og-image.png"],
+    creator: "@QAlaunchHQ",
+    site: "@QAlaunchHQ",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
+  verification: {
+    google: "",
+  },
 }
 
 export const viewport: Viewport = {

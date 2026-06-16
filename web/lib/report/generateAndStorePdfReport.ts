@@ -266,6 +266,7 @@ export async function sendReportEmail(input: {
 	scanId: string;
 	targetUrl: string;
 	pdfUrl: string | null;
+	issueCount: number;
 }): Promise<void> {
 	if (!input.to || !input.pdfUrl) {
 		console.warn(
@@ -288,23 +289,165 @@ export async function sendReportEmail(input: {
 	const resend = new Resend(process.env.RESEND_API_KEY);
 
 	await resend.emails.send({
-		from: process.env.FROM_EMAIL,
+		// Display name so inboxes show "QAlaunch", not a bare address.
+		from: 'QAlaunch <contact@getqalaunch.com>',
 		to: input.to,
-		subject: `Your QAlaunch report is ready — ${input.targetUrl}`,
-		html: `
-			<p>Hi,</p>
-			<p>Your QAlaunch website audit report for <strong>${input.targetUrl}</strong> is ready.</p>
-			<p>
-				<a href="${input.pdfUrl}"
-				   style="display:inline-block;padding:10px 20px;background:#6366f1;color:#fff;border-radius:6px;text-decoration:none;font-weight:500;">
-					Download PDF report
-				</a>
-			</p>
-			<p style="color:#6b7280;font-size:12px;">
-				This link expires in 7 days. Scan ID: ${input.scanId}
-			</p>
-		`,
+		subject: `Your QAlaunch audit report is ready — ${input.targetUrl}`,
+		html: buildReportEmailHtml({
+			websiteUrl: input.targetUrl,
+			issueCount: input.issueCount,
+			reportUrl: input.pdfUrl,
+			scanId: input.scanId,
+		}),
 	});
+}
+
+// ─── Email template ─────────────────────────────────────────────────────────
+
+function escapeHtml(value: string): string {
+	return value
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&#39;');
+}
+
+/**
+ * Designed HTML email delivered with the report PDF link.
+ * Table-based layout + inline CSS only — email clients do not support
+ * external stylesheets or modern layout (fl/grid).
+ */
+function buildReportEmailHtml(input: {
+	websiteUrl: string;
+	issueCount: number;
+	reportUrl: string;
+	scanId: string;
+}): string {
+	const websiteUrl = escapeHtml(input.websiteUrl);
+	const reportUrl = escapeHtml(input.reportUrl);
+	const scanId = escapeHtml(input.scanId);
+	const issueLabel = `${input.issueCount} issue${input.issueCount === 1 ? '' : 's'}`;
+
+	const features = [
+		'Every issue ranked by severity and business impact',
+		'Screenshot evidence for each problem found',
+		'Plain-English explanation of what each issue means',
+		'Step-by-step fix instructions for your developer',
+	];
+
+	const featureRows = features
+		.map(
+			(text) => `
+					<tr>
+						<td style="padding:5px 0;vertical-align:top;width:26px;color:#22C55E;font-size:15px;font-weight:700;line-height:22px;">&#10003;</td>
+						<td style="padding:5px 0;vertical-align:top;color:#18293A;font-size:15px;line-height:22px;">${escapeHtml(text)}</td>
+					</tr>`,
+		)
+		.join('');
+
+	return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light only" />
+<title>Your QAlaunch audit report is ready</title>
+</head>
+<body style="margin:0;padding:0;background:#F4F8FC;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F4F8FC;">
+	<tr>
+		<td align="center" style="padding:0;">
+
+			<!-- Header bar -->
+			<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09111F;">
+				<tr>
+					<td align="center" style="padding:28px 24px;">
+						<div style="font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:24px;font-weight:800;color:#FFFFFF;letter-spacing:-0.5px;">QAlaunch</div>
+						<div style="font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:14px;color:#6B8AA3;margin-top:4px;">Expert website auditing</div>
+					</td>
+				</tr>
+			</table>
+
+			<!-- Main card -->
+			<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;margin:24px auto;background:#FFFFFF;border:1px solid #DDE6F0;border-radius:14px;box-shadow:0 10px 30px -12px rgba(15,23,42,0.12);overflow:hidden;">
+
+				<!-- Success banner -->
+				<tr>
+					<td style="padding:16px 32px;background:#ECFDF5;border-bottom:1px solid #BBF7D0;font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#16A34A;">
+						&#10003; Your report is ready
+					</td>
+				</tr>
+
+				<!-- Greeting -->
+				<tr>
+					<td style="padding:28px 32px 8px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;color:#18293A;">
+						<p style="margin:0 0 12px;font-size:16px;font-weight:600;">Hi there,</p>
+						<p style="margin:0 0 12px;font-size:15px;line-height:23px;color:#3B536B;">Your website audit for <strong style="color:#18293A;">${websiteUrl}</strong> is complete.</p>
+						<p style="margin:0 0 4px;font-size:15px;line-height:23px;color:#3B536B;">We found <strong style="color:#18293A;">${issueLabel}</strong> across your website. Your full report includes:</p>
+					</td>
+				</tr>
+
+				<!-- Feature list -->
+				<tr>
+					<td style="padding:8px 32px 4px;">
+						<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family:'Segoe UI',Arial,Helvetica,sans-serif;">${featureRows}
+						</table>
+					</td>
+				</tr>
+
+				<!-- Download button -->
+				<tr>
+					<td align="center" style="padding:24px 32px 8px;">
+						<a href="${reportUrl}" style="display:inline-block;background:#1847A8;color:#FFFFFF;font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;text-decoration:none;padding:15px 32px;border-radius:10px;">Download Your PDF Report &rarr;</a>
+					</td>
+				</tr>
+
+				<!-- Expiry notice -->
+				<tr>
+					<td align="center" style="padding:4px 32px 24px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#6B8AA3;">
+						This download link expires in 7 days.<br />
+						Scan ID: ${scanId}
+					</td>
+				</tr>
+
+				<!-- Divider -->
+				<tr>
+					<td style="padding:0 32px;">
+						<div style="border-top:1px solid #DDE6F0;font-size:0;line-height:0;">&nbsp;</div>
+					</td>
+				</tr>
+
+				<!-- Help section -->
+				<tr>
+					<td style="padding:22px 32px 30px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
+						<p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#18293A;">Need help?</p>
+						<p style="margin:0 0 8px;font-size:14px;line-height:22px;color:#3B536B;">If you have any questions about your report or need a rescan, reply to this email or contact us at <a href="mailto:contact@getqalaunch.com" style="color:#1847A8;text-decoration:none;font-weight:600;">contact@getqalaunch.com</a>.</p>
+						<p style="margin:0;font-size:14px;line-height:22px;color:#3B536B;">We typically respond within 1 business day.</p>
+					</td>
+				</tr>
+			</table>
+
+			<!-- Footer -->
+			<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;margin:0 auto 28px;background:#F4F8FC;">
+				<tr>
+					<td align="center" style="padding:8px 32px 0;font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;line-height:20px;color:#6B8AA3;">
+						<div>&copy; 2026 QAlaunch &middot; getqalaunch.com</div>
+						<div style="margin:6px 0;">
+							<a href="https://getqalaunch.com/privacy" style="color:#6B8AA3;text-decoration:underline;">Privacy Policy</a>
+							&nbsp;&middot;&nbsp;
+							<a href="https://getqalaunch.com/refund" style="color:#6B8AA3;text-decoration:underline;">Refund Policy</a>
+						</div>
+						<div>You received this email because you purchased a QAlaunch report.</div>
+					</td>
+				</tr>
+			</table>
+
+		</td>
+	</tr>
+</table>
+</body>
+</html>`;
 }
 
 // ─── Public: main flow ────────────────────────────────────────────────────────

@@ -1075,7 +1075,7 @@ function ResultsView({
 
 		{/* ── CATEGORY SCORES ───────────────────────────────────────────── */}
 		<section className='border-b border-border-soft bg-white px-5 py-6 md:px-10'>
-			<div className='mx-auto grid max-w-5xl grid-cols-4 gap-3 sm:grid-cols-7'>
+			<div className='mx-auto grid max-w-5xl grid-cols-3 gap-3 sm:grid-cols-7'>
 				{categoryScores.map(({ key, label, score }) => {
 					const tone = catTone(score);
 					// A score of exactly 100 means no issues were found in this category.
@@ -1087,7 +1087,7 @@ function ResultsView({
 						<div
 							key={key}
 							className='rounded-xl border border-border-soft bg-surface-soft p-3 transition-transform hover:-translate-y-0.5'>
-							<div className='mb-1.5 text-[10px] font-bold uppercase tracking-wide text-muted-ink'>
+							<div className='mb-1.5 text-[9px] font-bold uppercase leading-tight tracking-wide break-words text-muted-ink sm:text-[10px]'>
 								{label}
 							</div>
 							{noIssues ? (
@@ -1191,16 +1191,24 @@ function ResultsView({
 					</p>
 				</div>
 
-				{/* Title-only list */}
-				<div className='px-6 pb-2 pt-5'>
-					{lockedIssues.map((issue) => (
-						<LockedIssueRow key={issue.id} issue={issue} />
+				{/* Redacted preview — real titles are paywalled. These rows are
+				    intentionally fake + blurred so the full list stays locked. */}
+				<div className='relative px-6 pb-2 pt-5'>
+					{LOCKED_PLACEHOLDERS.map((placeholder, i) => (
+						<BlurredIssueRow
+							key={i}
+							severity={placeholder.severity}
+							text={placeholder.text}
+						/>
 					))}
-					{lockedIssues.length === 0 && lockedIssueCount > 0 && (
-						<div className='mb-3 rounded-xl border border-border-soft bg-surface-soft px-4 py-3 text-center text-sm text-muted-ink'>
-							{lockedIssueCount} additional issues found — unlock to see all titles and details
-						</div>
-					)}
+					{/* Gradient overlay reinforces the locked-behind-paywall feel */}
+					<div
+						className='pointer-events-none absolute inset-x-0 bottom-0 h-28'
+						style={{
+							background:
+								'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(248,250,252,0.92) 100%)',
+						}}
+					/>
 				</div>
 
 				{/* Unlock CTA */}
@@ -1211,20 +1219,20 @@ function ResultsView({
 						⚡ Instant unlock
 					</div>
 					<h3 className='font-heading text-xl font-black text-ink'>
-						See all {totalIssueCount} issues + screenshot evidence + fix instructions
+						Unlock your full audit report
 					</h3>
 					<p className='mt-1.5 text-[13.5px] text-body'>
-						Download a comprehensive PDF your developer can action today. Average fix time: under 2 hours.
+						Get every issue with screenshot evidence and step-by-step fix instructions
 					</p>
-					<div className='mt-5 flex flex-wrap items-center justify-center gap-4'>
+					<div className='mt-5 flex flex-col items-center gap-3'>
 						<button
 							type='button'
 							onClick={scrollToPricing}
 							className='inline-flex items-center justify-center rounded-xl bg-brand px-6 py-3 text-sm font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-brand-mid hover:shadow-lg hover:shadow-brand/30'>
-							Unlock Full Report →
+							Get Full Report →
 						</button>
 						<span className='font-mono text-[13px] font-semibold text-body'>
-							From <strong className='text-ink'>$9</strong> · One-time payment
+							From <strong className='text-ink'>$9</strong> · One-time payment · Instant PDF delivery
 						</span>
 					</div>
 				</div>
@@ -1406,45 +1414,50 @@ function FindingCard({ finding }: { finding: ScanIssue }) {
 	);
 }
 
-// ─── LockedIssueRow ───────────────────────────────────────────────────────────
+// ─── BlurredIssueRow (paywalled placeholder) ──────────────────────────────────
+// Real locked-issue titles are intentionally NOT rendered here. These decorative
+// rows look like genuine findings but are fake + blurred so the remaining issues
+// stay behind the paywall.
 
-function LockedIssueRow({ issue }: { issue: LockedIssue }) {
-	const normSev = issue.severity.toLowerCase();
+const LOCKED_PLACEHOLDERS: Array<{
+	severity: 'critical' | 'high' | 'medium';
+	text: string;
+}> = [
+	{ severity: 'critical', text: 'Checkout submit button fails on common mobile viewport widths' },
+	{ severity: 'high', text: 'Primary navigation links return broken 404 responses' },
+	{ severity: 'high', text: 'Key images missing alt text, hurting accessibility and SEO' },
+	{ severity: 'medium', text: 'Meta descriptions exceed the recommended length on landing pages' },
+	{ severity: 'medium', text: 'Interactive tap targets are too small for comfortable mobile use' },
+];
+
+function BlurredIssueRow({
+	severity,
+	text,
+}: {
+	severity: 'critical' | 'high' | 'medium';
+	text: string;
+}) {
 	const badgeTone = {
 		critical: 'bg-danger-pale text-danger',
 		high:     'bg-warn-pale text-warn',
 		medium:   'bg-brand-pale text-brand',
-		low:      'bg-surface-soft text-muted-ink border border-border-soft',
-	}[normSev] ?? 'bg-surface-soft text-muted-ink';
-
-	const normCat = (v: string) => {
-		const map: Record<string, string> = {
-			functionality: 'Functionality',
-			ui_bugs: 'UI / Visual',
-			usability_ux: 'Usability',
-			responsiveness: 'Mobile',
-			performance: 'Performance',
-			seo: 'SEO',
-			accessibility: 'Accessibility',
-			security: 'Security',
-			content: 'Content',
-		};
-		return map[v] ?? v;
-	};
-
-	const displayTitle = issue.title?.trim() || `${normCat(issue.category)} issue detected`;
+	}[severity];
 
 	return (
-		<div className='mb-2 flex items-center gap-3 rounded-xl border border-border-soft bg-surface-soft px-4 py-3.5 transition-colors hover:bg-brand-pale/30'>
+		<div className='mb-2 flex items-center gap-3 rounded-xl border border-border-soft bg-surface-soft px-4 py-3.5'>
 			<span
 				className={cn(
 					'shrink-0 rounded-full px-2.5 py-1 font-heading text-[10px] font-extrabold uppercase tracking-wide',
 					badgeTone,
 				)}>
-				{normSev}
+				{severity}
 			</span>
-			<span className='min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink'>
-				{displayTitle}
+			{/* Blurred, non-selectable placeholder where the real title would be */}
+			<span
+				aria-hidden='true'
+				className='min-w-0 flex-1 select-none truncate text-[13.5px] font-semibold text-ink'
+				style={{ filter: 'blur(5px)', userSelect: 'none' }}>
+				{text}
 			</span>
 			<Lock className='size-3.5 shrink-0 text-muted-ink opacity-60' />
 		</div>

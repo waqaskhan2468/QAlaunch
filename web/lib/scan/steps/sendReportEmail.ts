@@ -28,12 +28,19 @@ export async function sendReportEmailStep(input: {
 		return;
 	}
 
+	// Total issue count for the email body, read straight from the issues table.
+	const { count } = await supabase
+		.from('issues')
+		.select('*', { count: 'exact', head: true })
+		.eq('scan_id', scanId);
+
 	try {
 		await sendReportEmail({
 			to: report.userEmail,
 			scanId,
 			targetUrl: report.targetUrl,
 			pdfUrl,
+			issueCount: count ?? 0,
 		});
 	} catch (err) {
 		console.error('[run-scan] report email failed — continuing', {

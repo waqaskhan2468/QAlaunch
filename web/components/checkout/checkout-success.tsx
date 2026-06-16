@@ -67,19 +67,39 @@ const STEPS: Step[] = [
     id: "report",
     label: "Generating PDF report",
     detail: "Building your full audit report",
-    activeOn: [],           // no distinct status for this sub-step
-    doneOn: ["done"],
+    activeOn: [],           // gated on report_pdf_url instead of status — see stepState
+    doneOn: [],
   },
   {
     id: "email",
     label: "Sending to your inbox",
     detail: "Report emailed + download ready below",
     activeOn: [],
-    doneOn: ["done"],
+    doneOn: [],
   },
 ]
 
-function stepState(step: Step, status: ScanRow["status"]): "done" | "active" | "idle" {
+/**
+ * Maps the scan status (and whether the PDF exists yet) to a step's visual state.
+ *
+ * The last two steps don't have their own DB status — the pipeline marks the scan
+ * `done` only after the PDF is generated and the email is sent. So we treat
+ * `done` WITHOUT a `report_pdf_url` as "still generating the PDF" (step 4 active),
+ * and `done` WITH a `report_pdf_url` as fully complete.
+ */
+function stepState(
+  step: Step,
+  status: ScanRow["status"],
+  hasPdf: boolean,
+): "done" | "active" | "idle" {
+  if (step.id === "report") {
+    if (status !== "done") return "idle"
+    return hasPdf ? "done" : "active"
+  }
+  if (step.id === "email") {
+    if (status !== "done") return "idle"
+    return hasPdf ? "done" : "idle"
+  }
   if (step.doneOn.includes(status)) return "done"
   if (step.activeOn.includes(status)) return "active"
   return "idle"
@@ -98,6 +118,8 @@ function deriveHost(raw?: string | null) {
 }
 
 const POLL_INTERVAL_MS = 4_000
+// Stop polling after 10 minutes and show a "taking longer than expected" notice.
+const MAX_POLL_MS = 10 * 60 * 1_000
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -107,37 +129,78 @@ export function CheckoutSuccessExperience() {
 
   const [scan, setScan] = useState<ScanRow | null>(null)
   const [phase, setPhase] = useState<"loading" | "polling" | "done" | "failed" | "not_found" | "free_scan">("loading")
+  const [timedOut, setTimedOut] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
+  // Bumped by the retry handler to restart polling from scratch.
+  const [pollToken, setPollToken] = useState(0)
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Poll /api/scan/status/{scanId} until done or failed.
+  // Poll /api/scan/status/{scanId} until the report is ready (done + PDF) or it
+  // fails. Starts immediately on load and repeats every POLL_INTERVAL_MS.
   useEffect(() => {
-    if (!scanId) {
-      setPhase("not_found")
-      return
+    // Render already shows the "invalid or expired link" state when scanId is
+    // missing — no need to set state synchronously here.
+    if (!scanId) return
+
+    const startedAt = Date.now()
+
+    const stop = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
     }
 
     const poll = async () => {
+      // Hard timeout — leave the progress UI up but stop hammering the API and
+      // surface a "taking longer than expected" message.
+      if (Date.now() - startedAt > MAX_POLL_MS) {
+        setTimedOut(true)
+        stop()
+        return
+      }
+
       try {
-        const res = await fetch(`/api/scan/status/${scanId}`, { cache: "no-store" })
-        if (!res.ok) { setPhase("not_found"); return }
+        // Cache-busting query param: a unique URL per poll defeats any
+        // CDN/route-cache that would otherwise serve a stale status. `no-store`
+        // alone does not stop server/edge caches.
+        const res = await fetch(
+          `/api/scan/status/${scanId}?t=${Date.now()}`,
+          { cache: "no-store" },
+        )
+        if (!res.ok) {
+          // 404 = scan genuinely not found; anything else is likely transient.
+          if (res.status === 404) {
+            setPhase("not_found")
+            stop()
+          }
+          return
+        }
 
         const data = (await res.json()) as StatusPayload
         const s = data.scan
+        if (!s) return
 
-        if (s.package === "free") { setPhase("free_scan"); return }
+        if (s.package === "free") {
+          setPhase("free_scan")
+          stop()
+          return
+        }
 
         setScan(s)
 
-        if (s.status === "done") {
+        if (s.status === "done" && s.report_pdf_url) {
+          // Fully complete: report generated and ready to download.
           setPhase("done")
-          if (intervalRef.current) clearInterval(intervalRef.current)
+          stop()
         } else if (s.status === "failed") {
           setPhase("failed")
-          if (intervalRef.current) clearInterval(intervalRef.current)
+          stop()
         } else {
+          // pending / crawling / analyzing, or done-but-PDF-not-written-yet:
+          // keep polling.
           setPhase("polling")
         }
       } catch {
@@ -148,10 +211,8 @@ export function CheckoutSuccessExperience() {
     void poll()
     intervalRef.current = setInterval(() => void poll(), POLL_INTERVAL_MS)
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
-  }, [scanId])
+    return stop
+  }, [scanId, pollToken])
 
   // ── Retry handler ──────────────────────────────────────────────────────────
 
@@ -171,19 +232,12 @@ export function CheckoutSuccessExperience() {
         setRetrying(false)
         return
       }
-      // Reset to polling — the pipeline is restarting.
+      // Reset to polling — the pipeline is restarting. Bumping pollToken
+      // re-runs the polling effect (fresh interval + reset 10-min timeout).
+      setScan((prev) => prev ? { ...prev, status: "pending", report_pdf_url: null, error_message: null } : prev)
       setPhase("polling")
-      setScan((prev) => prev ? { ...prev, status: "pending", error_message: null } : prev)
-      intervalRef.current = setInterval(async () => {
-        try {
-          const r = await fetch(`/api/scan/status/${scanId}`, { cache: "no-store" })
-          if (!r.ok) return
-          const d = (await r.json()) as StatusPayload
-          setScan(d.scan)
-          if (d.scan.status === "done") { setPhase("done"); if (intervalRef.current) clearInterval(intervalRef.current) }
-          if (d.scan.status === "failed") { setPhase("failed"); if (intervalRef.current) clearInterval(intervalRef.current) }
-        } catch { /* keep polling */ }
-      }, POLL_INTERVAL_MS)
+      setTimedOut(false)
+      setPollToken((n) => n + 1)
     } catch {
       setRetryError("Network error. Please try again or contact support.")
     } finally {
@@ -249,6 +303,7 @@ export function CheckoutSuccessExperience() {
   const host = deriveHost(scan?.url ?? null)
   const isPaid = scan?.payment_status === "paid"
   const currentStatus = scan?.status ?? "pending"
+  const hasPdf = Boolean(scan?.report_pdf_url)
 
   return (
     <div className="mx-auto max-w-xl px-5 py-14 md:py-20">
@@ -305,7 +360,7 @@ export function CheckoutSuccessExperience() {
         {phase !== "failed" && (
           <div className="mt-8 space-y-3">
             {STEPS.map((step) => {
-              const state = stepState(step, currentStatus)
+              const state = stepState(step, currentStatus, hasPdf)
               return (
                 <div key={step.id} className="flex items-start gap-3">
                   <div className="mt-0.5 shrink-0">
@@ -385,7 +440,7 @@ export function CheckoutSuccessExperience() {
           </div>
         )}
 
-        {/* Polling: email reminder */}
+        {/* Polling: email reminder (or "taking longer than expected" after timeout) */}
         {phase === "polling" && (
           <div className="mt-8 rounded-xl border border-border-soft bg-surface-soft px-4 py-4 text-center">
             <div className="flex items-center justify-center gap-2 text-sm font-semibold text-ink">
@@ -395,11 +450,19 @@ export function CheckoutSuccessExperience() {
             {scan?.user_email && (
               <p className="mt-1 break-all font-mono text-xs text-muted-ink">{scan.user_email}</p>
             )}
-            <p className="mt-3 text-sm leading-snug text-body">
-              Most reports arrive within{" "}
-              <span className="font-semibold text-ink">5 minutes</span>. You can
-              leave this page — we&apos;ll email you when it&apos;s ready.
-            </p>
+            {timedOut ? (
+              <p className="mt-3 text-sm leading-snug text-body">
+                This is <span className="font-semibold text-ink">taking longer than expected</span>.
+                Your report is still processing — we&apos;ll email it to you as soon as it&apos;s
+                ready, so you can safely close this page.
+              </p>
+            ) : (
+              <p className="mt-3 text-sm leading-snug text-body">
+                Most reports arrive within{" "}
+                <span className="font-semibold text-ink">5 minutes</span>. You can
+                leave this page — we&apos;ll email you when it&apos;s ready.
+              </p>
+            )}
           </div>
         )}
 
