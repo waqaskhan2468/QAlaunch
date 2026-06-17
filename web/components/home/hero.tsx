@@ -138,13 +138,17 @@ export function Hero() {
               />
             </span>{" "}
             for your customers?
+            <span className="mt-4 block font-heading text-[clamp(1.05rem,2.2vw,1.5rem)] font-bold text-white/55">
+              The AI website audit &amp; QA testing tool, built by a senior QA
+              engineer.
+            </span>
           </motion.h1>
 
           <motion.p
             variants={fadeUp}
             className="mt-6 max-w-xl text-base leading-relaxed text-white/65 sm:text-lg"
           >
-            Get a free expert website audit in 60 seconds. We test usability,
+            Get a free expert website audit in 120 seconds. We test usability,
             broken functionality, UI bugs, mobile responsiveness, and SEO — then
             give you a clear, actionable report your developer can fix today.
           </motion.p>
@@ -165,7 +169,7 @@ export function Hero() {
             ) : null}
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 px-1">
               <TrustItem label="No signup required" />
-              <TrustItem label="Free preview in 60s" />
+              <TrustItem label="Free preview in 120s" />
               <TrustItem label="Full report from $9" />
             </div>
           </motion.div>

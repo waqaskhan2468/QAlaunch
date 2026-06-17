@@ -15,7 +15,7 @@ const steps = [
     n: 2,
     title: "Get Your Free Preview",
     description:
-      "In 60 seconds, we surface your 3 most critical usability, UI, and functionality issues completely free — with severity, impact, and what's at stake.",
+      "In 120 seconds, we surface your 3 most critical usability, UI, and functionality issues completely free — with severity, impact, and what's at stake.",
   },
   {
     n: 3,

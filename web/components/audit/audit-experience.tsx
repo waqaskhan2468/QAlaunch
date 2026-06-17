@@ -1241,7 +1241,7 @@ function ResultsView({
 			{/* ── TRUST STRIP ──────────────────────────────────────────── */}
 			<div className='mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4'>
 				{[
-					{ ico: '⚡', t: 'Instant Delivery', s: 'PDF in your inbox in 60 seconds' },
+					{ ico: '⚡', t: 'Instant Delivery', s: 'PDF in your inbox in 120 seconds' },
 					{ ico: '🛡️', t: '100% Refund', s: "If you don't find it useful" },
 					{ ico: '👤', t: 'Built by Experts', s: '9 years of senior QA experience' },
 					{ ico: '🔁', t: 'No Subscription', s: 'Pay once — own the report forever' },

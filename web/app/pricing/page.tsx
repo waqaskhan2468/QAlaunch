@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 const pricingFaqs: FAQItem[] = [
 	{
 		q: 'How long does the full audit take?',
-		a: 'The free audit preview takes under 60 seconds. A full paid report is ready within 3–5 minutes of payment. Your PDF download link arrives by email immediately.',
+		a: 'The free audit preview takes under 120 seconds. A full paid report is ready within 3–5 minutes of payment. Your PDF download link arrives by email immediately.',
 	},
 	{
 		q: 'What counts as one "page"?',

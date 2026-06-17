@@ -23,7 +23,7 @@ const homeFaqs: FAQItem[] = [
   },
   {
     q: "How long does the free website audit take?",
-    a: "The free audit preview takes under 60 seconds and shows your 3 most critical issues at no cost. A full paid audit report is generated within 3–5 minutes of payment. You receive a PDF download link by email as soon as it's ready — there's no waiting around.",
+    a: "The free audit preview takes under 120 seconds and shows your 3 most critical issues at no cost. A full paid audit report is generated within 3–5 minutes of payment. You receive a PDF download link by email as soon as it's ready — there's no waiting around.",
   },
   {
     q: "What does the full paid report include?",
