@@ -47,6 +47,9 @@ export const claudeBoundingBoxSchema = z.object({
  * Single issue from Claude — lengths aligned with Postgres CHECKs on `public.issues`.
  * `evidence`, `confidence`, and optional `bounding_box` are stored on `scan_pages.ai_analysis` JSON;
  * `public.issues` rows keep the core columns only.
+ *
+ * Note: the model no longer produces "how to fix" text — issues carry only
+ * title / area / description / impact / severity / category.
  */
 export const claudeIssueSchema = z.object({
 	category: issueCategorySchema,
@@ -57,7 +60,6 @@ export const claudeIssueSchema = z.object({
 	page_section: z
 		.union([trimmed.pipe(z.string().min(1).max(500)), z.literal('')])
 		.optional(),
-	fix_instructions: trimmed.pipe(z.string().min(20).max(8000)),
 	evidence: issueEvidenceSchema,
 	confidence: z.number().min(0).max(1),
 	bounding_box: claudeBoundingBoxSchema.optional(),
@@ -77,7 +79,6 @@ export const legacyClaudeIssueSchema = z.object({
 	page_section: z
 		.union([trimmed.pipe(z.string().min(1).max(500)), z.literal('')])
 		.optional(),
-	fix_instructions: trimmed.pipe(z.string().min(20).max(8000)),
 });
 
 export const legacyClaudeIssuesResponseSchema = z.object({
@@ -96,7 +97,6 @@ export const CLAUDE_ISSUE_STRING_LIMITS = {
 	description: { min: 100, max: 800 },
 	impact: { min: 20, max: 200 },
 	page_section: { min: 1, max: 500 },
-	fix_instructions: { min: 20, max: 8000 },
 } as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -161,11 +161,6 @@ function normalizeIssueRow(row: unknown): unknown {
 			CLAUDE_ISSUE_STRING_LIMITS.impact.max,
 		),
 		page_section: normalizedPageSection,
-		fix_instructions: clampClaudeString(
-			row.fix_instructions,
-			CLAUDE_ISSUE_STRING_LIMITS.fix_instructions.min,
-			CLAUDE_ISSUE_STRING_LIMITS.fix_instructions.max,
-		),
 		...(confidence !== undefined ? { confidence } : {}),
 	};
 }

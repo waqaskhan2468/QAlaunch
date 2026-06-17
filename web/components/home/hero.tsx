@@ -18,6 +18,7 @@ import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
 export function Hero() {
   const router = useRouter()
   const [url, setUrl] = useState("")
+  const [email, setEmail] = useState("")
   const [isStarting, setIsStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
 
@@ -52,12 +53,15 @@ export function Hero() {
       setIsStarting(true)
       setStartError(null)
 
+      const trimmedEmail = email.trim()
+
       const res = await fetch("/api/scan/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url: value,
           package: "free",
+          ...(trimmedEmail ? { email: trimmedEmail } : {}),
         }),
       })
 
@@ -75,8 +79,14 @@ export function Hero() {
         return
       }
 
-      if (!res.ok || payload.ok !== true || !payload.scanId) {
-        throw new Error("Could not start free audit.")
+      if (payload.ok !== true || !payload.scanId) {
+        // Surface the precise reason from the validation gate (unreachable URL,
+        // login/web-app page) so the user knows what to fix.
+        setStartError(
+          (payload.ok === false && payload.message) ||
+            "Could not start your free audit. Please try again.",
+        )
+        return
       }
 
       const target = `/result?url=${encodeURIComponent(value)}&scanId=${encodeURIComponent(payload.scanId)}`
@@ -158,8 +168,15 @@ export function Hero() {
             variants={fadeUp}
             className="mt-10 rounded-2xl border border-white/15 bg-white/6 p-3 shadow-surface-dark sm:p-4"
           >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-              <UrlInput value={url} onChange={setUrl} onSubmit={submit} />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+                <UrlInput value={url} onChange={setUrl} onSubmit={submit} />
+                <EmailInput
+                  value={email}
+                  onChange={setEmail}
+                  onSubmit={submit}
+                />
+              </div>
               <MagneticButton onClick={submit} isLoading={isStarting} />
             </div>
             {startError ? (
@@ -214,7 +231,7 @@ function UrlInput({
   onSubmit: () => void
 }) {
   return (
-    <div className="relative flex-1">
+    <div className="relative sm:flex-[3]">
       <input
         id="audit-input"
         value={value}
@@ -227,6 +244,42 @@ function UrlInput({
         className={cn(
           "h-14 w-full rounded-xl border border-white/15 bg-white/10 px-5",
           "font-mono text-base text-white outline-none transition-all placeholder:text-white/35",
+          "focus:border-accent-bright focus:bg-accent-bright/10 focus:ring-4 focus:ring-accent-bright/15",
+        )}
+      />
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Email input (optional)                                             */
+/* ------------------------------------------------------------------ */
+
+function EmailInput({
+  value,
+  onChange,
+  onSubmit,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onSubmit: () => void
+}) {
+  return (
+    <div className="relative sm:flex-[2]">
+      <input
+        id="audit-email"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit()
+        }}
+        type="email"
+        autoComplete="email"
+        placeholder="Email (optional)"
+        aria-label="Email (optional)"
+        className={cn(
+          "h-14 w-full rounded-xl border border-white/15 bg-white/10 px-5",
+          "text-base text-white outline-none transition-all placeholder:text-white/35",
           "focus:border-accent-bright focus:bg-accent-bright/10 focus:ring-4 focus:ring-accent-bright/15",
         )}
       />
@@ -277,8 +330,8 @@ function MagneticButton({
       whileTap={{ scale: 0.96 }}
       style={{ x: springX, y: springY }}
       className={cn(
-        "group inline-flex h-14 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-accent-bright px-7 sm:px-8",
-        "text-sm font-extrabold tracking-wide text-white shadow-glow-accent",
+        "group inline-flex h-14 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-accent-bright px-7 sm:px-8",
+        "text-sm font-extrabold tracking-wide text-white shadow-glow-accent sm:text-lg",
         "hover:bg-accent-emerald hover:shadow-glow-accent-lg",
         "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-bright/35",
         "disabled:cursor-not-allowed disabled:opacity-80",

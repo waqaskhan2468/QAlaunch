@@ -5,6 +5,7 @@ import { scanStartSchema } from '@/types/zod';
 import { AppError, asyncHandler } from '@/lib/api/error';
 import { assertScanStartAllowed } from '@/lib/api/scan-start-rate-limit';
 import { queueScanJob } from '@/lib/api/queue-scan-job';
+import { validateScanTarget } from '@/lib/scan/validate-target';
 
 export const runtime = 'nodejs';
 
@@ -21,7 +22,7 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
-	const { url, package: pkg, email } = parsed.data;
+	const { url, package: pkg, email, acknowledgePublicOnly } = parsed.data;
 	const normalized = normalizeUrl(url);
 
 	if (isPrivateUrl(normalized)) {
@@ -36,6 +37,53 @@ export const POST = asyncHandler(async (req: Request) => {
 	const hash = urlHash(normalized);
 
 	await assertScanStartAllowed(supabase, req, { email, package: pkg });
+
+	// ── Pre-scan validation gate ───────────────────────────────────────────────
+	// Fetch the target server-side before queuing anything. Runs after rate
+	// limiting (so it can't be abused as a URL fetcher) and before any scan row
+	// is created. Does not touch the Inngest pipeline or payment flow.
+	const validation = await validateScanTarget(normalized);
+
+	if (validation.status === 'unreachable') {
+		return NextResponse.json(
+			{
+				ok: false,
+				code: 'unreachable',
+				message:
+					"We couldn't load this website. Please check the URL and try again.",
+			},
+			{ status: 422 },
+		);
+	}
+
+	if (validation.isWebApp) {
+		// Free preview tests a single public page — a login/sign-up form or app
+		// shell leaves nothing public to preview, so it can't be scanned for free.
+		if (pkg === 'free') {
+			return NextResponse.json(
+				{
+					ok: false,
+					code: 'webapp_not_scannable',
+					message:
+						"This looks like a login or web-app page, so there's nothing public to preview on a free scan. Enter your public homepage URL, or get a paid report to test the pages reachable before sign-in.",
+				},
+				{ status: 422 },
+			);
+		}
+
+		// Paid: testing public pages is still useful. Confirm before proceeding.
+		if (!acknowledgePublicOnly) {
+			return NextResponse.json(
+				{
+					ok: false,
+					code: 'confirm_public_only',
+					message:
+						"This looks like a web application with user accounts. QAlaunch tests public-facing pages only — nothing behind login. We'll test what's visible before sign-in. Continue, or cancel?",
+				},
+				{ status: 200 },
+			);
+		}
+	}
 
 	if (pkg === 'free') {
 		const { data: existing, error: freeCheckError } = await supabase

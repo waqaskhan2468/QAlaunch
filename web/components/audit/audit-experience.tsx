@@ -3,26 +3,23 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Check, Clock, Lock, Zap } from 'lucide-react';
+import { Check, Lock, Zap } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { plans } from '@/components/pricing/pricing-plans';
 import { computeHealthScore, labelFromScore } from '@/lib/scoring/health';
+import {
+	allPagesAnalyzed,
+	countInterimIssues,
+	deriveScanProgressMessage,
+} from '@/lib/scan/progressMessage';
 
-// ─── Scan loading steps ───────────────────────────────────────────────────────
-
-const scanChecklistSteps = [
-	'Testing usability & UI/UX patterns…',
-	'Checking all interactive functionality…',
-	'Testing mobile responsiveness…',
-	'Measuring performance & Core Web Vitals…',
-	'Analysing SEO, security & trust signals…',
-];
-
-const aiAnalysisStepLabel = 'Generating expert findings & fix instructions…';
+// ─── Scan loading ─────────────────────────────────────────────────────────────
 
 const POLL_INTERVAL_MS = 3_000;
 const MAX_POLL_DURATION_MS = 14 * 60 * 1_000;
+// Cosmetic rotation cadence for the crawl sub-labels (within the real phase).
+const PROGRESS_ROTATE_MS = 2_500;
 
 // ─── Scan pipeline steps (shown after scan completes) ────────────────────────
 
@@ -118,6 +115,17 @@ function countBySeverity(
 	return counts;
 }
 
+// Free scans only test the homepage. The headline presents a site-wide
+// estimate (a multiplier band) rather than the literal homepage count — the
+// claim is about the whole site, not a promise about this preview's contents.
+// N (real homepage issue count) → displayed band.
+function siteWideIssueCount(homepageIssueCount: number): string {
+	if (homepageIssueCount >= 11) return '18+';
+	if (homepageIssueCount >= 8) return '15+';
+	if (homepageIssueCount >= 5) return '12+';
+	return '10+'; // 1–4
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type UiState =
@@ -151,6 +159,7 @@ type ScanPageStatus = {
 		error?: string;
 		analysis_mode?: 'full' | 'hybrid' | 'text_only';
 		screenshots_available?: boolean;
+		issues?: unknown[];
 	} | null;
 	screenshot_desktop_url?: string | null;
 	screenshot_mobile_url?: string | null;
@@ -196,16 +205,12 @@ function loadingCopyForStatus(
 	title: string;
 	subtitle: string;
 	stageLabel: string;
-	completedScanSteps: number;
-	showAiStep: boolean;
 } {
 	if (status === 'pending') {
 		return {
 			title: 'Starting your free audit…',
 			subtitle: 'We queued your scan and are preparing website checks.',
 			stageLabel: 'Queued',
-			completedScanSteps: 0,
-			showAiStep: false,
 		};
 	}
 	if (status === 'crawling') {
@@ -213,26 +218,20 @@ function loadingCopyForStatus(
 			title: 'Scanning your website…',
 			subtitle: 'Collecting pages, UI states, and performance signals.',
 			stageLabel: 'Browser scan',
-			completedScanSteps: 2,
-			showAiStep: false,
 		};
 	}
 	if (status === 'analyzing') {
 		return {
 			title: 'Building your report…',
 			subtitle:
-				'Automated checks are done. Our AI is writing severity, impact, and fix guidance — usually 1–2 minutes.',
+				'Automated checks are done. Our AI is reviewing every page — usually 1–2 minutes.',
 			stageLabel: 'AI report',
-			completedScanSteps: scanChecklistSteps.length,
-			showAiStep: true,
 		};
 	}
 	return {
 		title: 'Auditing your website…',
 		subtitle: 'Preparing your free preview report.',
 		stageLabel: 'Initializing',
-		completedScanSteps: 0,
-		showAiStep: false,
 	};
 }
 
@@ -245,46 +244,6 @@ function deriveHost(raw?: string | null): string {
 	} catch {
 		return raw;
 	}
-}
-
-// ─── Loading checklist row ────────────────────────────────────────────────────
-
-function ChecklistRow({
-	label,
-	state,
-}: {
-	label: string;
-	state: 'done' | 'pending' | 'active';
-}) {
-	return (
-		<div
-			className={cn(
-				'flex items-center gap-3 rounded-xl border px-4 py-3 text-[13.5px] transition-colors',
-				state === 'done' ?
-					'border-accent-pale bg-[#F9FFFE] text-ink'
-				: state === 'active' ?
-					'border-brand/30 bg-brand-pale text-ink ring-2 ring-brand/15'
-				:	'border-border-soft bg-white text-body',
-			)}>
-			<span
-				aria-hidden='true'
-				className={cn(
-					'flex size-5 shrink-0 items-center justify-center rounded-full',
-					state === 'done' ?
-						'bg-accent-bright text-white'
-					: state === 'active' ?
-						'bg-white'
-					:	'bg-surface-soft text-muted-ink',
-				)}>
-				{state === 'done' ?
-					<Check className='size-3' strokeWidth={3} />
-				: state === 'active' ?
-					<span className='qa-spin block size-3 rounded-full border-2 border-brand/30 border-t-brand' />
-				:	<Clock className='size-3' />}
-			</span>
-			{label}
-		</div>
-	);
 }
 
 // ─── AuditExperience (public wrapper) ────────────────────────────────────────
@@ -353,6 +312,16 @@ function AuditExperienceInner({
 	);
 	const [statusFetchNote, setStatusFetchNote] = useState<string | null>(null);
 	const [isRetrying, setIsRetrying] = useState(false);
+	// Drives cosmetic rotation of the crawl sub-labels within the real phase.
+	const [rotateTick, setRotateTick] = useState(0);
+
+	useEffect(() => {
+		const id = window.setInterval(
+			() => setRotateTick((t) => t + 1),
+			PROGRESS_ROTATE_MS,
+		);
+		return () => window.clearInterval(id);
+	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -490,6 +459,19 @@ function AuditExperienceInner({
 	const loadingStatus = statusForCurrentScan?.scan.status ?? null;
 	const loadingCopy = loadingCopyForStatus(loadingStatus);
 
+	// Real-state progress message (free scan never produces a PDF/email).
+	const loadingPages = statusForCurrentScan?.pages ?? null;
+	const progressMessage = deriveScanProgressMessage({
+		status: loadingStatus,
+		host,
+		pageCount: loadingPages?.length ?? null,
+		interimIssueCount: countInterimIssues(loadingPages),
+		allPagesAnalyzed: allPagesAnalyzed(loadingPages),
+		hasReport: false,
+		isPaid: false,
+		rotateTick,
+	});
+
 	useEffect(() => {
 		if (loadingStatus !== 'pending' || pendingSince == null) {
 			setQueuedStuckSec(null);
@@ -502,12 +484,12 @@ function AuditExperienceInner({
 	}, [loadingStatus, pendingSince]);
 
 	useEffect(() => {
-		if (!loadingCopy.showAiStep || analyzingStartedAt == null) return;
+		if (loadingStatus !== 'analyzing' || analyzingStartedAt == null) return;
 		const id = window.setInterval(() => {
 			setAnalyzingElapsedSec(Math.floor((Date.now() - analyzingStartedAt) / 1_000));
 		}, 1_000);
 		return () => window.clearInterval(id);
-	}, [loadingCopy.showAiStep, analyzingStartedAt]);
+	}, [loadingStatus, analyzingStartedAt]);
 
 	const handleRetryScan = async () => {
 		if (!inputUrl || isRetrying) return;
@@ -541,7 +523,11 @@ function AuditExperienceInner({
 			}
 
 			if (!res.ok || payload.ok !== true || !('scanId' in payload)) {
-				setMessage('Could not restart your audit. Please try again.');
+				// Surface the validation gate reason (unreachable / login page) when present.
+				setMessage(
+					(payload.ok === false && payload.message) ||
+						'Could not restart your audit. Please try again.',
+				);
 				return;
 			}
 
@@ -597,21 +583,12 @@ function AuditExperienceInner({
 							</p>
 						:	null}
 					</div>
-					<div className='mt-7 flex flex-col gap-2 text-left'>
-						{scanChecklistSteps.map((label, i) => {
-							const done = i < loadingCopy.completedScanSteps;
-							return (
-								<ChecklistRow
-									key={label}
-									label={label}
-									state={done ? 'done' : 'pending'}
-								/>
-							);
-						})}
-						{loadingCopy.showAiStep ?
-							<ChecklistRow label={aiAnalysisStepLabel} state='active' />
-						:	null}
-					</div>
+					{progressMessage ?
+						<div className='mt-7 flex items-center justify-center gap-3 rounded-xl border border-brand/20 bg-white px-5 py-4 text-left'>
+							<span className='qa-spin block size-4 shrink-0 rounded-full border-2 border-brand/30 border-t-brand' />
+							<p className='text-sm font-semibold text-ink'>{progressMessage}</p>
+						</div>
+					:	null}
 				</div>
 			</section>
 		);
@@ -761,6 +738,9 @@ function ResultsView({
 	const categoryScores = computeCategoryScores(allIssuesForScoring);
 	const severityCounts = countBySeverity(allIssuesForScoring.map((i) => i.severity));
 
+	// Site-wide headline estimate from the real homepage issue count.
+	const displayIssueCount = siteWideIssueCount(totalIssueCount);
+
 	// Score ring animation
 	const CIRCUMFERENCE = 477;
 	const ringOffset = ringAnimated ?
@@ -819,6 +799,10 @@ function ResultsView({
 
 	return (
 		<div className='bg-surface-soft'>
+			<div className='border-b border-brand/20 bg-brand-pale px-5 py-3 text-center text-sm font-medium text-brand md:px-10'>
+				This is a homepage-only preview. A full scan checks every important
+				page on your site.
+			</div>
 			{incompleteVisualScan ?
 				<div className='border-b border-amber-200 bg-amber-50 px-5 py-3 text-center text-sm text-amber-950 md:px-10'>
 					Visual scan did not finish in time — findings below use{' '}
@@ -867,7 +851,7 @@ function ResultsView({
 							/>
 							<span>Audit completed</span>
 							<span>·</span>
-							<span>{totalIssueCount} issues detected</span>
+							<span>{displayIssueCount} issues across your site</span>
 						</div>
 
 						{/* Site URL row */}
@@ -892,16 +876,15 @@ function ResultsView({
 							Your website is{' '}
 							<span style={{ color: '#FCA5A5' }}>failing</span>
 							<br />
-							in{' '}
 							<span style={{ color: '#FCA5A5', fontFeatureSettings: '"tnum"' }}>
-								{totalIssueCount}
+								{displayIssueCount}
 							</span>{' '}
-							ways right now.
+							issues across your site.
 						</h1>
 						<p className='mt-4 max-w-xl text-[15px] leading-relaxed text-white/65'>
-							A full automated + AI review just found{' '}
-							<strong className='text-white'>{totalIssueCount} issues</strong>{' '}
-							actively affecting how real visitors experience your site.{' '}
+							A full automated + AI review points to{' '}
+							<strong className='text-white'>{displayIssueCount} issues across your site</strong>{' '}
+							actively affecting how real visitors experience it.{' '}
 							<strong className='text-white'>3 critical issues are shown free below.</strong>
 						</p>
 

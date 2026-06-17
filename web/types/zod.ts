@@ -36,6 +36,12 @@ export const scanStartSchema = z
 		url: z.string().min(1),
 		email: z.string().optional(),
 		package: scanPackageSchema,
+		/**
+		 * Set by the client when the user confirms the "we test public pages
+		 * only" interstitial for a web-app/auth homepage. Skips the gate's
+		 * confirmation prompt on the second submit. Paid packages only.
+		 */
+		acknowledgePublicOnly: z.boolean().optional(),
 	})
 	.superRefine((data, ctx) => {
 		const emailTrim =

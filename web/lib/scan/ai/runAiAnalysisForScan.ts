@@ -307,6 +307,7 @@ function buildAnalysisPromptAfterImages(input: {
 	const programmaticRollup = pd?.programmaticRollup ?? null;
 	const responseSecurity = pd?.responseSecurity ?? null;
 	const interactionTests = pd?.interactionTests ?? null;
+	const interactionProbes = pd?.interactionProbes ?? null;
 
 	const externalLinksSameTab = allLinks
 		.filter((link) => {
@@ -409,8 +410,29 @@ function buildAnalysisPromptAfterImages(input: {
 			2,
 		),
 		'',
+		'OBSERVED INTERACTION BEHAVIOUR (real scroll / click / navigation actions performed on the page — this is GROUND TRUTH, not inference from the screenshot):',
+		'When an entry describes a real observed behaviour, describe THAT behaviour in plain English in the issue (e.g. "When you scroll down, the navigation menu disappears instead of staying visible") instead of guessing from the static screenshot. Prefer this observed behaviour over any screenshot-based assumption when they conflict. Each entry: { name, scope, status, observation }.',
+		JSON.stringify(
+			(Array.isArray((interactionProbes as Record<string, unknown> | null)?.results)
+				? ((interactionProbes as Record<string, unknown>).results as Array<Record<string, unknown>>)
+						.filter((r) => r.status !== 'skip')
+						.map(({ name, scope, status, observation }) => ({ name, scope, status, observation }))
+				: []
+			),
+			null,
+			2,
+		),
+		'',
 	].join('\n');
 }
+
+/**
+ * Constant placeholder for the legacy issues.fix_instructions column. The model
+ * no longer produces fix guidance and the report no longer renders it, but the
+ * column is NOT NULL with a minimum-length CHECK — this satisfies it (>= 20 chars)
+ * without a DB migration. It is never displayed anywhere.
+ */
+const FIX_INSTRUCTIONS_PLACEHOLDER = 'Not included in report.';
 
 type IssueInsert = {
 	scan_id: string;
@@ -438,17 +460,30 @@ function pickFirstMatching(
 }
 
 /**
- * Pick the FREE_PREVIEW_ISSUE_COUNT issues most likely to convince a visitor
- * that there are real problems worth fixing. Priority:
- *  1. Broken functionality (critical OR high) — things that stop visitors cold
- *  2. Visible UI bug     (critical OR high) — things visitors can clearly see
- *  3. Mobile/responsive break (critical OR high) — reaches the widest audience
- *  4. Any remaining critical or high severity issue (broadens coverage)
- *  5. Anything left (sorted by display_order, already severity-ranked)
+ * Pick the FREE_PREVIEW_ISSUE_COUNT issues most likely to convince a
+ * non-technical site owner that there are real problems worth fixing.
+ *
+ * Functional and usability problems (broken buttons/links/forms, navigation
+ * issues) convert best, so they lead. Purely visual (ui_bugs) and especially
+ * accessibility issues are deprioritised. Priority:
+ *  1. functionality   (critical OR high) — broken things stop visitors cold
+ *  2. usability_ux    (critical OR high) — confusing navigation / flows
+ *  3. responsiveness  (critical OR high) — mobile breaks, widest audience
+ *  4. ui_bugs         (critical OR high) — visible visual defects
+ *  5. Any other critical/high EXCEPT accessibility (broadens coverage)
+ *  6. Any remaining critical/high (now including accessibility)
+ *  7. Anything left (sorted by display_order, already severity-ranked)
  *
  * Using pickFirstMatching removes the chosen item from `remaining` so the same
  * issue can never appear twice and we always progress toward `count`.
  */
+const FREE_PREVIEW_CATEGORY_PRIORITY = [
+	'functionality',
+	'usability_ux',
+	'responsiveness',
+	'ui_bugs',
+] as const;
+
 function selectBalancedPreview(
 	issues: IssueInsert[],
 	count: number,
@@ -456,48 +491,39 @@ function selectBalancedPreview(
 	const remaining = [...issues];
 	const selected: IssueInsert[] = [];
 
-	// 1. Broken functionality — functional or broken issues affect every visitor
-	const brokenFunctionality = pickFirstMatching(
-		remaining,
-		(issue) =>
-			issue.category === 'functionality' &&
-			(issue.severity === 'critical' || issue.severity === 'high'),
-	);
-	if (brokenFunctionality) selected.push(brokenFunctionality);
+	const isCriticalOrHigh = (issue: IssueInsert) =>
+		issue.severity === 'critical' || issue.severity === 'high';
 
-	// 2. UI bug — visible defects build immediate distrust
-	if (selected.length < count) {
-		const uiBug = pickFirstMatching(
+	// 1–4. Strong converters first, in category priority order. Functional and
+	//       usability issues lead; visual defects come after them.
+	for (const category of FREE_PREVIEW_CATEGORY_PRIORITY) {
+		if (selected.length >= count) break;
+		const picked = pickFirstMatching(
 			remaining,
-			(issue) =>
-				issue.category === 'ui_bugs' &&
-				(issue.severity === 'critical' || issue.severity === 'high'),
+			(issue) => issue.category === category && isCriticalOrHigh(issue),
 		);
-		if (uiBug) selected.push(uiBug);
+		if (picked) selected.push(picked);
 	}
 
-	// 3. Responsiveness/mobile break — majority of traffic is mobile
-	if (selected.length < count) {
-		const mobileBreak = pickFirstMatching(
-			remaining,
-			(issue) =>
-				issue.category === 'responsiveness' &&
-				(issue.severity === 'critical' || issue.severity === 'high'),
-		);
-		if (mobileBreak) selected.push(mobileBreak);
-	}
-
-	// 4. Fill with any other critical/high issue (covers usability, seo, perf, etc.)
+	// 5. Any other critical/high issue that is NOT accessibility (accessibility
+	//    is the least persuasive to non-technical owners, so it waits).
 	while (selected.length < count) {
-		const criticalOrHigh = pickFirstMatching(
+		const next = pickFirstMatching(
 			remaining,
-			(issue) => issue.severity === 'critical' || issue.severity === 'high',
+			(issue) => isCriticalOrHigh(issue) && issue.category !== 'accessibility',
 		);
-		if (!criticalOrHigh) break;
-		selected.push(criticalOrHigh);
+		if (!next) break;
+		selected.push(next);
 	}
 
-	// 5. Fill with whatever remains (already sorted by display_order/severity)
+	// 6. Any remaining critical/high (now including accessibility).
+	while (selected.length < count) {
+		const next = pickFirstMatching(remaining, isCriticalOrHigh);
+		if (!next) break;
+		selected.push(next);
+	}
+
+	// 7. Fill with whatever remains (already sorted by display_order/severity).
 	while (selected.length < count && remaining.length > 0) {
 		const next = remaining.shift();
 		if (!next) break;
@@ -772,7 +798,10 @@ export async function persistScanIssuesFromAnalysis(
 				description: issue.description,
 				impact: issue.impact,
 				page_section: pageSection,
-				fix_instructions: issue.fix_instructions,
+				// "How to fix" is no longer generated or shown. The issues.fix_instructions
+				// column is NOT NULL, so write a constant, never-displayed placeholder to
+				// satisfy it without a schema migration (see FIX_INSTRUCTIONS_PLACEHOLDER).
+				fix_instructions: FIX_INSTRUCTIONS_PLACEHOLDER,
 				screenshot_url: page.screenshot_desktop_url ?? null,
 				is_in_free_preview: false,
 				display_order: 0,

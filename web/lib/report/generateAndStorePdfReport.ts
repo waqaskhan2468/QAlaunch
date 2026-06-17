@@ -117,7 +117,7 @@ async function fetchReportData(
 		supabase
 			.from('issues')
 			.select(
-				'id, category, severity, title, description, impact, page_section, fix_instructions, display_order, scan_pages(page_url)',
+				'id, category, severity, title, description, impact, page_section, display_order, scan_pages(page_url)',
 			)
 			.eq('scan_id', scanId)
 			.order('display_order', { ascending: true }),
@@ -154,9 +154,6 @@ async function fetchReportData(
 			impact: String((row as { impact: string }).impact),
 			page_section:
 				(row as { page_section: string | null }).page_section ?? null,
-			fix_instructions: String(
-				(row as { fix_instructions: string }).fix_instructions,
-			),
 			display_order: Number(
 				(row as { display_order: number }).display_order ?? 0,
 			),

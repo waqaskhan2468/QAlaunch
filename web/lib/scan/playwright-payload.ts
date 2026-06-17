@@ -39,6 +39,7 @@ export function buildPlaywrightPayloadFromScanResult(result: ScanResult) {
 		responsive: responsiveToScanMeta(result.responsive),
 		axeViolations: result.axe ?? null,
 		interactionTests: result.interactionTests ?? null,
+		interactionProbes: result.interactionProbes ?? null,
 	};
 
 	if (result.ok) {

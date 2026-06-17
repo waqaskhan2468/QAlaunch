@@ -9,7 +9,6 @@ export type ReportIssue = {
 	description: string;
 	impact: string;
 	page_section: string | null;
-	fix_instructions: string;
 	display_order: number;
 };
 

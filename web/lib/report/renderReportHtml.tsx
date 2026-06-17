@@ -20,15 +20,7 @@ function estimateIssueHeight(issue: ReportIssue): number {
 	const titleLines = 1 + extraLines(issue.title, 72);
 	const descLines = 1 + extraLines(issue.description, CHARS_PER_LINE);
 	const impactLines = 1 + extraLines(issue.impact, CHARS_PER_LINE);
-	// fix_instructions parsed into numbered list — roughly 20px per step
-	const stepCount = countFixSteps(issue.fix_instructions);
-	const fixH = stepCount > 0 ? stepCount * 20 : 1 + extraLines(issue.fix_instructions, CHARS_PER_LINE) * 16;
-	return ISSUE_BASE_H + titleLines * 20 + descLines * 17 + impactLines * 17 + fixH;
-}
-
-function countFixSteps(text: string): number {
-	const matches = text.match(/^\d+\./gm);
-	return matches ? matches.length : 0;
+	return ISSUE_BASE_H + titleLines * 20 + descLines * 17 + impactLines * 17;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,30 +106,6 @@ function escapeHtml(value: string): string {
 		.replaceAll("'", '&#39;');
 }
 
-/**
- * Parse "1. Step one. 2. Step two." into <ol><li> items.
- * Falls back to plain text if no numbered steps found.
- */
-function formatFixInstructions(text: string): string {
-	// Match numbered steps: "1." "2." etc. at start of a token
-	const cleaned = text.trim();
-	const steps = cleaned.split(/(?=\b\d+\.\s)/).map((s) => s.trim()).filter(Boolean);
-
-	if (steps.length <= 1) {
-		// No numbered steps — just wrap in a paragraph
-		return `<p class="fix-text">${escapeHtml(cleaned)}</p>`;
-	}
-
-	const items = steps
-		.map((s) => {
-			// Strip leading "1. " prefix
-			const body = s.replace(/^\d+\.\s*/, '').trim();
-			return `<li>${escapeHtml(body)}</li>`;
-		})
-		.join('');
-	return `<ol class="fix-list">${items}</ol>`;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Score ring
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,7 +150,6 @@ function issueToHtml(issue: ReportIssue): string {
 	const sev = severityConfig(issue.severity);
 	const cat = categoryChipStyle(issue.category);
 	const catLabel = categoryDisplayLabel(issue.category);
-	const fixHtml = formatFixInstructions(issue.fix_instructions);
 
 	// Shorten long page_section labels
 	const section = issue.page_section && issue.page_section.length > 60
@@ -206,11 +173,6 @@ function issueToHtml(issue: ReportIssue): string {
   <div class="field-block impact-block">
     <div class="field-key">⚡ Why it matters</div>
     <div class="field-val">${escapeHtml(issue.impact)}</div>
-  </div>
-
-  <div class="field-block fix-block">
-    <div class="field-key">🔧 How to fix</div>
-    <div class="fix-body">${fixHtml}</div>
   </div>
 </div>`;
 }
@@ -610,16 +572,6 @@ body {
 .field-val { font-size: 11.5px; color: var(--ink-3); line-height: 1.58; }
 
 .impact-block { background: #fffbeb; border: 1px solid #fef3c7; }
-.fix-block { background: #f0fdf4; border: 1px solid #dcfce7; }
-
-/* ── Fix instructions list ────────────────────────────────── */
-.fix-text { font-size: 11.5px; color: var(--ink-3); line-height: 1.58; }
-.fix-list {
-  padding-left: 18px;
-  display: flex; flex-direction: column; gap: 4px;
-  margin: 0;
-}
-.fix-list li { font-size: 11.5px; color: var(--ink-3); line-height: 1.55; padding-left: 2px; }
 
 /* ── Performance cards ────────────────────────────────────── */
 .perf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
@@ -738,7 +690,7 @@ ${sectionsHtml}
       <div class="footer-heading">Recommended next steps</div>
       <div class="footer-text">
         Start with Critical and High severity issues — these affect real visitors right now.
-        Share this report with your developer and use the "How to fix" instructions in each card as a starting point.
+        Share this report with your developer so they can reproduce and resolve each issue.
         Medium and Low issues can be addressed in a follow-up sprint.
       </div>
       <a class="footer-contact" href="mailto:support@getqalaunch.com">Questions? Contact support@getqalaunch.com</a>

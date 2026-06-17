@@ -20,7 +20,7 @@ const DEFAULT_MAX_RETRIES = 2;
 // null — the JSON is incomplete and parseClaudeIssues throws "Invalid Claude
 // issues payload", killing the scan as NonRetriable.
 //
-// A typical page with 15–20 issues (title + description + fix_instructions each)
+// A typical page with 15–20 issues (title + description + impact each)
 // uses ~4 000–6 000 output tokens. 8 000 gives a safe ceiling without wasting
 // significant cost on the typical case.
 //
@@ -140,15 +140,15 @@ RULES:
 2. Be specific; name the exact section or element where the issue appears
 3. Every issue must have severity: critical, high, medium, or low
 4. Every issue must have a real business impact statement
-5. Provide developer-actionable fix instructions
-6. Categorize issues correctly
-7. Order findings by severity within each category
-8. Be concise but specific
-9. Reference exact pages and sections
-10. Do NOT report generic improvements; only real, observable problems
-11. Do NOT pad findings — if fewer than 3 genuine issues exist, report only what you actually observe. An empty or short issues array is valid; a clean page is a valid result.
-12. Use this category mapping strictly:
-13. Write 'description' and 'impact' in plain English for the website owner — describe what the visitor sees or experiences (e.g. "The menu button on mobile doesn't open the navigation" or "Visitors can't complete the checkout because the Pay button is greyed out"). Avoid technical jargon, HTML tag names, CSS property names, WCAG criteria references, and internal code terms in these two fields. Technical implementation details belong ONLY in 'fix_instructions'.
+5. Categorize issues correctly
+6. Order findings by severity within each category
+7. Be concise but specific
+8. Reference exact pages and sections
+9. Do NOT report generic improvements; only real, observable problems
+10. Do NOT pad findings — if fewer than 3 genuine issues exist, report only what you actually observe. An empty or short issues array is valid; a clean page is a valid result.
+11. Write each 'title' as ONE short, plain-English sentence naming the user-facing symptom the way a human tester would say it out loud — e.g. "Footer links open pages without scrolling to the top" or "The mobile menu button doesn't open the navigation". No acronyms, no code/CSS/HTML terms, no element or property names, no jargon.
+12. Write 'description' and 'impact' in plain English for the website owner — describe what the visitor sees or experiences and why it matters for the business (e.g. "Visitors can't complete the checkout because the Pay button is greyed out"). Avoid technical jargon, HTML tag names, CSS property names, WCAG criteria references, and internal code terms.
+13. Use this category mapping strictly:
     - responsiveness: viewport-specific layout breaks (overlap, clipping, horizontal scroll, content off-screen, broken wrapping, elements disappearing only on some screen sizes)
     - ui_bugs: visual defects not tied to viewport size (color, contrast, icon/image glitches, spacing inconsistencies visible across sizes)
     - usability_ux: interaction/confusion issues (unclear CTAs, poor flow, discoverability), not raw layout breakage
@@ -193,7 +193,6 @@ FIELD LENGTHS (required for database storage; responses outside these bounds are
 - title: 20-80 characters (after trimming whitespace)
 - description: 100-800 characters
 - impact: 20-200 characters
-- fix_instructions: at least 20 characters (be actionable)
 
 OUTPUT: You MUST call the tool "${REPORT_SCAN_ISSUES_TOOL_NAME}" exactly once with every issue in the "issues" array. Do not return issues as plain JSON in assistant text.
 
@@ -251,11 +250,6 @@ const REPORT_SCAN_ISSUES_INPUT_SCHEMA = {
 					description: { type: 'string', minLength: 100, maxLength: 800 },
 					impact: { type: 'string', minLength: 20, maxLength: 200 },
 					page_section: { type: 'string', maxLength: 500 },
-					fix_instructions: {
-						type: 'string',
-						minLength: 20,
-						maxLength: 8000,
-					},
 					evidence: {
 						type: 'string',
 						enum: [
@@ -288,7 +282,6 @@ const REPORT_SCAN_ISSUES_INPUT_SCHEMA = {
 					'title',
 					'description',
 					'impact',
-					'fix_instructions',
 					'evidence',
 					'confidence',
 				],

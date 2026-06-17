@@ -267,6 +267,84 @@ function detectAuthPresence(
 }
 
 // ─────────────────────────────────────────────
+// PRE-SCAN GATE — STRICT WEB-APP / AUTH-FORM DETECTION
+// ─────────────────────────────────────────────
+
+export type WebAppGateSignal = {
+	/** Homepage is itself a login / sign-up screen (an auth form dominates it). */
+	authForm: boolean;
+	/** Homepage looks like an authenticated web-app shell, not a public page. */
+	appShell: boolean;
+};
+
+const APP_SUBDOMAIN_PREFIXES = [
+	'app.',
+	'accounts.',
+	'auth.',
+	'id.',
+	'login.',
+	'workspace.',
+	'my.',
+];
+
+/**
+ * Strict detection used by the pre-scan validation gate (see
+ * `lib/scan/validate-target.ts`). Deliberately narrower than `requiresAuth`:
+ * a marketing site that merely links to "Login" / "Sign up" in its nav is NOT
+ * flagged — only a homepage that is genuinely a login/sign-up form or an
+ * authenticated app shell. This keeps the public-pages funnel friction-free.
+ *
+ * Pass `$` when the HTML is already parsed so it is not loaded twice.
+ */
+export function detectWebAppGate(
+	homepageHtml: string,
+	baseUrl: string,
+	$?: cheerio.CheerioAPI,
+): WebAppGateSignal {
+	const doc = $ ?? cheerio.load(homepageHtml);
+	const { html, nav } = normalisePage(doc);
+	const url = new URL(baseUrl);
+	const host = url.hostname.toLowerCase();
+	const path = url.pathname.toLowerCase();
+
+	// ── Auth form: a password field on the page is a near-certain login/signup
+	//    screen (public marketing homepages do not embed password inputs).
+	const hasPasswordField =
+		doc('input[type="password" i]').length > 0 ||
+		html.includes('type="password"') ||
+		html.includes("type='password'") ||
+		html.includes('type=password');
+
+	const isAuthPath =
+		path === '/app' ||
+		path.startsWith('/app/') ||
+		/^\/(login|log-in|signin|sign-in|signup|sign-up|register|auth|account)(\/|$)/.test(
+			path,
+		);
+
+	const authForm = hasPasswordField || isAuthPath;
+
+	// ── App shell: dedicated app subdomain, or nav that only an authenticated
+	//    product surface would carry (logout / my account, or a Dashboard link).
+	const isAppSubdomain = APP_SUBDOMAIN_PREFIXES.some((prefix) =>
+		host.startsWith(prefix),
+	);
+
+	const hasLoggedInNav = includesAny(nav, [
+		'log out',
+		'logout',
+		'sign out',
+		'my account',
+	]);
+
+	const hasDashboardNav = includesAny(nav, ['dashboard']);
+
+	const appShell = isAppSubdomain || hasLoggedInNav || hasDashboardNav;
+
+	return { authForm, appShell };
+}
+
+// ─────────────────────────────────────────────
 // WEBSITE TYPE SIGNALS
 // ─────────────────────────────────────────────
 

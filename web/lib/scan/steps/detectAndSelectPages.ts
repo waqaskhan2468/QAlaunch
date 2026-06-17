@@ -221,6 +221,22 @@ export async function detectAndSelectPagesStep(
 	const $ = cheerio.load(html);
 
 	const detection = detectWebsiteType(html, targetUrl, $);
+
+	// Free tier is a homepage-only preview — never test beyond the homepage,
+	// regardless of what page selection would otherwise pick. Detection above
+	// still runs so the AI keeps its website-type focus hints for the homepage.
+	if (pkg === 'free') {
+		const homepageUrl = new URL('/', targetUrl).toString();
+		const homepageOnly: SelectedScanPage[] = [
+			{ url: homepageUrl, role: 'homepage' },
+		];
+		return {
+			detection,
+			pagesToTest: [homepageUrl],
+			selectedPages: homepageOnly,
+		};
+	}
+
 	const selectedPages = selectPagesToTestWithRoles(
 		html,
 		targetUrl,

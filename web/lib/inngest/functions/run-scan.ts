@@ -90,12 +90,12 @@ export const runScan = inngest.createFunction(
 		// ── Phase 2: Browser scans + PageSpeed (all parallel) ───────────────
 		// Each scan-browser step creates its own Browserbase session so Inngest
 		// retries never reuse a dead/stale shared session.
-		const runPageScan = async (pageUrl: string) => {
+		const runPageScan = async (pageUrl: string, isHomepage = false) => {
 			const slug = stepIdFromPageUrl(pageUrl);
 			try {
 				// scan-browser writes all scan data directly to the DB row — no separate persist step.
 				await step.run(`scan-browser:${slug}`, () =>
-					scanBrowserOnlyStep({ scanId, pageUrl }),
+					scanBrowserOnlyStep({ scanId, pageUrl, pkg, isHomepage }),
 				);
 			} catch {
 				await step.run(`scan-persist-failed:${slug}`, () =>
@@ -125,7 +125,7 @@ export const runScan = inngest.createFunction(
 		const homepageUrl = pagesToTest[0];
 		const remainingFromDetect = pagesToTest.slice(1);
 
-		await runPageScan(homepageUrl);
+		await runPageScan(homepageUrl, true);
 
 		// ── Post-scan page discovery ──────────────────────────────────────
 		// For paid packages where detect-and-select-pages fell back to homepage-only

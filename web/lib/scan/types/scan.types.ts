@@ -90,10 +90,15 @@ export type ResponsiveResult = {
 	width: number;
 	height: number;
 	hasHorizontalScroll: boolean;
+	/**
+	 * Single JPEG for this viewport. Captured full-page (content height capped at
+	 * MAX_FULL_PAGE_HEIGHT_PX in screenshots.ts); falls back to a viewport-only
+	 * capture if the full-page attempt exceeds its time ceiling.
+	 */
 	screenshot: Buffer;
-	/** Optional vertical slices (legacy); mobile uses one full-page `screenshot` */
+	/** Optional vertical slices (legacy, unused — capture produces one image). */
 	slices?: Buffer[];
-	/** Number of image assets for this viewport (1 for full-page mobile/desktop) */
+	/** Number of image assets for this viewport (always 1). */
 	sliceCount?: number;
 };
 
@@ -207,6 +212,8 @@ export type ScanResult = {
 	responseSecurityMeta?: ResponseSecurityMeta;
 	/** Active interaction tests: 404, form validation, search, CTA, nav links. */
 	interactionTests?: import('@/lib/scan/services/interactionTests').InteractionTestsPayload;
+	/** Active interaction probes: sticky nav, footer scroll, ext-link target, CTA click state. */
+	interactionProbes?: import('@/lib/scan/services/interactionProbes').InteractionProbesPayload | null;
 };
 
 // ─── Axe ───────────────────────────────────────────────────────────────────

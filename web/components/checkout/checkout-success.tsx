@@ -13,6 +13,11 @@ import {
 } from "lucide-react"
 
 import { planForCheckoutPackage } from "@/components/pricing/pricing-plans"
+import {
+  allPagesAnalyzed,
+  countInterimIssues,
+  deriveScanProgressMessage,
+} from "@/lib/scan/progressMessage"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,8 +32,13 @@ type ScanRow = {
   error_message: string | null
 }
 
+type ScanPageStatus = {
+  ai_analysis?: { status?: string; issues?: unknown[] } | null
+}
+
 type StatusPayload = {
   scan: ScanRow
+  pages?: ScanPageStatus[]
 }
 
 // ─── Progress steps ───────────────────────────────────────────────────────────
@@ -128,14 +138,22 @@ export function CheckoutSuccessExperience() {
   const scanId = params.get("scanId")
 
   const [scan, setScan] = useState<ScanRow | null>(null)
+  const [pages, setPages] = useState<ScanPageStatus[] | null>(null)
   const [phase, setPhase] = useState<"loading" | "polling" | "done" | "failed" | "not_found" | "free_scan">("loading")
   const [timedOut, setTimedOut] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
   // Bumped by the retry handler to restart polling from scratch.
   const [pollToken, setPollToken] = useState(0)
+  // Drives cosmetic rotation of the crawl sub-labels within the real phase.
+  const [rotateTick, setRotateTick] = useState(0)
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    const id = setInterval(() => setRotateTick((t) => t + 1), 2_500)
+    return () => clearInterval(id)
+  }, [])
 
   // Poll /api/scan/status/{scanId} until the report is ready (done + PDF) or it
   // fails. Starts immediately on load and repeats every POLL_INTERVAL_MS.
@@ -190,6 +208,7 @@ export function CheckoutSuccessExperience() {
         }
 
         setScan(s)
+        setPages(Array.isArray(data.pages) ? data.pages : null)
 
         if (s.status === "done" && s.report_pdf_url) {
           // Fully complete: report generated and ready to download.
@@ -305,6 +324,18 @@ export function CheckoutSuccessExperience() {
   const currentStatus = scan?.status ?? "pending"
   const hasPdf = Boolean(scan?.report_pdf_url)
 
+  // Real-state live status line, sourced from the same poll as the steps above.
+  const progressMessage = deriveScanProgressMessage({
+    status: currentStatus,
+    host,
+    pageCount: pages?.length ?? null,
+    interimIssueCount: countInterimIssues(pages),
+    allPagesAnalyzed: allPagesAnalyzed(pages),
+    hasReport: hasPdf,
+    isPaid: true,
+    rotateTick,
+  })
+
   return (
     <div className="mx-auto max-w-xl px-5 py-14 md:py-20">
       <div className="rounded-2xl border border-accent-pale bg-white p-8 shadow-card md:p-10">
@@ -351,10 +382,23 @@ export function CheckoutSuccessExperience() {
             <>
               Your <span className="font-semibold text-ink">{tierLabel}</span> audit
               {host ? <> for <span className="font-mono font-semibold text-ink">{host}</span></> : null}{" "}
-              is running. Stay on this page or check back later.
+              is running.{" "}
+              <span className="font-semibold text-ink">
+                You can close this page — we&apos;ll email your report
+                {scan?.user_email ? <> to <span className="break-all font-mono">{scan.user_email}</span></> : null}{" "}
+                as soon as it&apos;s ready. No need to wait here.
+              </span>
             </>
           )}
         </p>
+
+        {/* Live status line (real pipeline state) */}
+        {phase !== "done" && phase !== "failed" && progressMessage && (
+          <div className="mt-6 flex items-center justify-center gap-3 rounded-xl border border-brand/20 bg-brand-pale/40 px-5 py-3.5">
+            <Loader2 className="size-4 shrink-0 animate-spin text-brand" strokeWidth={2.5} />
+            <p className="text-sm font-semibold text-ink">{progressMessage}</p>
+          </div>
+        )}
 
         {/* Progress steps */}
         {phase !== "failed" && (
@@ -459,8 +503,12 @@ export function CheckoutSuccessExperience() {
             ) : (
               <p className="mt-3 text-sm leading-snug text-body">
                 Most reports arrive within{" "}
-                <span className="font-semibold text-ink">5 minutes</span>. You can
-                leave this page — we&apos;ll email you when it&apos;s ready.
+                <span className="font-semibold text-ink">5 minutes</span>.{" "}
+                <span className="font-semibold text-ink">
+                  You can close this page — we&apos;ll email your report
+                  {scan?.user_email ? <> to {scan.user_email}</> : ""} as soon as it&apos;s
+                  ready. No need to wait here.
+                </span>
               </p>
             )}
           </div>

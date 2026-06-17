@@ -7,6 +7,7 @@ import {
 	createBrowserbaseSession,
 } from '@/lib/scan/browser';
 import type { ScanResult, ScanStep } from '../types/scan.types';
+import type { ScanPackage } from '@/types/zod';
 import { collectAxeViolations } from './accessibility';
 import { attachPageDiagnostics } from './diagnostics';
 import {
@@ -21,6 +22,7 @@ import { collectLinks } from './links';
 import { captureResponsiveFromPage, startMobileNavigation } from './responsive';
 import { blockThirdPartyResources } from './resourceBlocklist';
 import { captureDesktopScreenshot } from './screenshots';
+import { collectInteractionProbes } from './interactionProbes';
 import { collectBrokenStates } from './brokenStates';
 import { collectInteractionTests } from './interactionTests';
 import { logScanTiming } from './scan-timing';
@@ -41,12 +43,12 @@ const DEFAULT_PAGE_SCAN_TIMEOUT_MS = 240_000;
 // sites where mobile nav stalls, keeping the total scan within ~1 minute.
 const MOBILE_PHASE_TIMEOUT_MS = 30_000;
 
-// Node.js-level ceiling for desktop screenshot capture.
-// Viewport JPEG budget: addStyleTag(0.1s) + fonts(3-5s) + capture(1-2s) ≈ 3-7s.
-// Playwright timeout inside captureScreenshot is 10s.
-// 14s ceiling = 10s Playwright + 4s safety margin.
-// Full-page was removed: it required CDP scroll commands that hung for 114s on
-// congested Browserbase, orphaning the goroutine and blocking context.close().
+// Node.js-level ceiling for desktop screenshot capture — the outer backstop.
+// captureScreenshot tries full-page (≤7s) then falls back to viewport-only (≤4s),
+// ~11s worst case internally, each guarded by its own Node-level setTimeout.
+// This 14s ceiling sits above that internal budget so a CDP-level hang in
+// full-page can never orphan the goroutine and block context.close() — the
+// historical 114s failure mode. (Full-page itself is back, but bounded.)
 const DESKTOP_SCREENSHOT_TIMEOUT_MS = 14_000;
 
 // Reduce from 10 s → 8 s. Individual page.evaluate() / waitFor* calls on
@@ -168,7 +170,8 @@ type MobileNavResult = Awaited<ReturnType<typeof startMobileNavigation>>;
 async function captureMobileFromNavigation(
 	mobileNav: MobileNavResult | null,
 	result: ScanResult,
-	timing?: { scanId: string; pageUrl: string },
+	fullPage: boolean,
+	timing?: { scanId: string; pageUrl: string; tier?: string },
 ): Promise<Buffer | undefined> {
 	if (!mobileNav) {
 		result.warnings.push(
@@ -187,7 +190,7 @@ async function captureMobileFromNavigation(
 
 	try {
 		const responsiveResult = await runStep(result.steps, 'responsive', () =>
-			captureResponsiveFromPage(mobilePage, mobileNav.viewport, timing),
+			captureResponsiveFromPage(mobilePage, mobileNav.viewport, fullPage, timing),
 		);
 
 		if (responsiveResult) {
@@ -205,13 +208,18 @@ async function scanSingleUrl(
 	browser: Browser,
 	url: string,
 	scanId: string,
+	pkg: ScanPackage | undefined,
+	isHomepage: boolean,
 	writer?: ScanWriter,
 	registerAbort?: (abort: () => Promise<void>) => void,
 ): Promise<ScanResult> {
 	const context = await browser.newContext({ viewport: DESKTOP_VIEWPORT });
 	const result = createEmptyScanResult(scanId, url);
 	const scanStartedAt = Date.now();
-	const stepTiming = { scanId, pageUrl: url };
+	// Paid tiers get full-page capture; free stays viewport-only (fast/cheap).
+	// Unknown package defaults to viewport-only as the conservative choice.
+	const attemptFullPage = pkg != null && pkg !== 'free';
+	const stepTiming = { scanId, pageUrl: url, tier: pkg ?? 'unknown' };
 
 	registerAbort?.(() => closeContext(context));
 
@@ -272,7 +280,11 @@ async function scanSingleUrl(
 					resolve(undefined);
 				}, DESKTOP_SCREENSHOT_TIMEOUT_MS);
 				runStep(result.steps, 'screenshot:desktop', () =>
-					captureDesktopScreenshot(page, { fast: true, timing: stepTiming }),
+					captureDesktopScreenshot(page, {
+						fullPage: attemptFullPage,
+						fast: true,
+						timing: stepTiming,
+					}),
 				)
 					.then((buf) => {
 						clearTimeout(nodeTimer);
@@ -339,7 +351,12 @@ async function scanSingleUrl(
 			mobileNavigationPromise.then(async (mobileNav) => {
 				if (!mobileNav) return undefined;
 				mobileContextToClose = mobileNav.page.context();
-				return captureMobileFromNavigation(mobileNav, result, stepTiming);
+				return captureMobileFromNavigation(
+					mobileNav,
+					result,
+					attemptFullPage,
+					stepTiming,
+				);
 			}),
 			new Promise<undefined>((resolve) => {
 				setTimeout(() => {
@@ -369,6 +386,24 @@ async function scanSingleUrl(
 			if (writer && !writer.hasScreenshot('mobile')) {
 				await writer.uploadScreenshot('mobile', mobileScreenshot);
 			}
+		}
+
+		// ── Phase 3 — active interaction probes ────────────────────────────────
+		// Runs LAST, on the now-idle desktop page, because these checks scroll /
+		// click / navigate (unlike the Phase 1 collectors, which must not). Each
+		// probe is independently guarded + time-boxed; the whole phase is wrapped
+		// so it can never crash the page scan. Site-wide checks (sticky nav, footer
+		// scroll) run only on the homepage; per-page checks run on every page.
+		try {
+			result.interactionProbes = await collectInteractionProbes(page, url, {
+				siteWide: isHomepage,
+				links: result.links,
+				timing: stepTiming,
+			});
+		} catch (error) {
+			result.warnings.push(
+				`interaction_probes_failed: ${error instanceof Error ? error.message : 'unknown'}`,
+			);
 		}
 
 		const navigationOk = hasSuccessfulNavigation(result.steps);
@@ -419,12 +454,14 @@ async function scanSingleUrlWithTimeout(
 	browser: Browser,
 	url: string,
 	scanId: string,
+	pkg: ScanPackage | undefined,
+	isHomepage: boolean,
 	writer?: ScanWriter,
 ): Promise<ScanResult> {
 	let abortScan: (() => Promise<void>) | null = null;
 
 	const result = await withPageTimeout(
-		scanSingleUrl(browser, url, scanId, writer, (abort) => {
+		scanSingleUrl(browser, url, scanId, pkg, isHomepage, writer, (abort) => {
 			abortScan = abort;
 		}),
 		url,
@@ -450,7 +487,7 @@ export async function runPlaywrightScanOnSession(
 	connectUrl: string,
 	scanId: string,
 	url: string,
-	options?: { writer?: ScanWriter },
+	options?: { writer?: ScanWriter; pkg?: ScanPackage; isHomepage?: boolean },
 ): Promise<ScanResult> {
 	const browser = await connectBrowserbase(connectUrl);
 	try {
@@ -458,6 +495,8 @@ export async function runPlaywrightScanOnSession(
 			browser,
 			url,
 			scanId,
+			options?.pkg,
+			options?.isHomepage ?? false,
 			options?.writer,
 		);
 	} finally {
@@ -469,7 +508,7 @@ export async function runPlaywrightScanOnSession(
 export async function runPlaywrightScanForUrl(
 	scanId: string,
 	pageUrl: string,
-	options?: { writer?: ScanWriter },
+	options?: { writer?: ScanWriter; pkg?: ScanPackage; isHomepage?: boolean },
 ): Promise<ScanResult> {
 	const session: BrowserbaseSession = await createBrowserbaseSession(
 		scanId,
@@ -481,6 +520,8 @@ export async function runPlaywrightScanForUrl(
 			browser,
 			pageUrl,
 			scanId,
+			options?.pkg,
+			options?.isHomepage ?? false,
 			options?.writer,
 		);
 	} finally {

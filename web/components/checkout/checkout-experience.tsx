@@ -71,6 +71,9 @@ export function CheckoutExperience() {
   const [email, setEmail] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isPaying, setIsPaying] = useState(false)
+  // Message from the pre-scan gate when the homepage looks like a web app —
+  // drives the "public pages only" confirmation interstitial.
+  const [pendingConfirm, setPendingConfirm] = useState<string | null>(null)
 
   const fetchAbortRef = useRef<AbortController | null>(null)
 
@@ -80,7 +83,7 @@ export function CheckoutExperience() {
     }
   }, [])
 
-  const handlePay = useCallback(async () => {
+  const handlePay = useCallback(async (acknowledgePublicOnly = false) => {
     if (!plan) return
 
     const msg = validationMessageForCheckout(url, email)
@@ -97,6 +100,7 @@ export function CheckoutExperience() {
     const emailTrim = email.trim()
 
     setError(null)
+    setPendingConfirm(null)
     setIsPaying(true)
 
     try {
@@ -108,12 +112,26 @@ export function CheckoutExperience() {
           url: trimmed,
           package: plan.checkoutPackage,
           email: emailTrim,
+          ...(acknowledgePublicOnly ? { acknowledgePublicOnly: true } : {}),
         }),
       })
 
       const startPayload = (await startRes.json()) as
         | ScanStartPaidResponse
-        | { ok: false; message?: string }
+        | { ok: false; code?: string; message?: string }
+
+      // Pre-scan gate: homepage looks like a web app. Pause and ask the user to
+      // confirm we'll only test public-facing pages before payment.
+      if (
+        startPayload.ok === false &&
+        startPayload.code === "confirm_public_only"
+      ) {
+        setPendingConfirm(
+          startPayload.message ??
+            "This looks like a web application with user accounts. QAlaunch tests public-facing pages only — nothing behind login. Continue, or cancel?",
+        )
+        return
+      }
 
       if (
         !startRes.ok ||
@@ -363,6 +381,45 @@ export function CheckoutExperience() {
           </p>
         </div>
       </div>
+
+      {pendingConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 px-5 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-border-soft bg-white p-6 shadow-card">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-brand-pale px-3 py-1 text-xs font-bold text-brand">
+              <Lock className="size-3" strokeWidth={2.5} />
+              Public pages only
+            </div>
+            <h3 className="font-heading text-xl font-black text-ink">
+              This looks like a web application
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-body">
+              {pendingConfirm}
+            </p>
+            <div className="mt-6 flex flex-col gap-2.5 sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={() => void handlePay(true)}
+                disabled={isPaying}
+                className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-brand px-4 text-sm font-extrabold text-white transition hover:bg-brand-mid focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/35 disabled:pointer-events-none disabled:opacity-65"
+              >
+                {isPaying ? "Starting…" : "Continue with public pages"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingConfirm(null)}
+                disabled={isPaying}
+                className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-border-soft bg-white px-4 text-sm font-bold text-ink transition hover:border-brand hover:text-brand disabled:opacity-65"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

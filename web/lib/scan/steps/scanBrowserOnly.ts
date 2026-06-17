@@ -8,6 +8,7 @@ import {
 	isBrowserRetriable,
 } from '@/lib/scan/steps/scan-errors';
 import type { PageBrowserStepResult } from '@/lib/scan/steps/types';
+import type { ScanPackage } from '@/types/zod';
 
 function slog(event: string, fields: Record<string, unknown>): void {
 	console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...fields }));
@@ -16,6 +17,9 @@ function slog(event: string, fields: Record<string, unknown>): void {
 export async function scanBrowserOnlyStep(input: {
 	scanId: string;
 	pageUrl: string;
+	pkg: ScanPackage;
+	/** True for the homepage scan — gates the site-wide interaction probes. */
+	isHomepage?: boolean;
 }): Promise<PageBrowserStepResult> {
 	const writer = new ScanWriter(input.scanId, input.pageUrl);
 
@@ -24,6 +28,8 @@ export async function scanBrowserOnlyStep(input: {
 
 		const result = await runPlaywrightScanForUrl(input.scanId, input.pageUrl, {
 			writer,
+			pkg: input.pkg,
+			isHomepage: input.isHomepage ?? false,
 		});
 
 		slog('scan:browser_done', {

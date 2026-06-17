@@ -25,7 +25,7 @@ async function navigateForResponsiveCapture(
 	browser: Browser,
 	url: string,
 	viewport: ResponsiveViewport,
-	timing?: { scanId?: string; pageUrl?: string },
+	timing?: { scanId?: string; pageUrl?: string; tier?: string },
 ): Promise<Page> {
 	return timedScanStep(
 		'mobile:navigate',
@@ -64,7 +64,8 @@ async function navigateForResponsiveCapture(
 async function captureFromPage(
 	page: Page,
 	viewport: ResponsiveViewport,
-	timing?: { scanId?: string; pageUrl?: string },
+	fullPage: boolean,
+	timing?: { scanId?: string; pageUrl?: string; tier?: string },
 ): Promise<ResponsiveResult> {
 	return timedScanStep(
 		'screenshot:mobile',
@@ -78,7 +79,10 @@ async function captureFromPage(
 					document.documentElement.clientWidth,
 			);
 
-			const screenshot = await takeScreenshot(page, shotTiming);
+			const screenshot = await takeScreenshot(page, {
+				fullPage,
+				timing: shotTiming,
+			});
 
 			return {
 				viewport: viewport.name,
@@ -93,13 +97,17 @@ async function captureFromPage(
 	);
 }
 
-/** Capture a responsive result from a pre-navigated mobile Page. Caller closes the context. */
+/**
+ * Capture a responsive result from a pre-navigated mobile Page. Caller closes
+ * the context. `fullPage` is threaded from the scan tier (paid → full-page).
+ */
 export async function captureResponsiveFromPage(
 	page: Page,
 	viewport: ResponsiveViewport = RESPONSIVE_VIEWPORTS[0],
-	timing?: { scanId?: string; pageUrl?: string },
+	fullPage = false,
+	timing?: { scanId?: string; pageUrl?: string; tier?: string },
 ): Promise<ResponsiveResult> {
-	return captureFromPage(page, viewport, timing);
+	return captureFromPage(page, viewport, fullPage, timing);
 }
 
 /**
@@ -110,7 +118,7 @@ export async function captureResponsiveFromPage(
 export async function startMobileNavigation(
 	browser: Browser,
 	url: string,
-	timing?: { scanId?: string; pageUrl?: string },
+	timing?: { scanId?: string; pageUrl?: string; tier?: string },
 ): Promise<{ page: Page; viewport: ResponsiveViewport }> {
 	const startedAt = Date.now();
 	const viewport = RESPONSIVE_VIEWPORTS[0];
