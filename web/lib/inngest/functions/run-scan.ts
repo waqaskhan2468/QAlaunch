@@ -168,10 +168,18 @@ export const runScan = inngest.createFunction(
 		}
 
 		// Run remaining page scans + per-page PageSpeed collection in parallel.
+		// FREE TIER: skip PageSpeed Insights entirely — PSI (mobile + desktop, up to
+		// 75s) sits sequentially on the free critical path with no other pages to
+		// overlap it, and the free preview doesn't need Lighthouse metrics. The AI
+		// step handles a missing page_speed_data block gracefully
+		// (formatPageSpeedForClaude → "no_page_speed_data"; pageHasAnalyzableData
+		// still passes on structured scan data). Paid tiers are unaffected.
 		await Promise.allSettled([
-			...[homepageUrl, ...allPagesToScan].map((pageUrl) =>
-				runPageSpeedScan(pageUrl),
-			),
+			...(pkg === 'free'
+				? []
+				: [homepageUrl, ...allPagesToScan].map((pageUrl) =>
+						runPageSpeedScan(pageUrl),
+					)),
 			...allPagesToScan.map((pageUrl) => runPageScan(pageUrl)),
 		]);
 

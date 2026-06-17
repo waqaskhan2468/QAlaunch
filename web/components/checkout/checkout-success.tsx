@@ -392,15 +392,9 @@ export function CheckoutSuccessExperience() {
           )}
         </p>
 
-        {/* Live status line (real pipeline state) */}
-        {phase !== "done" && phase !== "failed" && progressMessage && (
-          <div className="mt-6 flex items-center justify-center gap-3 rounded-xl border border-brand/20 bg-brand-pale/40 px-5 py-3.5">
-            <Loader2 className="size-4 shrink-0 animate-spin text-brand" strokeWidth={2.5} />
-            <p className="text-sm font-semibold text-ink">{progressMessage}</p>
-          </div>
-        )}
-
-        {/* Progress steps */}
+        {/* Progress steps — the active step shows the live real-state message as
+            its detail (see progressMessage in the step list below), so there is
+            exactly one spinner at a time. */}
         {phase !== "failed" && (
           <div className="mt-8 space-y-3">
             {STEPS.map((step) => {
@@ -421,7 +415,7 @@ export function CheckoutSuccessExperience() {
                       {step.label}
                     </p>
                     {state === "active" && (
-                      <p className="mt-0.5 text-xs text-body">{step.detail}</p>
+                      <p className="mt-0.5 text-xs text-body">{progressMessage || step.detail}</p>
                     )}
                   </div>
                 </div>

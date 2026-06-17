@@ -1,4 +1,5 @@
 import type { Page } from 'playwright-core';
+import type { LinksResult, ValidatedLink } from '../types/scan.types';
 import { logScanTiming } from './scan-timing';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -311,54 +312,66 @@ async function testPrimaryCtaReachability(
 
 // ─── Test 5: Navigation link health ──────────────────────────────────────────
 //
-// Uses Node.js HEAD fetch for each nav link — no browser navigation.
+// Reuses the HEAD-check results already gathered once by collectLinks instead of
+// re-fetching nav links. We only do a cheap DOM read to find which links live in
+// the nav/header, then look up their status in the shared link set — no duplicate
+// network requests.
 
-async function testNavigationLinks(page: Page): Promise<InteractionTestResult> {
+async function testNavigationLinks(
+	page: Page,
+	links: ValidatedLink[] | null,
+): Promise<InteractionTestResult> {
 	const id = 'test-nav-links';
 	const name = 'Navigation link health';
 	const startedAt = Date.now();
 
 	try {
-		const navLinks = await page.evaluate(() =>
-			Array.from(document.querySelectorAll<HTMLAnchorElement>('nav a[href], header a[href]'))
-				.map((el) => ({ href: el.getAttribute('href') ?? '', text: el.innerText.trim().slice(0, 50) }))
-				.filter(({ href }) =>
-					href &&
-					!href.startsWith('#') &&
-					!href.startsWith('javascript:') &&
-					!href.startsWith('mailto:') &&
-					!href.startsWith('tel:'),
+		if (!links || links.length === 0) {
+			return makeResult(id, name, 'skip', startedAt, 'Link health data unavailable');
+		}
+
+		// collectLinks normalises hrefs to absolute; anchor.href is also absolute.
+		const statusByHref = new Map(links.map((link) => [link.href, link]));
+
+		// Cheap DOM read (no network): which links are in the nav/header.
+		const navHrefs = await page.evaluate(() =>
+			Array.from(
+				document.querySelectorAll<HTMLAnchorElement>('nav a[href], header a[href]'),
+			)
+				.map((el) => ({ href: el.href, text: el.innerText.trim().slice(0, 50) }))
+				.filter(
+					({ href }) =>
+						href &&
+						!href.startsWith('javascript:') &&
+						!href.startsWith('mailto:') &&
+						!href.startsWith('tel:'),
 				),
 		);
 
-		if (navLinks.length === 0) {
-			return makeResult(id, name, 'skip', startedAt, 'No navigation links found');
-		}
-
-		const pageOrigin = new URL(page.url()).origin;
-		const internal = navLinks
-			.map(({ href, text }) => {
-				try {
-					const abs = new URL(href, page.url()).toString();
-					return new URL(abs).origin === pageOrigin ? { href: abs, text } : null;
-				} catch { return null; }
+		const seen = new Set<string>();
+		const checkedNav = navHrefs
+			.filter(({ href }) => {
+				if (seen.has(href)) return false;
+				seen.add(href);
+				return true;
 			})
-			.filter((l): l is { href: string; text: string } => l !== null)
-			.slice(0, 10);
+			.map(({ href, text }) => {
+				const link = statusByHref.get(href);
+				return link ? { href, text, status: link.status, ok: link.ok } : null;
+			})
+			.filter(
+				(l): l is { href: string; text: string; status: number; ok: boolean } =>
+					l !== null,
+			);
 
-		if (internal.length === 0) {
-			return makeResult(id, name, 'skip', startedAt, 'All nav links are external');
+		if (checkedNav.length === 0) {
+			return makeResult(id, name, 'skip', startedAt, 'No checked navigation links found');
 		}
 
-		const checks = await Promise.all(internal.map(async ({ href, text }) => {
-			const { status, ok } = await headFetch(href);
-			return { href, text, status, ok };
-		}));
-
-		const broken = checks.filter((c) => !c.ok);
+		const broken = checkedNav.filter((c) => !c.ok);
 
 		if (broken.length === 0) {
-			return makeResult(id, name, 'pass', startedAt, `All ${internal.length} navigation links are reachable`);
+			return makeResult(id, name, 'pass', startedAt, `All ${checkedNav.length} navigation links are reachable`);
 		}
 
 		return makeResult(
@@ -366,7 +379,7 @@ async function testNavigationLinks(page: Page): Promise<InteractionTestResult> {
 			name,
 			'fail',
 			startedAt,
-			`${broken.length} of ${internal.length} nav links broken: ${broken.map((b) => `"${b.text}" (${b.status || 'no response'})`).join(', ')}`,
+			`${broken.length} of ${checkedNav.length} nav links broken: ${broken.map((b) => `"${b.text}" (${b.status || 'no response'})`).join(', ')}`,
 		);
 	} catch (error) {
 		return makeResult(id, name, 'error', startedAt, error instanceof Error ? error.message : 'test error');
@@ -456,22 +469,26 @@ async function testTapTargetSize(page: Page): Promise<InteractionTestResult> {
 //
 // Links with target="_blank" without rel="noopener" allow the opened page to
 // access window.opener and redirect the original tab — a phishing vector.
+// Derives from the link set collectLinks already read (target + rel captured per
+// link) — no separate DOM pass.
 
-async function testExternalLinkSecurity(page: Page): Promise<InteractionTestResult> {
+function testExternalLinkSecurity(links: ValidatedLink[] | null): InteractionTestResult {
 	const id = 'test-external-link-security';
 	const name = 'External link security';
 	const startedAt = Date.now();
 
 	try {
-		const insecure = await page.evaluate(() =>
-			Array.from(document.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]'))
-				.filter((el) => !(el.getAttribute('rel') ?? '').includes('noopener'))
-				.slice(0, 10)
-				.map((el) => ({
-					text: (el.textContent ?? '').trim().slice(0, 50),
-					href: el.getAttribute('href') ?? '',
-				})),
-		);
+		if (!links) {
+			return makeResult(id, name, 'skip', startedAt, 'Link data unavailable');
+		}
+
+		const insecure = links
+			.filter(
+				(link) =>
+					(link.target ?? '') === '_blank' &&
+					!(link.rel ?? '').includes('noopener'),
+			)
+			.slice(0, 10);
 
 		if (insecure.length === 0) {
 			return makeResult(id, name, 'pass', startedAt, 'All new-tab links include rel="noopener"');
@@ -904,35 +921,12 @@ export async function collectInteractionTests(
 	page: Page,
 	pageUrl: string,
 	timing?: { scanId?: string; pageUrl?: string },
+	opts?: { linksPromise?: Promise<LinksResult | undefined> },
 ): Promise<InteractionTestsPayload> {
 	const startedAt = Date.now();
 	const results: InteractionTestResult[] = [];
 
-	const tests: Array<() => Promise<InteractionTestResult>> = [
-		// ── Existing tests (fetch-only or safe DOM interaction) ──────────────
-		() => test404Page(pageUrl),                          // fetch only — no navigation
-		() => testFormValidation(page),                      // click only — no navigation
-		() => testSearchFunctionality(page),                 // type only — no Enter key
-		() => testPrimaryCtaReachability(page, pageUrl),     // fetch only — no navigation
-		() => testNavigationLinks(page),                     // fetch only — no navigation
-		// ── New tests (all page.evaluate() — zero side effects) ──────────────
-		() => testBrokenImages(page),
-		() => testTapTargetSize(page),
-		() => testExternalLinkSecurity(page),
-		() => testCookieBanner(page),
-		() => testFontSizeReadability(page),
-		() => testAboveFoldCta(page),
-		() => testLayoutShift(page),
-		// ── Content & trust tests ────────────────────────────────────────────
-		() => testPlaceholderText(page),
-		() => testLegalLinks(page),
-		() => testStaleCopyright(page),
-		() => testTappableContacts(page),
-		() => testSocialLinks(page),
-		() => testFavicon(page),
-	];
-
-	for (const test of tests) {
+	const runTest = async (test: () => Promise<InteractionTestResult>) => {
 		try {
 			results.push(await test());
 		} catch (error) {
@@ -944,7 +938,43 @@ export async function collectInteractionTests(
 				durationMs: 0,
 			});
 		}
+	};
+
+	// Tests that don't depend on the link health set. Run these first so the
+	// shared collectLinks pass (running concurrently as its own collector) is
+	// resolved by the time we reach the link-dependent checks below.
+	const independentTests: Array<() => Promise<InteractionTestResult>> = [
+		() => test404Page(pageUrl),                          // fetch only — distinct fake URL
+		() => testFormValidation(page),                      // click only — no navigation
+		() => testSearchFunctionality(page),                 // type only — no Enter key
+		() => testPrimaryCtaReachability(page, pageUrl),     // fetch only — no navigation
+		() => testBrokenImages(page),
+		() => testTapTargetSize(page),
+		() => testCookieBanner(page),
+		() => testFontSizeReadability(page),
+		() => testAboveFoldCta(page),
+		() => testLayoutShift(page),
+		() => testPlaceholderText(page),
+		() => testLegalLinks(page),
+		() => testStaleCopyright(page),
+		() => testTappableContacts(page),
+		() => testSocialLinks(page),
+		() => testFavicon(page),
+	];
+
+	for (const test of independentTests) {
+		await runTest(test);
 	}
+
+	// Link-dependent checks reuse the HEAD-check results + target/rel attributes
+	// from collectLinks (computed once) rather than re-fetching / re-reading.
+	const linksResult = opts?.linksPromise
+		? await opts.linksPromise.catch(() => undefined)
+		: undefined;
+	const links = linksResult?.links ?? null;
+
+	await runTest(() => testNavigationLinks(page, links));
+	await runTest(async () => testExternalLinkSecurity(links));
 
 	const durationMs = Date.now() - startedAt;
 	const testsFailed = results.filter((r) => r.status === 'fail').length;

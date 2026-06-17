@@ -263,6 +263,13 @@ async function scanSingleUrl(
 		// the race resolves with undefined, Phase 1 completes, and collectors are
 		// returned.  The stuck page.screenshot() call is abandoned in the background.
 		const phase1StartedAt = Date.now();
+		// Run collectLinks once and share the in-flight promise: the interaction-test
+		// suite reuses its HEAD-check results + target/rel attributes instead of
+		// re-fetching nav links / re-reading link attributes. Both still run
+		// concurrently, so there's no added latency.
+		const linksStep = runStep(result.steps, 'links', () =>
+			collectLinks(page, url, stepTiming),
+		);
 		const [
 			r_screenshot,
 			r_brokenStates,
@@ -298,9 +305,7 @@ async function scanSingleUrl(
 			runStep(result.steps, 'broken_states', () =>
 				collectBrokenStates(page, { timing: stepTiming }),
 			),
-			runStep(result.steps, 'links', () =>
-				collectLinks(page, url, stepTiming),
-			),
+			linksStep,
 			runStep(result.steps, 'interactive', () =>
 				collectInteractiveData(page, stepTiming),
 			),
@@ -311,7 +316,9 @@ async function scanSingleUrl(
 				collectAxeViolations(page, stepTiming),
 			),
 			runStep(result.steps, 'interaction_tests', () =>
-				collectInteractionTests(page, url, stepTiming),
+				collectInteractionTests(page, url, stepTiming, {
+					linksPromise: linksStep,
+				}),
 			),
 		]);
 

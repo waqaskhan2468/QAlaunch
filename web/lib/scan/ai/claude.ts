@@ -12,6 +12,12 @@ const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 // Most responses arrive in 30–60 s; 120 s gives a comfortable ceiling.
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+// Free tier: shorter per-attempt ceiling. Free scans are a single homepage with a
+// smaller (viewport-only) image and modest output — 60s covers the typical
+// 30–60s response while halving the worst case (a hung attempt would otherwise
+// run the full 120s, then compound on the Inngest step retry). Paid keeps 120s.
+export const FREE_CLAUDE_TIMEOUT_MS = 60_000;
+
 // Retries: 2 retries = 3 total attempts, safe under Inngest's 14-min step timeout.
 const DEFAULT_MAX_RETRIES = 2;
 
@@ -375,8 +381,11 @@ export async function analyzeWithClaude(input: {
 	dynamicAfterImagesText: string;
 	scanId?: string;
 	pageUrl?: string;
+	/** Per-attempt timeout override (e.g. free tier uses FREE_CLAUDE_TIMEOUT_MS). */
+	timeoutMs?: number;
 }) {
 	const config = getClaudeConfig();
+	const timeoutMs = input.timeoutMs ?? config.timeoutMs;
 
 	// Build image blocks conditionally — screenshots may be absent for partial scans
 	const imageBlocks: MessageContentBlock[] = [];
@@ -431,7 +440,7 @@ export async function analyzeWithClaude(input: {
 
 	for (let attempt = 1; attempt <= config.maxRetries + 1; attempt += 1) {
 		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), config.timeoutMs);
+		const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 		const startedAt = Date.now();
 
 		try {

@@ -235,6 +235,47 @@ function loadingCopyForStatus(
 	};
 }
 
+// ─── Progress steps (free) ────────────────────────────────────────────────────
+// Derived purely from the polled scan status, so completed steps stay visible
+// with a checkmark and exactly one step is "active" at a time. Free scans skip
+// PageSpeed and never produce a PDF/email, so the list ends at AI review.
+
+type ProgressStep = {
+	id: string;
+	label: string;
+	activeOn: ScanStatusResponse['scan']['status'][];
+	doneOn: ScanStatusResponse['scan']['status'][];
+};
+
+const FREE_PROGRESS_STEPS: ProgressStep[] = [
+	{
+		id: 'queued',
+		label: 'Queued',
+		activeOn: ['pending'],
+		doneOn: ['crawling', 'analyzing', 'done'],
+	},
+	{
+		id: 'scanning',
+		label: 'Scanning your homepage',
+		activeOn: ['crawling'],
+		doneOn: ['analyzing', 'done'],
+	},
+	{
+		id: 'analyzing',
+		label: 'Reviewing for issues',
+		activeOn: ['analyzing'],
+		doneOn: ['done'],
+	},
+];
+
+function progressStepState(
+	step: ProgressStep,
+	status: ScanStatusResponse['scan']['status'],
+): 'done' | 'active' | 'idle' {
+	if (step.doneOn.includes(status)) return 'done';
+	if (step.activeOn.includes(status)) return 'active';
+	return 'idle';
+}
 
 function deriveHost(raw?: string | null): string {
 	if (!raw) return 'yourwebsite.com';
@@ -583,12 +624,39 @@ function AuditExperienceInner({
 							</p>
 						:	null}
 					</div>
-					{progressMessage ?
-						<div className='mt-7 flex items-center justify-center gap-3 rounded-xl border border-brand/20 bg-white px-5 py-4 text-left'>
-							<span className='qa-spin block size-4 shrink-0 rounded-full border-2 border-brand/30 border-t-brand' />
-							<p className='text-sm font-semibold text-ink'>{progressMessage}</p>
-						</div>
-					:	null}
+					{/* Accumulating progress steps — completed steps stay with a green
+					    check; exactly one active spinner; the live message is the active
+					    step's detail. All derived from the polled scan status. */}
+					<div className='mx-auto mt-7 flex max-w-sm flex-col gap-3 text-left'>
+						{FREE_PROGRESS_STEPS.map((step) => {
+							const state = progressStepState(step, loadingStatus ?? 'pending');
+							return (
+								<div key={step.id} className='flex items-start gap-3'>
+									<div className='mt-0.5 flex size-5 shrink-0 items-center justify-center'>
+										{state === 'done' ?
+											<span className='flex size-5 items-center justify-center rounded-full bg-accent-bright text-white'>
+												<Check className='size-3' strokeWidth={3} />
+											</span>
+										: state === 'active' ?
+											<span className='qa-spin block size-4 rounded-full border-2 border-brand/30 border-t-brand' />
+										:	<span className='size-5 rounded-full border-2 border-border-soft' />}
+									</div>
+									<div className='min-w-0'>
+										<p
+											className={cn(
+												'text-sm font-semibold leading-tight',
+												state === 'idle' ? 'text-muted-ink' : 'text-ink',
+											)}>
+											{step.label}
+										</p>
+										{state === 'active' && progressMessage ?
+											<p className='mt-0.5 text-xs text-body'>{progressMessage}</p>
+										:	null}
+									</div>
+								</div>
+							);
+						})}
+					</div>
 				</div>
 			</section>
 		);

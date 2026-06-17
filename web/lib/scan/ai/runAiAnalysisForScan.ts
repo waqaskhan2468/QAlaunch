@@ -5,6 +5,7 @@ import {
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT_HYBRID_DESKTOP,
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT_HYBRID_MOBILE,
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT_NO_SCREENSHOTS,
+	FREE_CLAUDE_TIMEOUT_MS,
 	parseClaudeIssues,
 } from './claude';
 import {
@@ -675,6 +676,8 @@ export async function analyzeScanPageWithClaude(
 			dynamicAfterImagesText,
 			scanId,
 			pageUrl: page.page_url,
+			// Free tier: shorter per-attempt ceiling for speed (paid keeps the default).
+			...(pkg === 'free' ? { timeoutMs: FREE_CLAUDE_TIMEOUT_MS } : {}),
 		});
 
 		const issues = parseClaudeIssues(raw);
