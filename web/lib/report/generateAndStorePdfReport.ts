@@ -328,9 +328,9 @@ function buildReportEmailHtml(input: {
 
 	const features = [
 		'Every issue ranked by severity and business impact',
-		'Screenshot evidence for each problem found',
-		'Plain-English explanation of what each issue means',
-		'Step-by-step fix instructions for your developer',
+		'A plain-English explanation of what each issue means and why it matters',
+		'Issues found across functionality, usability, mobile, performance, SEO, and accessibility',
+		'An overall health score and a clear priority order for what to fix first',
 	];
 
 	const featureRows = features
@@ -405,6 +405,20 @@ function buildReportEmailHtml(input: {
 					<td align="center" style="padding:4px 32px 24px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#6B8AA3;">
 						This download link expires in 7 days.<br />
 						Scan ID: ${scanId}
+					</td>
+				</tr>
+
+				<!-- Secondary upsell: human-reviewed deeper test -->
+				<tr>
+					<td style="padding:8px 32px 4px;">
+						<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F4F8FC;border:1px solid #E2EBF5;border-radius:10px;">
+							<tr>
+								<td style="padding:16px 18px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
+									<p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#3B536B;">Want a human to dig deeper?</p>
+									<p style="margin:0;font-size:13px;line-height:21px;color:#6B8AA3;">Our automated scan catches what most visitors actually experience &mdash; but if you&#39;d like an experienced QA engineer to manually test specific flows (checkout, signup, a feature you&#39;re worried about), reply to this email and we&#39;ll get back to you with details.</p>
+								</td>
+							</tr>
+						</table>
 					</td>
 				</tr>
 
