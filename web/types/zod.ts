@@ -78,7 +78,30 @@ export const scanStartSchema = z
 
 
 
+// ─── Contact form ─────────────────────────────────────────────────────────────
+// Shared by the contact form (client-side validation) and the
+// POST /api/contact route handler (server-side validation), so the rules can
+// never drift between the two. Required fields mirror the form's "*" markers:
+// first name, last name, and a valid email. Everything else is optional.
+export const contactFormSchema = z.object({
+	firstName: z.string().trim().min(1, 'First name is required.').max(80),
+	lastName: z.string().trim().min(1, 'Last name is required.').max(80),
+	email: z
+		.string()
+		.trim()
+		.min(1, 'Email is required.')
+		.email('Enter a valid email address.')
+		.max(160),
+	// Optional context fields. Empty strings are allowed (treated as "not
+	// provided"); only a max length is enforced to guard against abuse.
+	websiteUrl: z.string().trim().max(300).optional(),
+	pageCount: z.string().trim().max(80).optional(),
+	websiteType: z.string().trim().max(80).optional(),
+	message: z.string().trim().max(4000).optional(),
+});
+
 export type ScanPackage = z.infer<typeof scanPackageSchema>;
 export type WebsiteType = z.infer<typeof websiteTypeSchema>;
 export type ScanStatus = z.infer<typeof scanStatusSchema>;
+export type ContactFormData = z.infer<typeof contactFormSchema>;
 

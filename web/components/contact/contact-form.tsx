@@ -5,22 +5,86 @@ import { useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { cn } from "@/lib/utils"
+import { contactFormSchema } from "@/types/zod"
 
 /**
- * Contact form — client component that simulates a submit. All fields
- * are local state so we can show a success state without a backend.
- * Replace the `handleSubmit` body with a real server action when wiring
- * up a backend.
+ * Contact form — posts to POST /api/contact, which emails the submission to
+ * contact@getqalaunch.com (with the submitter set as reply-to). Validation uses
+ * the shared `contactFormSchema` so client and server rules stay in sync.
  */
+
+type FieldName =
+  | "firstName"
+  | "lastName"
+  | "email"
+  | "websiteUrl"
+  | "pageCount"
+  | "websiteType"
+  | "message"
+
+const EMPTY_FORM: Record<FieldName, string> = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  websiteUrl: "",
+  pageCount: "",
+  websiteType: "",
+  message: "",
+}
+
 export function ContactForm() {
   const [status, setStatus] = useState<"idle" | "submitting" | "sent">("idle")
+  const [values, setValues] = useState<Record<FieldName, string>>(EMPTY_FORM)
+  const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  function update(name: FieldName, value: string) {
+    setValues((prev) => ({ ...prev, [name]: value }))
+    // Clear a field's error as soon as the user edits it.
+    setErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev))
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    setSubmitError(null)
+
+    const parsed = contactFormSchema.safeParse(values)
+    if (!parsed.success) {
+      const fieldErrors = parsed.error.flatten().fieldErrors
+      const next: Partial<Record<FieldName, string>> = {}
+      for (const key of Object.keys(fieldErrors) as FieldName[]) {
+        const msg = fieldErrors[key]?.[0]
+        if (msg) next[key] = msg
+      }
+      setErrors(next)
+      return
+    }
+
     setStatus("submitting")
-    // Simulated network delay — swap for a real server action.
-    await new Promise((r) => setTimeout(r, 900))
-    setStatus("sent")
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed.data),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        setSubmitError(
+          data?.message ??
+            "Something went wrong sending your message. Please try again or email us at contact@getqalaunch.com.",
+        )
+        setStatus("idle")
+        return
+      }
+
+      setStatus("sent")
+    } catch {
+      setSubmitError(
+        "We couldn't reach the server. Please check your connection and try again, or email us at contact@getqalaunch.com.",
+      )
+      setStatus("idle")
+    }
   }
 
   if (status === "sent") {
@@ -53,7 +117,11 @@ export function ContactForm() {
         </p>
         <button
           type="button"
-          onClick={() => setStatus("idle")}
+          onClick={() => {
+            setValues(EMPTY_FORM)
+            setErrors({})
+            setStatus("idle")
+          }}
           className="mt-6 text-sm font-bold text-brand hover:underline"
         >
           Send another message
@@ -65,6 +133,7 @@ export function ContactForm() {
   return (
     <form
       onSubmit={handleSubmit}
+      noValidate
       className="rounded-3xl border border-border-soft bg-white p-8 shadow-sm md:p-10"
     >
       <h3 className="mb-6 font-heading text-2xl font-black tracking-tight text-ink">
@@ -72,32 +141,57 @@ export function ContactForm() {
       </h3>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="First Name" required>
-          <input type="text" placeholder="John" className={inputClass} />
+        <Field label="First Name" required error={errors.firstName}>
+          <input
+            type="text"
+            name="firstName"
+            value={values.firstName}
+            onChange={(e) => update("firstName", e.target.value)}
+            placeholder="John"
+            className={inputClass}
+          />
         </Field>
-        <Field label="Last Name" required>
-          <input type="text" placeholder="Smith" className={inputClass} />
+        <Field label="Last Name" required error={errors.lastName}>
+          <input
+            type="text"
+            name="lastName"
+            value={values.lastName}
+            onChange={(e) => update("lastName", e.target.value)}
+            placeholder="Smith"
+            className={inputClass}
+          />
         </Field>
       </div>
 
-      <Field label="Email Address" required className="mt-4">
+      <Field label="Email Address" required className="mt-4" error={errors.email}>
         <input
           type="email"
+          name="email"
+          value={values.email}
+          onChange={(e) => update("email", e.target.value)}
           placeholder="john@company.com"
           className={inputClass}
         />
       </Field>
 
-      <Field label="Website URL" className="mt-4">
+      <Field label="Website URL" className="mt-4" error={errors.websiteUrl}>
         <input
           type="url"
+          name="websiteUrl"
+          value={values.websiteUrl}
+          onChange={(e) => update("websiteUrl", e.target.value)}
           placeholder="https://yourwebsite.com"
           className={inputClass}
         />
       </Field>
 
-      <Field label="Number of pages" className="mt-4">
-        <select className={inputClass} defaultValue="">
+      <Field label="Number of pages" className="mt-4" error={errors.pageCount}>
+        <select
+          name="pageCount"
+          value={values.pageCount}
+          onChange={(e) => update("pageCount", e.target.value)}
+          className={inputClass}
+        >
           <option value="" disabled>
             Select page count
           </option>
@@ -110,8 +204,13 @@ export function ContactForm() {
         </select>
       </Field>
 
-      <Field label="Website type" className="mt-4">
-        <select className={inputClass} defaultValue="">
+      <Field label="Website type" className="mt-4" error={errors.websiteType}>
+        <select
+          name="websiteType"
+          value={values.websiteType}
+          onChange={(e) => update("websiteType", e.target.value)}
+          className={inputClass}
+        >
           <option value="" disabled>
             Select type
           </option>
@@ -125,13 +224,29 @@ export function ContactForm() {
         </select>
       </Field>
 
-      <Field label="Tell us about your project" className="mt-4">
+      <Field
+        label="Tell us about your project"
+        className="mt-4"
+        error={errors.message}
+      >
         <textarea
           rows={5}
+          name="message"
+          value={values.message}
+          onChange={(e) => update("message", e.target.value)}
           placeholder="Describe your website, any specific concerns, or what you'd like us to focus on…"
           className={cn(inputClass, "min-h-28 resize-y")}
         />
       </Field>
+
+      {submitError && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger"
+        >
+          {submitError}
+        </p>
+      )}
 
       <motion.button
         type="submit"
@@ -199,11 +314,13 @@ function Field({
   required,
   children,
   className,
+  error,
 }: {
   label: string
   required?: boolean
   children: React.ReactNode
   className?: string
+  error?: string
 }) {
   return (
     <label className={cn("block", className)}>
@@ -211,6 +328,11 @@ function Field({
         {label} {required && <span className="text-danger">*</span>}
       </span>
       {children}
+      {error && (
+        <span className="mt-1.5 block text-xs font-semibold text-danger">
+          {error}
+        </span>
+      )}
     </label>
   )
 }
