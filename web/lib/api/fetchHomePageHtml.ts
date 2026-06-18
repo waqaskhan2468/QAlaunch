@@ -53,9 +53,13 @@ export async function fetchHomepageHtml(
 					signal: controller.signal as AbortSignal,
 					dispatcher: homepageFetchAgent,
 					headers: {
+						// Present as a real browser. Plain "bot" UAs are blocked
+						// outright by many WordPress hosts / CDNs / WAFs.
 						'User-Agent':
-							'Mozilla/5.0 (compatible; QALaunch/1.0; +https://qalaunch.com)',
-						Accept: 'text/html,application/xhtml+xml',
+							'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+						Accept:
+							'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+						'Accept-Language': 'en-US,en;q=0.9',
 					},
 				} as Parameters<typeof undiciFetch>[1]);
 
