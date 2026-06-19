@@ -3,6 +3,7 @@ import { verifyAndParsePaddleWebhook } from "@/lib/api/paddle";
 import { getServiceSupabase } from "@/lib/db/supabase";
 import { queueScanJob } from "@/lib/api/queue-scan-job";
 import { scanPackageSchema } from "@/types/zod";
+import { logFunnelEvent } from "@/lib/analytics/funnel";
 
 export const runtime = "nodejs";
 
@@ -115,6 +116,14 @@ export async function POST(req: Request) {
     console.error("[paddle webhook] scan update failed", { scanId, transactionId, updateError });
     return NextResponse.json({ error: "scan_update_failed" }, { status: 500 });
   }
+
+  // Funnel: payment confirmed for this scan (transaction.paid/completed).
+  await logFunnelEvent(supabase, {
+    scanId,
+    eventType: "payment_completed",
+    url: targetUrl,
+    email: userEmail ?? null,
+  });
 
   try {
     await queueScanJob({

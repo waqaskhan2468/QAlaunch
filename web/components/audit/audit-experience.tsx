@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Lock, Zap } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { trackFunnelEvent } from '@/lib/analytics/funnel-client';
 import { plans } from '@/components/pricing/pricing-plans';
 import { computeHealthScore, labelFromScore } from '@/lib/scoring/health';
 import {
@@ -23,16 +24,19 @@ const PROGRESS_ROTATE_MS = 2_500;
 
 // ─── Scan pipeline steps (shown after scan completes) ────────────────────────
 
+// Shown as "What's included in your full report" above the pricing CTA — a list
+// of what the full scan tests, NOT a pass/fail checklist. Details describe the
+// check, with no ✓ marks (which would imply each area passed).
 const SCAN_PIPELINE_STEPS = [
-	{ icon: '🌐', name: 'Page Load', detail: '✓ Complete' },
-	{ icon: '📸', name: 'Screenshots', detail: '✓ Desktop + Mobile' },
-	{ icon: '♿', name: 'Accessibility', detail: '✓ axe-core' },
-	{ icon: '🔗', name: 'Link Check', detail: '✓ All links' },
-	{ icon: '📱', name: 'Mobile', detail: '✓ 5 viewports' },
-	{ icon: '⚡', name: 'Performance', detail: '✓ PageSpeed' },
-	{ icon: '🔍', name: 'SEO', detail: '✓ Meta + OG' },
-	{ icon: '🖱️', name: 'Interactions', detail: '✓ Forms + CTAs' },
-	{ icon: '🤖', name: 'AI Analysis', detail: '✓ Claude review' },
+	{ icon: '🌐', name: 'Page Load', detail: 'Load & render' },
+	{ icon: '📸', name: 'Screenshots', detail: 'Desktop + mobile' },
+	{ icon: '♿', name: 'Accessibility', detail: 'axe-core' },
+	{ icon: '🔗', name: 'Link Check', detail: 'All links' },
+	{ icon: '📱', name: 'Mobile', detail: '5 viewports' },
+	{ icon: '⚡', name: 'Performance', detail: 'PageSpeed' },
+	{ icon: '🔍', name: 'SEO', detail: 'Meta + OG' },
+	{ icon: '🖱️', name: 'Interactions', detail: 'Forms + CTAs' },
+	{ icon: '🤖', name: 'AI Analysis', detail: 'Claude review' },
 ];
 
 // ─── Category breakdown config ────────────────────────────────────────────────
@@ -47,33 +51,79 @@ const CATEGORY_DISPLAY = [
 	{ key: 'seo', label: 'SEO' },
 ] as const;
 
-const SEVERITY_DEDUCTION: Record<string, number> = {
-	critical: 22,
-	high: 14,
-	medium: 8,
-	low: 3,
-};
-
-function computeCategoryScores(
+// Real issue count per category (visible + locked), in CATEGORY_DISPLAY order.
+function computeCategoryCounts(
 	issues: Array<{ category: string; severity: string }>,
 ) {
-	const raw: Record<string, number> = {};
+	const counts: Record<string, number> = {};
 	for (const issue of issues) {
 		const cat = issue.category.toLowerCase();
-		const ded = SEVERITY_DEDUCTION[issue.severity.toLowerCase()] ?? 5;
-		raw[cat] = Math.max(0, (raw[cat] ?? 100) - ded);
+		counts[cat] = (counts[cat] ?? 0) + 1;
 	}
 	return CATEGORY_DISPLAY.map(({ key, label }) => ({
 		key,
 		label,
-		score: raw[key] ?? 100,
+		count: counts[key] ?? 0,
 	}));
 }
 
-function catTone(score: number): 'good' | 'warn' | 'bad' {
-	if (score >= 75) return 'good';
-	if (score >= 50) return 'warn';
-	return 'bad';
+// Tone for a category card based on how many issues it has.
+function countTone(count: number): 'warn' | 'bad' {
+	return count >= 3 ? 'bad' : 'warn';
+}
+
+const SEVERITY_RANK: Record<string, number> = {
+	critical: 3,
+	high: 2,
+	medium: 1,
+	low: 0,
+};
+
+// Singular/plural noun per category for the locked-issue teaser breakdown.
+const CATEGORY_NOUN: Record<string, { one: string; many: string }> = {
+	accessibility: { one: 'accessibility issue', many: 'accessibility issues' },
+	usability_ux: { one: 'usability issue', many: 'usability issues' },
+	ui_bugs: { one: 'UI/visual issue', many: 'UI/visual issues' },
+	functionality: { one: 'functionality bug', many: 'functionality bugs' },
+	responsiveness: { one: 'mobile issue', many: 'mobile issues' },
+	performance: { one: 'performance issue', many: 'performance issues' },
+	seo: { one: 'SEO issue', many: 'SEO issues' },
+};
+
+function categoryNoun(cat: string, count: number): string {
+	const noun = CATEGORY_NOUN[cat];
+	if (!noun) return count === 1 ? 'issue' : 'issues';
+	return count === 1 ? noun.one : noun.many;
+}
+
+// Per-category breakdown of the REAL locked issues, ordered by CATEGORY_DISPLAY.
+// maxSev is the highest severity present in that category (drives the "critical"/
+// "high" emphasis word) — only categories with at least one locked issue appear.
+function lockedCategoryBreakdown(
+	lockedIssues: Array<{ category: string; severity: string }>,
+) {
+	const byCat = new Map<string, { count: number; maxSev: string }>();
+	for (const issue of lockedIssues) {
+		const cat = issue.category.toLowerCase();
+		const sev = issue.severity.toLowerCase();
+		const cur = byCat.get(cat);
+		if (!cur) {
+			byCat.set(cat, { count: 1, maxSev: sev });
+		} else {
+			cur.count += 1;
+			if ((SEVERITY_RANK[sev] ?? -1) > (SEVERITY_RANK[cur.maxSev] ?? -1)) {
+				cur.maxSev = sev;
+			}
+		}
+	}
+	const order = CATEGORY_DISPLAY.map((c) => c.key) as string[];
+	const rank = (cat: string) => {
+		const i = order.indexOf(cat);
+		return i === -1 ? order.length : i;
+	};
+	return [...byCat.entries()]
+		.map(([cat, { count, maxSev }]) => ({ cat, count, maxSev }))
+		.sort((a, b) => rank(a.cat) - rank(b.cat));
 }
 
 // ─── Score/grade helpers ──────────────────────────────────────────────────────
@@ -115,15 +165,15 @@ function countBySeverity(
 	return counts;
 }
 
-// Free scans only test the homepage. The headline presents a site-wide
-// estimate (a multiplier band) rather than the literal homepage count — the
-// claim is about the whole site, not a promise about this preview's contents.
+// Free scans only test the homepage. The hero shows a site-wide *estimate* (a
+// multiplier band) as a "typical across an entire site" figure — distinct from
+// the real homepage issue count. Returns the bare number; the UI appends "+".
 // N (real homepage issue count) → displayed band.
-function siteWideIssueCount(homepageIssueCount: number): string {
-	if (homepageIssueCount >= 11) return '18+';
-	if (homepageIssueCount >= 8) return '15+';
-	if (homepageIssueCount >= 5) return '12+';
-	return '10+'; // 1–4
+function siteWideIssueCount(homepageIssueCount: number): number {
+	if (homepageIssueCount >= 11) return 18;
+	if (homepageIssueCount >= 8) return 15;
+	if (homepageIssueCount >= 5) return 12;
+	return 10; // 1–4
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -208,9 +258,9 @@ function loadingCopyForStatus(
 } {
 	if (status === 'pending') {
 		return {
-			title: 'Starting your free audit…',
-			subtitle: 'We queued your scan and are preparing website checks.',
-			stageLabel: 'Queued',
+			title: 'Checking your site…',
+			subtitle: 'Making sure your website is reachable before we scan it.',
+			stageLabel: 'Checking your site',
 		};
 	}
 	if (status === 'crawling') {
@@ -249,8 +299,8 @@ type ProgressStep = {
 
 const FREE_PROGRESS_STEPS: ProgressStep[] = [
 	{
-		id: 'queued',
-		label: 'Queued',
+		id: 'checking',
+		label: 'Checking your site',
 		activeOn: ['pending'],
 		doneOn: ['crawling', 'analyzing', 'done'],
 	},
@@ -756,6 +806,7 @@ function AuditExperienceInner({
 
 	return (
 		<ResultsView
+			scanId={statusForCurrentScan?.scan.id ?? initialScanId ?? ''}
 			host={host}
 			inputUrl={inputUrl}
 			findings={findings}
@@ -772,6 +823,7 @@ function AuditExperienceInner({
 // ─── ResultsView ─────────────────────────────────────────────────────────────
 
 type ResultsViewProps = {
+	scanId: string;
 	host: string;
 	inputUrl: string | null;
 	findings: ScanIssue[];
@@ -784,6 +836,7 @@ type ResultsViewProps = {
 };
 
 function ResultsView({
+	scanId,
 	host,
 	inputUrl,
 	findings,
@@ -795,19 +848,58 @@ function ResultsView({
 	incompleteVisualScan,
 }: ResultsViewProps) {
 	const [ringAnimated, setRingAnimated] = useState(false);
-	const [catsAnimated, setCatsAnimated] = useState(false);
 	const [displayScore, setDisplayScore] = useState(0);
 	const [showStickyCta, setShowStickyCta] = useState(false);
 	const heroRef = useRef<HTMLElement>(null);
 	const pricingRef = useRef<HTMLDivElement>(null);
+	const lockedRef = useRef<HTMLDivElement>(null);
 
-	// Category + severity aggregation
-	const allIssuesForScoring = [...findings, ...lockedIssues];
-	const categoryScores = computeCategoryScores(allIssuesForScoring);
-	const severityCounts = countBySeverity(allIssuesForScoring.map((i) => i.severity));
+	// Funnel: the results page actually rendered for the user. Fire once.
+	const funnelUrl = inputUrl ?? host;
+	const resultsTrackedRef = useRef(false);
+	useEffect(() => {
+		if (!scanId || resultsTrackedRef.current) return;
+		resultsTrackedRef.current = true;
+		trackFunnelEvent({ scanId, eventType: 'results_viewed', url: funnelUrl });
+	}, [scanId, funnelUrl]);
 
-	// Site-wide headline estimate from the real homepage issue count.
-	const displayIssueCount = siteWideIssueCount(totalIssueCount);
+	// Funnel: the locked-issues / upgrade section scrolled into view. Fire once
+	// when it first becomes visible — the truest signal that the user reached the
+	// paywall (it sits well below the fold).
+	const paywallTrackedRef = useRef(false);
+	useEffect(() => {
+		const el = lockedRef.current;
+		if (!scanId || !el || paywallTrackedRef.current) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					if (entry.isIntersecting && !paywallTrackedRef.current) {
+						paywallTrackedRef.current = true;
+						trackFunnelEvent({ scanId, eventType: 'paywall_viewed', url: funnelUrl });
+						observer.disconnect();
+					}
+				}
+			},
+			{ threshold: 0.2 },
+		);
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, [scanId, funnelUrl]);
+
+	// Category + severity aggregation over the REAL homepage issues (visible + locked).
+	const allIssues = [...findings, ...lockedIssues];
+	const categoryCounts = computeCategoryCounts(allIssues);
+	const categoriesWithIssues = categoryCounts.filter((c) => c.count > 0);
+	const categoriesWithoutIssues = categoryCounts.filter((c) => c.count === 0);
+	const severityCounts = countBySeverity(allIssues.map((i) => i.severity));
+	const lockedBreakdown = lockedCategoryBreakdown(lockedIssues);
+
+	// Real total — the figure the severity pills add up to (same as "X of Y shown").
+	const realIssueCount = totalIssueCount;
+	// Number of preview issues shown free below.
+	const criticalShownCount = findings.length;
+	// Inflated site-wide estimate (bare number; rendered with a trailing "+").
+	const inflatedCount = siteWideIssueCount(totalIssueCount);
 
 	// Score ring animation
 	const CIRCUMFERENCE = 477;
@@ -821,7 +913,6 @@ function ResultsView({
 
 	useEffect(() => {
 		const t1 = setTimeout(() => setRingAnimated(true), 200);
-		const t2 = setTimeout(() => setCatsAnimated(true), 400);
 
 		// Count-up animation
 		let step = 0;
@@ -836,7 +927,6 @@ function ResultsView({
 
 		return () => {
 			clearTimeout(t1);
-			clearTimeout(t2);
 			clearInterval(id);
 		};
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -919,7 +1009,7 @@ function ResultsView({
 							/>
 							<span>Audit completed</span>
 							<span>·</span>
-							<span>{displayIssueCount} issues across your site</span>
+							<span>Homepage scan</span>
 						</div>
 
 						{/* Site URL row */}
@@ -941,19 +1031,25 @@ function ResultsView({
 						<h1
 							className='font-heading font-black leading-[1.05] tracking-tight text-white'
 							style={{ fontSize: 'clamp(30px, 4vw, 48px)', letterSpacing: '-1.2px' }}>
-							Your website is{' '}
-							<span style={{ color: '#FCA5A5' }}>failing</span>
+							Your homepage is{' '}
+							<span style={{ color: '#FCA5A5' }}>failing.</span>
 							<br />
 							<span style={{ color: '#FCA5A5', fontFeatureSettings: '"tnum"' }}>
-								{displayIssueCount}
+								{realIssueCount}
 							</span>{' '}
-							issues across your site.
+							issues found.
 						</h1>
 						<p className='mt-4 max-w-xl text-[15px] leading-relaxed text-white/65'>
-							A full automated + AI review points to{' '}
-							<strong className='text-white'>{displayIssueCount} issues across your site</strong>{' '}
+							A full automated + AI review found{' '}
+							<strong className='text-white'>{realIssueCount} issues on your homepage</strong>{' '}
 							actively affecting how real visitors experience it.{' '}
-							<strong className='text-white'>3 critical issues are shown free below.</strong>
+							<strong className='text-white'>
+								{criticalShownCount} critical issues are shown free below.
+							</strong>
+						</p>
+						<p className='mt-3 max-w-xl text-[12.5px] leading-relaxed text-white/45'>
+							This is a homepage-only preview — {inflatedCount}+ issues are typical
+							across an entire site. Run a full scan to check your other pages too.
 						</p>
 
 						{/* Severity chips */}
@@ -1089,81 +1185,49 @@ function ResultsView({
 			</div>
 		</section>
 
-		{/* ── SCAN PIPELINE STEPS ───────────────────────────────────────── */}
-		<section className='border-b border-border-soft bg-white px-5 py-7 md:px-10'>
+		{/* ── ISSUES BY CATEGORY ────────────────────────────────────────── */}
+		{/* Real issue counts per category — only categories that actually have
+		    issues get a card; zero-issue categories are grouped, de-emphasized,
+		    below so they don't visually compete with the real problems. */}
+		<section className='border-b border-border-soft bg-white px-5 py-6 md:px-10'>
 			<div className='mx-auto max-w-5xl'>
-				<div className='mb-5 flex items-center gap-3'>
-					<span className='font-mono text-[10.5px] font-bold uppercase tracking-[2px] text-muted-ink'>
-						✓ All checks completed
+				<div className='mb-4 flex items-center gap-3'>
+					<span className='whitespace-nowrap font-mono text-[10.5px] font-bold uppercase tracking-[2px] text-muted-ink'>
+						Issues by category
 					</span>
 					<div className='h-px flex-1 bg-border-soft' />
 				</div>
-				<div className='flex gap-0 overflow-x-auto pb-1' style={{ scrollbarWidth: 'none' }}>
-					{SCAN_PIPELINE_STEPS.map((step, i) => (
-						<div
-							key={step.name}
-							className='relative flex min-w-[100px] flex-1 flex-col items-center'>
-							{i < SCAN_PIPELINE_STEPS.length - 1 && (
+				{categoriesWithIssues.length > 0 ? (
+					<div className='flex flex-wrap gap-3'>
+						{categoriesWithIssues.map(({ key, label, count }) => {
+							const tone = countTone(count);
+							return (
 								<div
-									className='absolute top-[17px] h-0.5 bg-accent-bright'
-									style={{ left: 'calc(50% + 18px)', right: 'calc(-50% + 18px)' }}
-								/>
-							)}
-							<div className='relative z-10 mb-2 flex size-9 items-center justify-center rounded-full border-2 border-accent-bright bg-accent-pale text-[15px]'>
-								{step.icon}
-							</div>
-							<div className='text-center text-[11px] font-bold leading-tight text-ink'>
-								{step.name}
-							</div>
-							<div className='mt-0.5 text-center font-mono text-[10px] font-semibold text-accent-bright'>
-								{step.detail}
-							</div>
-						</div>
-					))}
-				</div>
-			</div>
-		</section>
-
-		{/* ── CATEGORY SCORES ───────────────────────────────────────────── */}
-		<section className='border-b border-border-soft bg-white px-5 py-6 md:px-10'>
-			<div className='mx-auto grid max-w-5xl grid-cols-3 gap-3 sm:grid-cols-7'>
-				{categoryScores.map(({ key, label, score }) => {
-					const tone = catTone(score);
-					// A score of exactly 100 means no issues were found in this category.
-					// Show "✓" instead of "100" so users understand it's "no issues", not
-					// a performance measurement — especially important for free scans where
-					// most categories have no visible issues in the 3-issue preview.
-					const noIssues = score === 100;
-					return (
-						<div
-							key={key}
-							className='rounded-xl border border-border-soft bg-surface-soft p-3 transition-transform hover:-translate-y-0.5'>
-							<div className='mb-1.5 text-[9px] font-bold uppercase leading-tight tracking-wide break-words text-muted-ink sm:text-[10px]'>
-								{label}
-							</div>
-							{noIssues ? (
-								<div className='font-heading text-xl font-black leading-none' style={{ color: '#22C55E' }}>
-									✓
+									key={key}
+									className='min-w-[130px] flex-1 rounded-xl border border-border-soft bg-surface-soft p-3.5 transition-transform hover:-translate-y-0.5'
+									style={{ maxWidth: 200 }}>
+									<div className='mb-1.5 text-[9px] font-bold uppercase leading-tight tracking-wide break-words text-muted-ink sm:text-[10px]'>
+										{label}
+									</div>
+									<div
+										className='font-heading text-2xl font-black leading-none'
+										style={{ color: catBarColor[tone] }}>
+										{count}
+									</div>
+									<div className='mt-1 text-[11px] font-semibold text-body'>
+										{count === 1 ? 'issue found' : 'issues found'}
+									</div>
 								</div>
-							) : (
-								<div
-									className='font-heading text-xl font-black leading-none'
-									style={{ color: catBarColor[tone] }}>
-									{score}
-								</div>
-							)}
-							<div className='mt-2 h-1 overflow-hidden rounded-full bg-border-soft'>
-								<div
-									className='h-full rounded-full transition-all duration-[1.5s] ease-out'
-									style={{
-										width: noIssues ? '100%' : catsAnimated ? `${score}%` : '0%',
-										background: noIssues ? '#22C55E' : catBarColor[tone],
-									}}
-								/>
-							</div>
-						</div>
-					);
-				})}
+							);
+						})}
+					</div>
+				) : null}
+				{categoriesWithoutIssues.length > 0 ? (
+					<p className='mt-4 text-[12px] leading-relaxed text-muted-ink'>
+						<span className='font-semibold text-accent-bright'>No issues found:</span>{' '}
+						{categoriesWithoutIssues.map((c) => c.label).join(', ')}
+					</p>
+				) : null}
 			</div>
 		</section>
 
@@ -1209,7 +1273,9 @@ function ResultsView({
 			</div>
 
 			{/* ── LOCKED SECTION ──────────────────────────────────────────── */}
-			<div className='mt-12 overflow-hidden rounded-2xl border-2 border-border-soft bg-white'>
+			<div
+				ref={lockedRef}
+				className='mt-12 overflow-hidden rounded-2xl border-2 border-border-soft bg-white'>
 				{/* Dark header */}
 				<div
 					className='relative overflow-hidden px-8 py-7 text-center'
@@ -1241,6 +1307,34 @@ function ResultsView({
 						Each one is actively affecting how real visitors experience your website
 					</p>
 				</div>
+
+				{/* Real breakdown of what's locked, by category. Only categories with
+				    locked issues appear — the titles themselves stay paywalled below. */}
+				{lockedBreakdown.length > 0 ? (
+					<div className='border-b border-border-soft px-6 py-5'>
+						<div className='mb-3 font-mono text-[10.5px] font-bold uppercase tracking-[1.5px] text-muted-ink'>
+							What&apos;s locked in your full report
+						</div>
+						<ul className='flex flex-col gap-2'>
+							{lockedBreakdown.map(({ cat, count, maxSev }) => (
+								<li
+									key={cat}
+									className='flex items-center gap-2 text-[13.5px] font-semibold text-ink'>
+									<Lock className='size-3.5 shrink-0 text-danger' />
+									<span>
+										{count}{' '}
+										{maxSev === 'critical' ? (
+											<span className='text-danger'>critical </span>
+										) : maxSev === 'high' ? (
+											<span className='text-warn'>high-severity </span>
+										) : null}
+										{categoryNoun(cat, count)}
+									</span>
+								</li>
+							))}
+						</ul>
+					</div>
+				) : null}
 
 				{/* Redacted preview — real titles are paywalled. These rows are
 				    intentionally fake + blurred so the full list stays locked. */}
@@ -1285,6 +1379,13 @@ function ResultsView({
 						<span className='font-mono text-[13px] font-semibold text-body'>
 							From <strong className='text-ink'>$9</strong> · One-time payment · Instant PDF delivery
 						</span>
+						<span className='text-[12px] text-muted-ink'>
+							Not satisfied?{' '}
+							<Link href='/refund' className='font-semibold text-brand hover:underline'>
+								Full refund
+							</Link>{' '}
+							if we can&apos;t generate your report.
+						</span>
 					</div>
 				</div>
 			</div>
@@ -1309,6 +1410,42 @@ function ResultsView({
 						</div>
 					</div>
 				))}
+			</div>
+
+			{/* ── WHAT'S INCLUDED ───────────────────────────────────────── */}
+			{/* A list of what the full scan tests — NOT a pass/fail checklist.
+			    Neutral styling (no green ✓) so it reads as coverage, not results.
+			    Sits directly above the pricing CTA. */}
+			<div className='mt-14 rounded-2xl border border-border-soft bg-white p-6 md:p-7'>
+				<div className='mb-5 flex items-center gap-3'>
+					<span className='font-mono text-[10.5px] font-bold uppercase tracking-[2px] text-muted-ink'>
+						What&apos;s included in your full report
+					</span>
+					<div className='h-px flex-1 bg-border-soft' />
+				</div>
+				<div className='flex gap-0 overflow-x-auto pb-1' style={{ scrollbarWidth: 'none' }}>
+					{SCAN_PIPELINE_STEPS.map((step, i) => (
+						<div
+							key={step.name}
+							className='relative flex min-w-[100px] flex-1 flex-col items-center'>
+							{i < SCAN_PIPELINE_STEPS.length - 1 && (
+								<div
+									className='absolute top-[17px] h-0.5 bg-border-soft'
+									style={{ left: 'calc(50% + 18px)', right: 'calc(-50% + 18px)' }}
+								/>
+							)}
+							<div className='relative z-10 mb-2 flex size-9 items-center justify-center rounded-full border-2 border-brand/25 bg-brand-pale text-[15px]'>
+								{step.icon}
+							</div>
+							<div className='text-center text-[11px] font-bold leading-tight text-ink'>
+								{step.name}
+							</div>
+							<div className='mt-0.5 text-center font-mono text-[10px] font-semibold text-muted-ink'>
+								{step.detail}
+							</div>
+						</div>
+					))}
+				</div>
 			</div>
 
 			{/* ── PRICING ───────────────────────────────────────────────── */}

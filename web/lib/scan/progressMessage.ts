@@ -71,7 +71,9 @@ export function deriveScanProgressMessage(input: ScanProgressInput): string {
 	const site = input.host ?? 'your website';
 
 	if (status === null || status === 'pending') {
-		return `Loading ${site}…`;
+		// Free scans run the reachability / login-gate check during `pending`
+		// (the first pipeline step), before crawling begins.
+		return `Checking ${site} is reachable…`;
 	}
 
 	if (status === 'crawling') {

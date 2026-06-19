@@ -24,6 +24,7 @@ import {
   paddleClientToken,
   paddlePriceIdForPackage,
 } from "@/lib/checkout/paddle-client"
+import { trackFunnelEvent } from "@/lib/analytics/funnel-client"
 
 const SELF_SERVE: CheckoutPackageSlug[] = ["basic", "standard", "premium"]
 
@@ -172,6 +173,14 @@ export function CheckoutExperience() {
       }
 
       const successUrl = `${window.location.origin}/checkout/success?scanId=${encodeURIComponent(startPayload.scanId)}`
+
+      // Funnel: user clicked buy and the Paddle checkout is being opened.
+      trackFunnelEvent({
+        scanId: startPayload.scanId,
+        eventType: "checkout_started",
+        url: startPayload.targetUrl,
+        email: emailTrim,
+      })
 
       paddle.Checkout.open({
         items: [{ priceId, quantity: 1 }],

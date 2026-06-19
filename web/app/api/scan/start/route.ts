@@ -7,6 +7,7 @@ import { assertScanStartAllowed } from '@/lib/api/scan-start-rate-limit';
 import { queueScanJob } from '@/lib/api/queue-scan-job';
 import { validateScanTarget } from '@/lib/scan/validate-target';
 import { isBlockedDomain } from '@/lib/scan/blocklist';
+import { logFunnelEvent } from '@/lib/analytics/funnel';
 
 export const runtime = 'nodejs';
 
@@ -50,41 +51,33 @@ export const POST = asyncHandler(async (req: Request) => {
 
 	await assertScanStartAllowed(supabase, req, { email, package: pkg });
 
-	// ── Pre-scan validation gate ───────────────────────────────────────────────
-	// Fetch the target server-side before queuing anything. Runs after rate
-	// limiting (so it can't be abused as a URL fetcher) and before any scan row
-	// is created. Does not touch the Inngest pipeline or payment flow.
-	const validation = await validateScanTarget(normalized);
+	// ── Pre-scan validation gate (PAID only) ───────────────────────────────────
+	// Paid scans validate synchronously *before* charging: reject unreachable
+	// targets and confirm public-only scanning for login/web-app homepages. Runs
+	// after rate limiting (so it can't be abused as a URL fetcher).
+	//
+	// FREE scans intentionally SKIP this slow live fetch here so the submit
+	// response is instant (only the blocklist + one indexed rate-limit query run
+	// before responding). The identical reachability / login-gate check instead
+	// runs as the first step of the Inngest pipeline — see
+	// lib/scan/steps/checkReachability and run-scan's 'check-reachability' step.
+	if (pkg !== 'free') {
+		const validation = await validateScanTarget(normalized);
 
-	if (validation.status === 'unreachable') {
-		return NextResponse.json(
-			{
-				ok: false,
-				code: 'unreachable',
-				message:
-					"We couldn't load this website. Please check the URL and try again.",
-			},
-			{ status: 422 },
-		);
-	}
-
-	if (validation.isWebApp) {
-		// Free preview tests a single public page — a login/sign-up form or app
-		// shell leaves nothing public to preview, so it can't be scanned for free.
-		if (pkg === 'free') {
+		if (validation.status === 'unreachable') {
 			return NextResponse.json(
 				{
 					ok: false,
-					code: 'webapp_not_scannable',
+					code: 'unreachable',
 					message:
-						"This looks like a login or web-app page, so there's nothing public to preview on a free scan. Enter your public homepage URL, or get a paid report to test the pages reachable before sign-in.",
+						"We couldn't load this website. Please check the URL and try again.",
 				},
 				{ status: 422 },
 			);
 		}
 
-		// Paid: testing public pages is still useful. Confirm before proceeding.
-		if (!acknowledgePublicOnly) {
+		// Testing public pages is still useful for paid; confirm before proceeding.
+		if (validation.isWebApp && !acknowledgePublicOnly) {
 			return NextResponse.json(
 				{
 					ok: false,
@@ -176,6 +169,15 @@ export const POST = asyncHandler(async (req: Request) => {
 			{ status: 201 },
 		);
 	}
+
+	// Funnel: a free scan was accepted (passed blocklist + rate limit + validation),
+	// recorded before the Inngest pipeline is triggered.
+	await logFunnelEvent(supabase, {
+		scanId: scan.id,
+		eventType: 'scan_started',
+		url: normalized,
+		email: email ?? null,
+	});
 
 	await queueScanJob({
 		scanId: scan.id,

@@ -3,6 +3,7 @@ import { SCAN_PROCESS_REQUESTED } from '@/lib/inngest/events';
 import { stepIdFromPageUrl } from '@/lib/inngest/step-id';
 import { analyzePageStep } from '@/lib/scan/steps/analyzePage';
 import { clearAiAnalysisStep } from '@/lib/scan/steps/clearAiAnalysis';
+import { checkReachabilityStep } from '@/lib/scan/steps/checkReachability';
 import { collectPageSpeedForPageStep } from '@/lib/scan/steps/collectPageSpeed';
 import { detectAndSelectPagesStep } from '@/lib/scan/steps/detectAndSelectPages';
 import { finalizeScannerStep } from '@/lib/scan/steps/finalizeScanner';
@@ -29,6 +30,8 @@ function getScanConcurrencyLimit(): number {
  * Main scan pipeline.
  *
  * Step execution order:
+ *   0.  check-reachability       — FREE only: live URL fetch + login-gate check;
+ *                                  marks scan failed + early-exits if unreachable
  *   1.  mark-crawling            — status → crawling
  *   2.  detect-and-select-pages  — homepage HTML → page list + website type
  *   3.  persist-metadata         — save detection result to DB
@@ -66,7 +69,33 @@ export const runScan = inngest.createFunction(
 	},
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	async ({ event, step }: { event: any; step: any }) => {
-		const { scanId, targetUrl, package: pkg } = event.data as ProcessPayload;
+		const { scanId, targetUrl, package: pkg, userEmail } = event.data as ProcessPayload;
+
+		// ── Phase 0: Reachability / login-gate check (FREE only) ────────────
+		// Free scans skip the synchronous front-door fetch in /api/scan/start so
+		// the submit returns instantly; we run that check here instead, before any
+		// browser work. If the target is unreachable or a login/web-app page, the
+		// step marks the scan failed with a clear reason and we stop — no browser
+		// scan. Paid scans were already validated synchronously before payment.
+		if (pkg === 'free') {
+			const reachability = (await step.run('check-reachability', () =>
+				checkReachabilityStep({ scanId, targetUrl }),
+			)) as { ok: boolean; reason?: string };
+
+			if (!reachability.ok) {
+				console.error(
+					JSON.stringify({
+						ts: new Date().toISOString(),
+						level: 'error',
+						event: 'pipeline:early_exit',
+						reason: 'reachability_failed',
+						detail: reachability.reason,
+						scanId,
+					}),
+				);
+				return;
+			}
+		}
 
 		// ── Phase 1: Discover pages ─────────────────────────────────────────
 		await step.run('mark-crawling', () => markCrawlingStep(scanId));
@@ -256,6 +285,8 @@ export const runScan = inngest.createFunction(
 			);
 		}
 
-		await step.run('mark-done', () => markScanDoneStep({ scanId, pkg }));
+		await step.run('mark-done', () =>
+			markScanDoneStep({ scanId, pkg, targetUrl, userEmail }),
+		);
 	},
 );
