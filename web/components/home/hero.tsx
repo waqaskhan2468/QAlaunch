@@ -49,6 +49,11 @@ export function Hero() {
         ? raw
         : `https://${raw}`
 
+    // NOTE: once we enter a redirecting path, `isStarting` is intentionally left
+    // `true` so the button stays disabled + in its loading state until the new
+    // page takes over. We only flip it back to `false` on a failure path (so the
+    // user can fix the URL and retry) — never after a successful redirect, which
+    // is what previously caused the button to flicker back to clickable.
     try {
       setIsStarting(true)
       setStartError(null)
@@ -76,24 +81,25 @@ export function Hero() {
       ) {
         const target = `/result?url=${encodeURIComponent(value)}&freePreviewUsed=1`
         router.push(target)
-        return
+        return // keep loading state — redirect in flight
       }
 
       if (payload.ok !== true || !payload.scanId) {
-        // Surface the precise reason from the validation gate (unreachable URL,
-        // login/web-app page) so the user knows what to fix.
+        // Validation failed (blocklist, rate limit, unreachable URL, web-app
+        // page, …). Surface the precise reason and re-enable so they can retry.
         setStartError(
           (payload.ok === false && payload.message) ||
             "Could not start your free audit. Please try again.",
         )
+        setIsStarting(false)
         return
       }
 
       const target = `/result?url=${encodeURIComponent(value)}&scanId=${encodeURIComponent(payload.scanId)}`
       router.push(target)
+      // keep loading state — redirect in flight
     } catch {
       setStartError("Could not start your free audit. Please try again.")
-    } finally {
       setIsStarting(false)
     }
   }
@@ -325,9 +331,10 @@ function MagneticButton({
       type="button"
       onClick={onClick}
       disabled={isLoading}
-      onMouseMove={onMove}
+      aria-busy={isLoading}
+      onMouseMove={isLoading ? undefined : onMove}
       onMouseLeave={reset}
-      whileTap={{ scale: 0.96 }}
+      whileTap={isLoading ? undefined : { scale: 0.96 }}
       style={{ x: springX, y: springY }}
       className={cn(
         "group inline-flex h-14 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-accent-bright px-7 sm:px-8",
@@ -337,14 +344,26 @@ function MagneticButton({
         "disabled:cursor-not-allowed disabled:opacity-80",
       )}
     >
-      {isLoading ? "Starting audit..." : "Audit My Website Free"}
-      <motion.span
-        className="inline-flex"
-        animate={{ x: [0, 3, 0] }}
-        transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <ArrowRight className="size-4" />
-      </motion.span>
+      {isLoading ? (
+        <>
+          <span
+            className="qa-spin size-4 shrink-0 rounded-full border-2 border-white/35 border-t-white"
+            aria-hidden
+          />
+          Starting audit…
+        </>
+      ) : (
+        <>
+          Audit My Website Free
+          <motion.span
+            className="inline-flex"
+            animate={{ x: [0, 3, 0] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <ArrowRight className="size-4" />
+          </motion.span>
+        </>
+      )}
     </motion.button>
   )
 }

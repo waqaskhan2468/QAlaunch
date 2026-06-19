@@ -6,6 +6,7 @@ import { AppError, asyncHandler } from '@/lib/api/error';
 import { assertScanStartAllowed } from '@/lib/api/scan-start-rate-limit';
 import { queueScanJob } from '@/lib/api/queue-scan-job';
 import { validateScanTarget } from '@/lib/scan/validate-target';
+import { isBlockedDomain } from '@/lib/scan/blocklist';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +31,17 @@ export const POST = asyncHandler(async (req: Request) => {
 			400,
 			'private_url_not_allowed',
 			'Private or local URLs are not allowed. Please enter a public website URL.',
+		);
+	}
+
+	// Blocklist: reject major established sites the submitter can't own (free and
+	// paid alike). Auditing one only wastes cloud-browser + AI budget and yields a
+	// useless report. Runs before rate limiting and before any scan row is created.
+	if (isBlockedDomain(normalized)) {
+		throw new AppError(
+			400,
+			'blocked_domain',
+			"This looks like an established site rather than one you own or manage. QAlaunch is built for auditing your own projects — try your site's URL instead.",
 		);
 	}
 

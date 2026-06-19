@@ -3,10 +3,16 @@ import type { ServiceSupabase } from '@/lib/db/supabase';
 import type { ScanPackage } from '@/types/zod';
 
 const WINDOW_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Free scans allowed per IP per rolling 24h. Tune here.
+const FREE_SCANS_PER_IP_PER_DAY = 5;
 
 type IpBucket = { count: number; resetAt: number };
 
 const ipBuckets = new Map<string, IpBucket>();
+// Separate bucket set for the free-tier daily cap (24h window, free only).
+const freeIpDailyBuckets = new Map<string, IpBucket>();
 
 function parseLimit(raw: string | undefined, fallback: number): number {
 	const parsed = Number.parseInt(raw ?? '', 10);
@@ -45,6 +51,27 @@ function assertInMemoryIpLimit(ip: string, limit: number): void {
 			429,
 			'rate_limit_exceeded',
 			'Too many scan requests from your network. Please try again later.',
+		);
+	}
+
+	bucket.count += 1;
+}
+
+/** Free-tier daily cap: at most N free scans per IP per rolling 24h. */
+function assertFreeDailyIpLimit(ip: string, limit: number): void {
+	const now = Date.now();
+	const bucket = freeIpDailyBuckets.get(ip);
+
+	if (!bucket || bucket.resetAt <= now) {
+		freeIpDailyBuckets.set(ip, { count: 1, resetAt: now + DAY_MS });
+		return;
+	}
+
+	if (bucket.count >= limit) {
+		throw new AppError(
+			429,
+			'rate_limit_exceeded',
+			"You've reached the free scan limit for today. Try again tomorrow, or start a paid scan.",
 		);
 	}
 
@@ -101,6 +128,8 @@ export async function assertScanStartAllowed(
 	}
 
 	if (input.package === 'free') {
+		assertFreeDailyIpLimit(ip, FREE_SCANS_PER_IP_PER_DAY);
+
 		const freeCount = await countScansInWindow(supabase, { package: 'free' });
 		if (freeCount >= limits.freeGlobal) {
 			throw new AppError(
