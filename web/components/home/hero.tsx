@@ -2,18 +2,18 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Check } from "lucide-react"
-import { motion, useMotionValue, useSpring, useTransform } from "motion/react"
+import { ArrowRight, Check, Link2, Mail, Star } from "lucide-react"
+import { motion, useMotionValue, useSpring } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { fadeUp, stagger } from "@/components/motion/primitives"
 import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
+import { Flag } from "@/components/home/flag"
 
 /**
- * Hero split — marketing copy + URL capture on the left, an animated
- * live-audit dashboard on the right. Uses motion for a staggered entrance,
- * magnetic button feedback, mouse-parallax on the dashboard, and a spring
- * counter on each stat.
+ * Hero split — marketing copy + URL capture on the left over navy, an audit
+ * report preview + rating card on the right over a pale-mint panel. A green
+ * angular flag runs down the diagonal seam between the two halves.
  */
 export function Hero() {
   const router = useRouter()
@@ -105,45 +105,46 @@ export function Hero() {
   }
 
   return (
-    <section className="relative flex min-h-[calc(100vh-4rem)] items-center overflow-hidden bg-slate-deep px-5 py-16 sm:px-8 md:px-12 md:py-20 lg:py-24">
-      {/* Decorative dot grid + glowing orbs */}
+    <section className="relative flex min-h-[calc(100vh-4rem)] items-center overflow-hidden bg-slate-deep px-5 py-16 sm:px-8 md:px-12 md:py-20 lg:py-0">
+      {/* Decorative dot grid on the navy half */}
       <div className="qa-hero-grid pointer-events-none absolute inset-0" />
-      <div className="qa-orb-float pointer-events-none absolute -left-32 -top-32 size-[600px] rounded-full bg-[radial-gradient(circle,rgba(24,71,168,0.5)_0%,transparent_65%)]" />
-      <div className="qa-orb-float-alt pointer-events-none absolute -bottom-40 -right-28 size-[500px] rounded-full bg-[radial-gradient(circle,rgba(34,197,94,0.2)_0%,transparent_60%)]" />
 
-      <div className="relative z-10 mx-auto grid w-full max-w-7xl items-center gap-14 lg:grid-cols-[1.05fr_1fr] lg:gap-16 xl:gap-20">
+      {/* Diagonal mint panel + green flag seam (desktop only). Two stacked
+          clipped layers share the same slope: the green layer sits behind and
+          the mint layer is offset right, revealing a constant green band. */}
+      <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 lg:block">
+        <div
+          className="absolute inset-0 bg-accent-bright"
+          style={{ clipPath: "polygon(11% 0, 100% 0, 100% 100%, -1% 100%)" }}
+        />
+        <div
+          className="absolute inset-0 bg-accent-mint"
+          style={{ clipPath: "polygon(15% 0, 100% 0, 100% 100%, 3% 100%)" }}
+        />
+      </div>
+
+      <div className="relative z-10 mx-auto grid w-full max-w-7xl items-center gap-14 lg:grid-cols-[1.05fr_1fr] lg:gap-10">
+        {/* ── Left: copy + capture (over navy) ───────────────────────────── */}
         <motion.div
-          className="flex flex-col"
+          className="flex flex-col py-2 lg:py-24"
           variants={stagger(0.08, 0.1)}
           initial="hidden"
           animate="visible"
         >
-          {/* Live badge with pulse ring */}
-          <motion.div
-            variants={fadeUp}
-            className="mb-7 inline-flex w-fit items-center gap-2 rounded-full border border-accent-bright/25 bg-accent-bright/10 px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-[#4ade80]"
-          >
-            <span className="relative flex size-[7px]">
-              <motion.span
-                className="absolute inset-0 rounded-full bg-[#4ade80]"
-                animate={{ scale: [1, 2.4, 1], opacity: [0.55, 0, 0.55] }}
-                transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-              />
-              <span className="relative inline-flex size-full rounded-full bg-[#4ade80]" />
-            </span>
-            9 Years of QA Expertise — Now Automated
+          <motion.div variants={fadeUp} className="mb-7">
+            <Flag>9 Years of QA Expertise — Now Automated</Flag>
           </motion.div>
 
           <motion.h1
             variants={fadeUp}
-            className="font-heading text-[clamp(2.25rem,5.2vw,4rem)] font-black leading-[1.05] tracking-tight text-balance text-white"
+            className="font-heading text-[clamp(2.25rem,5.2vw,4rem)] font-black leading-[1.05] tracking-[-0.03em] text-balance text-white"
           >
             Is your website{" "}
             <span className="relative inline-block text-accent-bright">
               actually working
               <motion.span
                 aria-hidden="true"
-                className="absolute inset-x-0 -bottom-1 h-[3px] origin-left rounded-full bg-accent-bright/80"
+                className="absolute inset-x-0 -bottom-1 h-[3px] origin-left rounded-none bg-accent-bright/80"
                 initial={{ scaleX: 0 }}
                 animate={{ scaleX: 1 }}
                 transition={{
@@ -169,19 +170,12 @@ export function Hero() {
             give you a clear, actionable report your developer can fix today.
           </motion.p>
 
-          {/* URL capture */}
-          <motion.div
-            variants={fadeUp}
-            className="mt-10 rounded-2xl border border-white/15 bg-white/6 p-3 shadow-surface-dark sm:p-4"
-          >
+          {/* URL capture — sharp bordered input boxes */}
+          <motion.div variants={fadeUp} className="mt-10">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
                 <UrlInput value={url} onChange={setUrl} onSubmit={submit} />
-                <EmailInput
-                  value={email}
-                  onChange={setEmail}
-                  onSubmit={submit}
-                />
+                <EmailInput value={email} onChange={setEmail} onSubmit={submit} />
               </div>
               <MagneticButton onClick={submit} isLoading={isStarting} />
             </div>
@@ -197,10 +191,10 @@ export function Hero() {
             </div>
           </motion.div>
 
-          {/* Stats */}
+          {/* Stats — dominant big numbers */}
           <motion.div
             variants={fadeUp}
-            className="mt-10 grid grid-cols-2 gap-6 sm:flex sm:flex-wrap sm:gap-8"
+            className="mt-12 grid grid-cols-2 gap-x-8 gap-y-7 sm:flex sm:flex-wrap sm:gap-x-12"
           >
             <StatItem value={1000} suffix="+" label="Websites Audited" />
             <StatItem value={35} suffix="+" label="Quality Checks" />
@@ -209,14 +203,15 @@ export function Hero() {
           </motion.div>
         </motion.div>
 
-        {/* Animated dashboard mock */}
+        {/* ── Right: report preview + rating (over mint) ─────────────────── */}
         <motion.div
-          className="relative hidden lg:block"
-          initial={{ opacity: 0, y: 40, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
+          className="relative hidden flex-col gap-5 lg:flex lg:py-24 lg:pl-10 xl:pl-16"
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.25, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         >
-          <DashboardMock />
+          <ReportCard />
+          <RatingCard />
         </motion.div>
       </div>
     </section>
@@ -237,7 +232,8 @@ function UrlInput({
   onSubmit: () => void
 }) {
   return (
-    <div className="relative sm:flex-[3]">
+    <div className="relative flex items-center sm:flex-[3]">
+      <Link2 className="pointer-events-none absolute left-4 size-4 text-muted-ink" />
       <input
         id="audit-input"
         value={value}
@@ -248,9 +244,9 @@ function UrlInput({
         type="url"
         placeholder="https://yourwebsite.com"
         className={cn(
-          "h-14 w-full rounded-xl border border-white/15 bg-white/10 px-5",
-          "font-mono text-base text-white outline-none transition-all placeholder:text-white/35",
-          "focus:border-accent-bright focus:bg-accent-bright/10 focus:ring-4 focus:ring-accent-bright/15",
+          "h-14 w-full rounded-none border-2 border-slate-deep bg-white pl-11 pr-4",
+          "font-mono text-base text-ink outline-none transition-colors placeholder:text-muted-ink",
+          "focus:border-accent-bright focus:ring-4 focus:ring-accent-bright/20",
         )}
       />
     </div>
@@ -271,7 +267,8 @@ function EmailInput({
   onSubmit: () => void
 }) {
   return (
-    <div className="relative sm:flex-[2]">
+    <div className="relative flex items-center sm:flex-[2]">
+      <Mail className="pointer-events-none absolute left-4 size-4 text-muted-ink" />
       <input
         id="audit-email"
         value={value}
@@ -284,9 +281,9 @@ function EmailInput({
         placeholder="Email (optional)"
         aria-label="Email (optional)"
         className={cn(
-          "h-14 w-full rounded-xl border border-white/15 bg-white/10 px-5",
-          "text-base text-white outline-none transition-all placeholder:text-white/35",
-          "focus:border-accent-bright focus:bg-accent-bright/10 focus:ring-4 focus:ring-accent-bright/15",
+          "h-14 w-full rounded-none border-2 border-slate-deep bg-white pl-11 pr-4",
+          "text-base text-ink outline-none transition-colors placeholder:text-muted-ink",
+          "focus:border-accent-bright focus:ring-4 focus:ring-accent-bright/20",
         )}
       />
     </div>
@@ -334,10 +331,10 @@ function MagneticButton({
       aria-busy={isLoading}
       onMouseMove={isLoading ? undefined : onMove}
       onMouseLeave={reset}
-      whileTap={isLoading ? undefined : { scale: 0.96 }}
+      whileTap={isLoading ? undefined : { scale: 0.98 }}
       style={{ x: springX, y: springY }}
       className={cn(
-        "group inline-flex h-14 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-accent-bright px-7 sm:px-8",
+        "group inline-flex h-14 w-full items-center justify-center gap-2 whitespace-nowrap rounded-none bg-accent-bright px-7 sm:px-8",
         "text-sm font-extrabold tracking-wide text-white shadow-glow-accent sm:text-lg",
         "hover:bg-accent-emerald hover:shadow-glow-accent-lg",
         "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-bright/35",
@@ -375,7 +372,7 @@ function MagneticButton({
 function TrustItem({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-1.5 text-xs font-medium text-white/50">
-      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-accent-bright/20 text-[#4ade80]">
+      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-none bg-accent-bright/20 text-[#4ade80]">
         <Check className="size-2.5" strokeWidth={3} />
       </span>
       {label}
@@ -422,24 +419,20 @@ function StatItem({
   }, [value])
 
   return (
-    <motion.div
-      ref={ref}
-      whileHover={{ y: -2 }}
-      className="group border-l-2 border-white/10 pl-4 transition-colors hover:border-accent-bright/60"
-    >
-      <span className="block font-heading text-2xl font-black leading-none text-white sm:text-[26px]">
+    <div ref={ref} className="flex flex-col">
+      <span className="font-heading text-4xl font-black leading-none tracking-[-0.02em] text-white sm:text-5xl">
         {display >= 1000 ? display.toLocaleString() : display}
         {suffix}
       </span>
-      <span className="mt-1.5 block text-[11px] uppercase tracking-wider text-white/45">
+      <span className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-white/45">
         {label}
       </span>
-    </motion.div>
+    </div>
   )
 }
 
 /* ------------------------------------------------------------------ */
-/*  Dashboard mock with mouse parallax                                  */
+/*  Report preview card (light, sharp, over the mint panel)             */
 /* ------------------------------------------------------------------ */
 
 const bars = [
@@ -455,100 +448,54 @@ const issues = [
     severity: "CRITICAL",
     cat: "Functionality",
     title: "Contact form submits with no confirmation",
-    tone: { border: "border-l-danger", badge: "bg-danger/20 text-[#fca5a5]" },
+    border: "border-l-danger",
+    badge: "bg-danger/15 text-danger",
   },
   {
     severity: "HIGH",
     cat: "Usability",
     title: "Navigation disappears on scroll",
-    tone: { border: "border-l-warn", badge: "bg-warn/20 text-[#fcd34d]" },
+    border: "border-l-warn",
+    badge: "bg-warn/15 text-warn",
   },
   {
     severity: "CRITICAL",
     cat: "Mobile",
     title: "CTA button invisible on iPhone SE",
-    tone: { border: "border-l-danger", badge: "bg-danger/20 text-[#fca5a5]" },
-  },
-  {
-    severity: "MEDIUM",
-    cat: "UI / UX",
-    title: "Low contrast text in hero section",
-    tone: {
-      border: "border-l-[#60a5fa]",
-      badge: "bg-brand/20 text-[#93c5fd]",
-    },
+    border: "border-l-danger",
+    badge: "bg-danger/15 text-danger",
   },
 ]
 
-function DashboardMock() {
-  const wrapRef = useRef<HTMLDivElement | null>(null)
-  const px = useMotionValue(0)
-  const py = useMotionValue(0)
-  const rx = useSpring(useTransform(py, [-1, 1], [6, -6]), {
-    stiffness: 150,
-    damping: 18,
-  })
-  const ry = useSpring(useTransform(px, [-1, 1], [-8, 8]), {
-    stiffness: 150,
-    damping: 18,
-  })
-
-  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = wrapRef.current?.getBoundingClientRect()
-    if (!rect) return
-    px.set(((e.clientX - rect.left) / rect.width) * 2 - 1)
-    py.set(((e.clientY - rect.top) / rect.height) * 2 - 1)
-  }
-
-  const reset = () => {
-    px.set(0)
-    py.set(0)
-  }
-
+function ReportCard() {
   return (
-    <motion.div
-      ref={wrapRef}
-      onMouseMove={onMove}
-      onMouseLeave={reset}
-      style={{
-        rotateX: rx,
-        rotateY: ry,
-        transformPerspective: 1200,
-        transformStyle: "preserve-3d",
-      }}
-      className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-2xl shadow-black/50"
-    >
+    <div className="rounded-none border-2 border-slate-deep bg-white shadow-[8px_8px_0_0_rgba(9,17,31,1)]">
       {/* Browser chrome */}
-      <div className="flex items-center gap-2.5 border-b border-white/10 bg-white/5 px-4 py-3">
+      <div className="flex items-center gap-2.5 border-b-2 border-slate-deep bg-surface-soft px-4 py-3">
         <div className="flex gap-1.5">
           <span className="size-2.5 rounded-full bg-[#FF5F57]" />
           <span className="size-2.5 rounded-full bg-[#FFBD2E]" />
           <span className="size-2.5 rounded-full bg-[#28CA41]" />
         </div>
-        <div className="flex-1 rounded-md bg-white/10 px-3 py-1 font-mono text-xs text-white/40">
+        <div className="flex-1 rounded-none bg-white px-3 py-1 font-mono text-xs text-muted-ink">
           yourwebsite.com — Live Audit
         </div>
       </div>
 
       <div className="p-5">
         {/* Score row */}
-        <div className="mb-4 flex items-center gap-3.5 border-b border-white/10 pb-4">
-          <motion.div
-            className="flex size-14 flex-col items-center justify-center rounded-full border-[3px] border-warn"
-            initial={{ scale: 0, rotate: -90 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ delay: 0.6, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <span className="font-heading text-xl font-black leading-none text-white">
+        <div className="mb-4 flex items-center gap-3.5 border-b border-border-soft pb-4">
+          <div className="flex size-14 flex-col items-center justify-center rounded-none border-2 border-warn">
+            <span className="font-heading text-xl font-black leading-none text-ink">
               58
             </span>
             <span className="text-[9px] font-bold text-warn">C+</span>
-          </motion.div>
+          </div>
           <div>
-            <div className="text-sm font-bold text-white">
+            <div className="text-sm font-bold text-ink">
               Health Score: Needs Attention
             </div>
-            <div className="mt-0.5 text-[11px] text-white/40">
+            <div className="mt-0.5 text-[11px] text-muted-ink">
               12 issues found across 6 categories
             </div>
           </div>
@@ -556,84 +503,86 @@ function DashboardMock() {
 
         {/* Progress bars */}
         <div className="mb-4 flex flex-col gap-2">
-          {bars.map((b, i) => (
+          {bars.map((b) => (
             <div key={b.label} className="flex items-center gap-2.5">
-              <span className="w-[84px] shrink-0 text-[11px] text-white/50">
+              <span className="w-[84px] shrink-0 text-[11px] text-body">
                 {b.label}
               </span>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
-                <motion.div
-                  className="h-full rounded-full"
-                  style={{ backgroundColor: b.color }}
-                  initial={{ width: "0%" }}
-                  animate={{ width: `${b.value}%` }}
-                  transition={{
-                    delay: 0.5 + i * 0.12,
-                    duration: 0.9,
-                    ease: [0.22, 1, 0.36, 1],
-                  }}
+              <div className="h-1.5 flex-1 overflow-hidden rounded-none bg-border-soft">
+                <div
+                  className="h-full rounded-none"
+                  style={{ backgroundColor: b.color, width: `${b.value}%` }}
                 />
               </div>
-              <span className="w-7 text-right font-mono text-[11px] text-white/50">
+              <span className="w-7 text-right font-mono text-[11px] text-body">
                 {b.value}
               </span>
             </div>
           ))}
         </div>
 
-        {/* Issue cards */}
+        {/* Issue rows */}
         <div className="flex flex-col gap-2">
-          {issues.map((iss, i) => (
-            <motion.div
+          {issues.map((iss) => (
+            <div
               key={iss.title}
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 1.3 + i * 0.18, duration: 0.45 }}
-              whileHover={{ x: 4 }}
               className={cn(
-                "rounded-xl border-l-[3px] bg-white/5 p-3",
-                iss.tone.border,
+                "rounded-none border border-border-soft border-l-[3px] bg-surface-soft p-3",
+                iss.border,
               )}
             >
               <div className="mb-1 flex items-center gap-1.5">
                 <span
                   className={cn(
-                    "rounded-full px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider",
-                    iss.tone.badge,
+                    "rounded-none px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider",
+                    iss.badge,
                   )}
                 >
                   {iss.severity}
                 </span>
-                <span className="text-[10px] uppercase tracking-wider text-white/40">
+                <span className="text-[10px] uppercase tracking-wider text-muted-ink">
                   {iss.cat}
                 </span>
               </div>
-              <div className="text-xs font-bold leading-snug text-white">
+              <div className="text-xs font-bold leading-snug text-ink">
                 {iss.title}
               </div>
-            </motion.div>
+            </div>
           ))}
         </div>
+      </div>
+    </div>
+  )
+}
 
-        {/* Platform chips */}
-        <div className="mt-5 flex flex-wrap items-center gap-2.5 border-t border-white/10 pt-4">
-          <span className="whitespace-nowrap text-[10px] uppercase tracking-widest text-white/30">
-            Tested on:
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {["Lovable", "Bolt.new", "Replit", "Shopify", "Any website"].map(
-              (p) => (
-                <span
-                  key={p}
-                  className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/50"
-                >
-                  {p}
-                </span>
-              ),
-            )}
+/* ------------------------------------------------------------------ */
+/*  Rating card — real testimonial (James M.)                           */
+/* ------------------------------------------------------------------ */
+
+function RatingCard() {
+  return (
+    <figure className="rounded-none border-2 border-slate-deep bg-white p-5">
+      <div className="mb-3 flex gap-0.5 text-[#F59E0B]" aria-label="5 star rating">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Star key={i} className="size-4" fill="currentColor" strokeWidth={0} />
+        ))}
+      </div>
+      <blockquote className="text-[13px] italic leading-relaxed text-ink">
+        &ldquo;I thought my Lovable app was ready to launch. QAlaunch found a
+        broken checkout button, an invisible CTA on mobile, and 3 JS errors — all
+        in under a minute. Saved me from a disastrous launch.&rdquo;
+      </blockquote>
+      <figcaption className="mt-4 flex items-center gap-3">
+        <div className="flex size-9 items-center justify-center rounded-full bg-brand font-heading text-xs font-extrabold text-white">
+          JM
+        </div>
+        <div>
+          <div className="text-[13px] font-bold text-ink">James M.</div>
+          <div className="text-[11px] text-muted-ink">
+            SaaS Founder — Built with Lovable
           </div>
         </div>
-      </div>
-    </motion.div>
+      </figcaption>
+    </figure>
   )
 }

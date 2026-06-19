@@ -38,7 +38,7 @@ export function HowItWorks() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="mb-14 text-center font-heading text-[clamp(1.75rem,3.6vw,2.5rem)] font-black leading-tight tracking-tight text-white text-balance"
+          className="mb-14 text-center font-heading text-[clamp(1.75rem,3.6vw,2.5rem)] font-black leading-tight tracking-[-0.02em] text-white text-balance"
         >
           From URL to expert audit report in 3 steps
         </motion.h2>
@@ -50,10 +50,10 @@ export function HowItWorks() {
           whileInView="visible"
           viewport={{ once: true, margin: "-80px" }}
         >
-          {/* Connector line — draws in on scroll */}
+          {/* Connector line — a simple straight rule that draws in on scroll */}
           <motion.div
             aria-hidden="true"
-            className="pointer-events-none absolute left-[16.7%] right-[16.7%] top-[33px] hidden h-px origin-left bg-gradient-to-r from-accent-bright/50 via-accent-bright/30 to-brand-mid/50 md:block"
+            className="pointer-events-none absolute left-[16.7%] right-[16.7%] top-[32px] hidden h-px origin-left bg-white/20 md:block"
             initial={{ scaleX: 0 }}
             whileInView={{ scaleX: 1 }}
             viewport={{ once: true, margin: "-80px" }}
@@ -67,9 +67,9 @@ export function HowItWorks() {
               className="group relative px-4 text-center"
             >
               <motion.div
-                whileHover={{ y: -6, scale: 1.06, rotate: -3 }}
+                whileHover={{ y: -6, scale: 1.06 }}
                 transition={{ type: "spring", stiffness: 300, damping: 18 }}
-                className="relative z-10 mx-auto mb-5 flex size-16 items-center justify-center rounded-full border-[2.5px] border-accent-bright/45 bg-gradient-to-br from-brand to-brand-mid font-heading text-2xl font-black text-white shadow-glow-brand"
+                className="relative z-10 mb-5 inline-block bg-slate-deep px-3 font-heading text-6xl font-black leading-none tracking-[-0.02em] text-accent-bright"
               >
                 {step.n}
               </motion.div>

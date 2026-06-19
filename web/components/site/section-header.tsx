@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { Flag } from "@/components/home/flag"
 
 type SectionHeaderProps = {
   eyebrow: string
@@ -30,17 +31,12 @@ export function SectionHeader({
         className,
       )}
     >
-      <div
-        className={cn(
-          "mb-3 text-xs font-bold uppercase tracking-widest",
-          tone === "dark" ? "text-brand" : "text-accent-bright",
-        )}
-      >
-        {eyebrow}
+      <div className="mb-4">
+        <Flag>{eyebrow}</Flag>
       </div>
       <h2
         className={cn(
-          "font-heading text-[clamp(1.75rem,3.6vw,2.75rem)] font-black leading-tight tracking-tight text-balance",
+          "font-heading text-[clamp(1.75rem,3.6vw,2.75rem)] font-black leading-tight tracking-[-0.03em] text-balance",
           tone === "dark" ? "text-ink" : "text-white",
         )}
       >

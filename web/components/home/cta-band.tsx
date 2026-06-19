@@ -32,6 +32,11 @@ export function CtaBand() {
   return (
     <section className="relative overflow-hidden bg-linear-to-br from-brand-dark to-brand px-10 py-20 text-center md:px-12 md:py-24">
       <div className="qa-cta-grid pointer-events-none absolute inset-0" />
+      {/* Green angular flag accent — ties back to the hero seam */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-0 top-0 h-28 w-20 -translate-x-1/3 -translate-y-1/4 -skew-x-12 bg-accent-bright"
+      />
       {/* Soft drifting accent orb */}
       <motion.div
         aria-hidden="true"
@@ -61,7 +66,7 @@ export function CtaBand() {
           whileHover={{ y: -3, scale: 1.02 }}
           whileTap={{ scale: 0.97 }}
           transition={{ type: "spring", stiffness: 300, damping: 18 }}
-          className="mt-10 inline-flex h-14 items-center justify-center gap-2 rounded-2xl bg-accent-bright px-10 text-sm font-extrabold tracking-wide text-white shadow-glow-accent hover:bg-accent-emerald hover:shadow-glow-accent-lg focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-bright/35 sm:h-[60px] sm:px-12 sm:text-base"
+          className="mt-10 inline-flex h-14 items-center justify-center gap-2 rounded-none bg-accent-bright px-10 text-sm font-extrabold tracking-wide text-white shadow-glow-accent hover:bg-accent-emerald hover:shadow-glow-accent-lg focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-bright/35 sm:h-[60px] sm:px-12 sm:text-base"
         >
           Audit My Website Free
           <motion.span

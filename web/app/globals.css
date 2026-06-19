@@ -16,6 +16,8 @@
   --accent: #16a34a;
   --accent-bright: #22c55e;
   --accent-pale: #ecfdf5;
+  /* Pale mint — light-section accent background in the redesigned layout */
+  --accent-mint: #eef6f0;
 
   --slate-deep: #09111f;
   --ink: #18293a;
@@ -60,6 +62,7 @@
   --color-accent-emerald: var(--accent);
   --color-accent-bright: var(--accent-bright);
   --color-accent-pale: var(--accent-pale);
+  --color-accent-mint: var(--accent-mint);
 
   --color-slate-deep: var(--slate-deep);
   --color-ink: var(--ink);

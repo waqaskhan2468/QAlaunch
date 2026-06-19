@@ -59,7 +59,7 @@ export function Testimonials() {
               whileHover={{ y: -6 }}
               transition={{ type: "spring", stiffness: 260, damping: 20 }}
               tabIndex={0}
-              className="flex flex-col rounded-2xl border border-border-soft bg-white p-7 outline-none hover:border-brand hover:shadow-card-hover focus-visible:border-brand focus-visible:ring-4 focus-visible:ring-brand/15"
+              className="flex flex-col rounded-none border-2 border-slate-deep bg-white p-7 outline-none transition-colors hover:border-accent-bright focus-visible:border-accent-bright focus-visible:ring-4 focus-visible:ring-accent-bright/20"
             >
               <div
                 className="mb-4 flex gap-0.5 text-[#F59E0B]"

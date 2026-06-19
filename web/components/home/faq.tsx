@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronDown } from "lucide-react"
+import { Minus, Plus } from "lucide-react"
 import { useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 
@@ -66,7 +66,7 @@ export function FAQ({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-          className="mb-10 text-center font-heading text-[clamp(1.5rem,3vw,2.25rem)] font-black leading-tight tracking-tight text-ink"
+          className="mb-10 text-center font-heading text-[clamp(1.5rem,3vw,2.25rem)] font-black leading-tight tracking-[-0.02em] text-ink"
         >
           {title}
         </motion.h2>
@@ -84,31 +84,26 @@ export function FAQ({
                 key={item.q}
                 variants={fadeUpSoft}
                 className={cn(
-                  "overflow-hidden rounded-xl border bg-white transition-colors",
+                  "overflow-hidden rounded-none border-2 bg-white transition-colors",
                   open
-                    ? "border-brand shadow-card"
-                    : "border-border-soft hover:border-brand/40",
+                    ? "border-accent-bright"
+                    : "border-slate-deep hover:border-accent-bright",
                 )}
               >
                 <button
                   type="button"
                   onClick={() => setOpenIndex(open ? null : i)}
                   aria-expanded={open}
-                  className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left font-bold text-ink transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+                  className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left font-bold text-ink transition-colors hover:text-accent-emerald focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-bright/40"
                 >
                   <span className="text-base leading-snug">{item.q}</span>
-                  <motion.span
-                    animate={{ rotate: open ? 180 : 0 }}
-                    transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                    className="inline-flex"
-                  >
-                    <ChevronDown
-                      className={cn(
-                        "size-5 shrink-0 transition-colors",
-                        open ? "text-brand" : "text-muted-ink",
-                      )}
-                    />
-                  </motion.span>
+                  <span className="inline-flex shrink-0" aria-hidden="true">
+                    {open ? (
+                      <Minus className="size-5 text-accent-bright" strokeWidth={3} />
+                    ) : (
+                      <Plus className="size-5 text-ink" strokeWidth={3} />
+                    )}
+                  </span>
                 </button>
                 <AnimatePresence initial={false}>
                   {open && (

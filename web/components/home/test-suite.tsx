@@ -12,6 +12,7 @@ import { motion } from "motion/react"
 
 import { Reveal, popIn, stagger } from "@/components/motion/primitives"
 import { SectionHeader } from "@/components/site/section-header"
+import { Flag } from "@/components/home/flag"
 import { cn } from "@/lib/utils"
 
 type Priority = "top" | "core"
@@ -112,9 +113,9 @@ export function TestSuite() {
                 transition={{ type: "spring", stiffness: 260, damping: 20 }}
                 tabIndex={0}
                 className={cn(
-                  "group rounded-2xl border border-border-soft bg-white p-6 outline-none",
-                  "hover:border-brand hover:shadow-card-hover",
-                  "focus-visible:border-brand focus-visible:ring-4 focus-visible:ring-brand/15",
+                  "group rounded-none border-2 border-slate-deep bg-white p-6 outline-none transition-colors",
+                  "hover:border-accent-bright",
+                  "focus-visible:border-accent-bright focus-visible:ring-4 focus-visible:ring-accent-bright/20",
                 )}
               >
                 <div className="mb-3 flex items-center gap-3">
@@ -122,7 +123,7 @@ export function TestSuite() {
                     whileHover={{ rotate: -6, scale: 1.1 }}
                     transition={{ type: "spring", stiffness: 320, damping: 15 }}
                     className={cn(
-                      "flex size-11 items-center justify-center rounded-xl",
+                      "flex size-11 items-center justify-center rounded-none",
                       iconTone,
                     )}
                   >
@@ -131,16 +132,9 @@ export function TestSuite() {
                   <h3 className="font-heading text-base font-extrabold text-ink">
                     {title}
                   </h3>
-                  <span
-                    className={cn(
-                      "ml-auto rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider",
-                      priority === "top"
-                        ? "bg-[#FFF3E8] text-[#C2410C]"
-                        : "bg-brand-pale text-brand",
-                    )}
-                  >
+                  <Flag className="ml-auto">
                     {priority === "top" ? "Top Priority" : "Core Check"}
-                  </span>
+                  </Flag>
                 </div>
                 <p className="mb-4 text-sm leading-relaxed text-body">
                   {description}
@@ -149,7 +143,7 @@ export function TestSuite() {
                   {tags.map((tag) => (
                     <span
                       key={tag}
-                      className="rounded-full bg-brand-pale px-2.5 py-1 text-[11px] font-semibold text-brand transition-colors group-hover:bg-brand group-hover:text-white"
+                      className="rounded-none border border-slate-deep bg-white px-2.5 py-1 text-[11px] font-semibold text-ink transition-colors group-hover:bg-slate-deep group-hover:text-white"
                     >
                       {tag}
                     </span>

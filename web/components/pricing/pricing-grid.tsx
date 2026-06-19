@@ -6,6 +6,7 @@ import { motion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { slideInLeft, stagger } from "@/components/motion/primitives"
+import { Flag } from "@/components/home/flag"
 import { plans, type Plan } from "./pricing-plans"
 
 type PricingGridProps = {
@@ -42,23 +43,22 @@ function PlanCard({ plan }: { plan: Plan }) {
       whileHover={{ y: -8 }}
       transition={{ type: "spring", stiffness: 240, damping: 20 }}
       className={cn(
-        "relative flex flex-col rounded-3xl border bg-white p-8",
-        "hover:shadow-card-hover",
+        "relative flex flex-col rounded-none border-2 bg-white p-8 transition-colors",
         plan.popular
-          ? "border-2 border-brand bg-gradient-to-b from-brand-pale to-white shadow-glow-brand"
-          : "border-border-soft",
+          ? "border-accent-bright bg-accent-mint"
+          : "border-slate-deep",
       )}
     >
       {plan.popular && (
         <>
-          <span className="absolute -top-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-gradient-to-r from-brand to-brand-mid px-4 py-1 text-[10.5px] font-extrabold tracking-wide text-white shadow-glow-brand">
+          <Flag className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap">
             <Star className="size-3" fill="currentColor" strokeWidth={0} />
             Most Popular
-          </span>
+          </Flag>
           {/* Shimmer sweep */}
           <motion.span
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl"
+            className="pointer-events-none absolute inset-0 overflow-hidden rounded-none"
           >
             <motion.span
               className="absolute -inset-y-4 w-24 -skew-x-12 bg-gradient-to-r from-transparent via-white/50 to-transparent"
@@ -99,7 +99,7 @@ function PlanCard({ plan }: { plan: Plan }) {
 
       <div
         className={cn(
-          "relative mt-3 inline-flex w-fit items-center gap-1 rounded-full px-3 py-1 text-xs font-bold",
+          "relative mt-3 inline-flex w-fit items-center gap-1 rounded-none px-3 py-1 text-xs font-bold",
           plan.delivery.icon === "bolt"
             ? "bg-accent-pale text-accent-emerald"
             : "bg-[#E0E7FF] text-[#3730A3]",
@@ -133,7 +133,7 @@ function PlanCard({ plan }: { plan: Plan }) {
 
 function CTAButton({ plan }: { plan: Plan }) {
   const baseClasses =
-    "relative inline-flex h-12 w-full items-center justify-center rounded-xl px-4 font-extrabold text-sm focus-visible:outline-none focus-visible:ring-4"
+    "relative inline-flex h-12 w-full items-center justify-center rounded-none px-4 font-extrabold text-sm focus-visible:outline-none focus-visible:ring-4"
   const variantClasses = {
     primary:
       "bg-brand text-white shadow-glow-brand hover:bg-brand-mid focus-visible:ring-brand/35",

@@ -57,7 +57,7 @@ export function SiteNav() {
             width={1219}
             height={340}
             priority
-            className="h-8 w-auto"
+            className="h-11 w-auto"
           />
         </Link>
 
@@ -69,7 +69,7 @@ export function SiteNav() {
                 key={l.href}
                 href={l.href}
                 className={cn(
-                  "flex h-9 items-center rounded-lg px-3 text-[13px] font-medium transition-colors",
+                  "flex h-9 items-center rounded-none px-3 text-[13px] font-medium transition-colors",
                   active
                     ? "bg-white/10 text-white"
                     : "text-white/60 hover:bg-white/10 hover:text-white",
@@ -83,7 +83,7 @@ export function SiteNav() {
             type="button"
             onClick={handleResultClick}
             className={cn(
-              "qa-press group ml-3 inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent-bright px-4 text-[13px] font-semibold text-white",
+              "qa-press group ml-3 inline-flex h-9 items-center gap-1.5 rounded-none bg-accent-bright px-4 text-[13px] font-semibold text-white",
               "hover:bg-accent-emerald hover:shadow-md hover:shadow-accent-bright/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-bright/40",
             )}
           >
@@ -100,7 +100,7 @@ export function SiteNav() {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="rounded-md p-2 text-white/80 md:hidden"
+          className="rounded-none p-2 text-white/80 md:hidden"
           aria-label="Toggle navigation"
           aria-expanded={open}
         >
@@ -120,7 +120,7 @@ export function SiteNav() {
                   href={l.href}
                   onClick={() => setOpen(false)}
                   className={cn(
-                    "rounded-lg px-3 py-2.5 text-sm font-medium",
+                    "rounded-none px-3 py-2.5 text-sm font-medium",
                     active
                       ? "bg-white/10 text-white"
                       : "text-white/70 hover:bg-white/10",
@@ -133,7 +133,7 @@ export function SiteNav() {
             <button
               type="button"
               onClick={handleResultClick}
-              className="qa-press mt-2 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-accent-bright px-5 text-sm font-bold text-white shadow-glow-accent hover:bg-accent-emerald focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-bright/35"
+              className="qa-press mt-2 inline-flex h-12 items-center justify-center gap-2 rounded-none bg-accent-bright px-5 text-sm font-bold text-white shadow-glow-accent hover:bg-accent-emerald focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-bright/35"
             >
               Audit My Website Free
               <span aria-hidden="true">→</span>

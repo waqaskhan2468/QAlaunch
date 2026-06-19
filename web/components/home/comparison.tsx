@@ -103,7 +103,7 @@ export function Comparison() {
         </Reveal>
 
         <motion.div
-          className="mt-12 overflow-hidden rounded-2xl shadow-xl shadow-black/[0.06]"
+          className="mt-12 overflow-hidden rounded-none border-2 border-slate-deep bg-white"
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-80px" }}
@@ -116,13 +116,13 @@ export function Comparison() {
                 <th className="bg-surface-soft px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-muted-ink">
                   Feature
                 </th>
-                <th className="bg-slate-deep px-6 py-4 text-left">
-                  <span className="inline-flex items-center gap-2 font-heading text-sm font-extrabold text-white">
+                <th className="border-x-2 border-t-2 border-slate-deep bg-white px-6 py-4 text-left">
+                  <span className="inline-flex items-center gap-2 font-heading text-sm font-extrabold text-ink">
                     <Rocket className="size-4 text-accent-bright" />
                     QAlaunch
                   </span>
                 </th>
-                <th className="bg-[#F1F5F9] px-6 py-4 text-left font-heading text-sm font-extrabold text-muted-ink">
+                <th className="bg-surface-soft px-6 py-4 text-left font-heading text-sm font-extrabold text-muted-ink">
                   Other Tools
                 </th>
               </tr>
@@ -138,12 +138,19 @@ export function Comparison() {
                   key={r.feature}
                   variants={fadeUpSoft}
                   className={cn(
-                    "transition-colors hover:bg-brand-pale/60",
+                    "transition-colors hover:bg-accent-mint",
                     i < rows.length - 1 && "border-b border-border-soft",
                   )}
                 >
                   <td className="px-6 py-4 text-sm text-ink">{r.feature}</td>
-                  <td className="px-6 py-4">{renderCell(r.qa)}</td>
+                  <td
+                    className={cn(
+                      "border-x-2 border-slate-deep px-6 py-4",
+                      i === rows.length - 1 && "border-b-2",
+                    )}
+                  >
+                    {renderCell(r.qa)}
+                  </td>
                   <td className="px-6 py-4">{renderCell(r.others)}</td>
                 </motion.tr>
               ))}
