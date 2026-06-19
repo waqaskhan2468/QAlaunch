@@ -51,19 +51,14 @@ export function SiteNav() {
     >
       <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-5 md:px-12">
         <Link href="/" className="flex items-center" aria-label="QAlaunch home">
-          <span className="flex items-center gap-2.5">
-            <Image
-              src="/QAlaunch_Favicon.svg"
-              alt="QAlaunch logo"
-              width={28}
-              height={28}
-              priority
-              className="size-7"
-            />
-            <span className="font-heading text-[18px] font-black tracking-tight text-white">
-              QAlaunch
-            </span>
-          </span>
+          <Image
+            src="/brand/qalaunch-logo-dark-bg.svg"
+            alt="QAlaunch"
+            width={1219}
+            height={340}
+            priority
+            className="h-8 w-auto"
+          />
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">

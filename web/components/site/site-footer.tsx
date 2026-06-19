@@ -50,17 +50,14 @@ export function SiteFooter() {
       <div className="mx-auto max-w-7xl">
         <div className="grid gap-10 pb-10 md:grid-cols-[2fr_1fr_1fr_1fr] md:gap-11">
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center">
               <Image
-                src="/QAlaunch_Favicon.svg"
-                alt="QAlaunch logo"
-                width={28}
-                height={28}
-                className="size-7"
+                src="/brand/qalaunch-logo-dark-bg.svg"
+                alt="QAlaunch"
+                width={1219}
+                height={340}
+                className="h-8 w-auto"
               />
-              <span className="font-heading text-[18px] font-black tracking-tight text-white">
-                QAlaunch
-              </span>
             </div>
             <p className="mt-4 max-w-sm text-[13.5px] leading-relaxed text-white/45">
               Expert website auditing backed by 9 years of professional QA

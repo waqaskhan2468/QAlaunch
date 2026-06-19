@@ -253,8 +253,19 @@ export function renderReportHtml(input: {
 	pages: ReportScanPage[];
 	logoUrl?: string;
 }): string {
-	const { scan, issues, pages } = input;
+	const { scan, issues, pages, logoUrl } = input;
 	const generatedAt = new Date().toISOString();
+
+	// White-text wordmark on the dark cover. Falls back to the inline SVG mark
+	// when no hosted logo URL is supplied (e.g. local renders without an origin).
+	const coverBrandHtml = logoUrl
+		? `<img src="${escapeHtml(logoUrl)}" alt="QAlaunch" style="height:32px;width:auto;display:block;" />`
+		: `<div class="brand-mark">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          </svg>
+        </div>
+        <span class="brand-name">QAlaunch</span>`;
 	const score = computeHealthScore(issues.map((i) => i.severity));
 	const scoreLabel = labelFromScore(score);
 	const offset = scoreRingOffset(score);
@@ -611,12 +622,7 @@ body {
     <div class="cover-glow"></div>
     <div class="cover-inner">
       <div class="cover-brand">
-        <div class="brand-mark">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-          </svg>
-        </div>
-        <span class="brand-name">QAlaunch</span>
+        ${coverBrandHtml}
       </div>
       <div class="cover-eyebrow">Website Quality Audit</div>
       <div class="cover-heading">QA Analysis<br>Report</div>

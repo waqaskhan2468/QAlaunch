@@ -22,6 +22,23 @@ const SIGNED_URL_TTL =
 		Number(process.env.REPORT_SIGNED_URL_TTL_SECONDS)
 	:	604_800;
 
+/**
+ * Public origin where static brand assets (`/public/brand/*`) are served.
+ * Both the Resend email and the headless PDF render fetch the logo over HTTP,
+ * so a relative path will not resolve — they need an absolute URL. Mirrors the
+ * origin precedence used by `getInngestServeOrigin()`.
+ */
+function getPublicAssetOrigin(): string {
+	const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+	if (appUrl) return appUrl.replace(/\/$/, '');
+	const vercel = process.env.VERCEL_URL?.trim();
+	if (vercel) return `https://${vercel.replace(/\/$/, '')}`;
+	return 'https://getqalaunch.com';
+}
+
+/** White-text wordmark PNG — sits on the dark email/PDF header surfaces. */
+const BRAND_LOGO_DARK_BG_URL = `${getPublicAssetOrigin()}/brand/qalaunch-logo-dark-bg@2x.png`;
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function getErrorMessage(error: unknown): string {
@@ -360,8 +377,8 @@ function buildReportEmailHtml(input: {
 			<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#09111F;">
 				<tr>
 					<td align="center" style="padding:28px 24px;">
-						<div style="font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:24px;font-weight:800;color:#FFFFFF;letter-spacing:-0.5px;">QAlaunch</div>
-						<div style="font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:14px;color:#6B8AA3;margin-top:4px;">Expert website auditing</div>
+						<img src="${BRAND_LOGO_DARK_BG_URL}" alt="QAlaunch" width="180" height="50" style="display:block;margin:0 auto;width:180px;height:auto;border:0;outline:none;text-decoration:none;" />
+						<div style="font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:14px;color:#6B8AA3;margin-top:10px;">Expert website auditing</div>
 					</td>
 				</tr>
 			</table>
@@ -481,7 +498,12 @@ export async function generateAndStorePdfReport(
 		const { scan, pages, issues } = await fetchReportData(supabase, scanId);
 
 		stage = 'render-html';
-		const html = renderReportHtml({ scan, pages, issues });
+		const html = renderReportHtml({
+			scan,
+			pages,
+			issues,
+			logoUrl: BRAND_LOGO_DARK_BG_URL,
+		});
 
 		stage = 'generate-pdf';
 		const pdfBuffer = await requestPdfFromBrowser(html);
