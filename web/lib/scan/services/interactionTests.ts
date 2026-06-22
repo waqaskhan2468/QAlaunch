@@ -320,6 +320,7 @@ async function testPrimaryCtaReachability(
 async function testNavigationLinks(
 	page: Page,
 	links: ValidatedLink[] | null,
+	options: { mainNavOnly: boolean },
 ): Promise<InteractionTestResult> {
 	const id = 'test-nav-links';
 	const name = 'Navigation link health';
@@ -334,10 +335,33 @@ async function testNavigationLinks(
 		const statusByHref = new Map(links.map((link) => [link.href, link]));
 
 		// Cheap DOM read (no network): which links are in the nav/header.
-		const navHrefs = await page.evaluate(() =>
-			Array.from(
+		// Free tier checks only the MAIN nav items — the top-level menu a visitor sees
+		// without interacting. Paid tiers also include items nested inside collapsed
+		// dropdown / mega-menus (hidden until hover or click), i.e. the full nav surface.
+		const navHrefs = await page.evaluate((mainNavOnly: boolean) => {
+			// "Main nav item" = currently visible at this viewport without any
+			// interaction. Excludes anchors hidden inside collapsed dropdowns
+			// (display:none / visibility:hidden / zero-size / hidden ancestor).
+			const isMainNavVisible = (el: HTMLAnchorElement): boolean => {
+				if (!mainNavOnly) return true;
+				const rect = el.getBoundingClientRect();
+				if (rect.width <= 0 || rect.height <= 0) return false;
+				const style = window.getComputedStyle(el);
+				if (
+					style.display === 'none' ||
+					style.visibility === 'hidden' ||
+					Number(style.opacity) < 0.05
+				) {
+					return false;
+				}
+				// checkVisibility() also catches a display:none ancestor / content-visibility.
+				return typeof el.checkVisibility === 'function' ? el.checkVisibility() : true;
+			};
+
+			return Array.from(
 				document.querySelectorAll<HTMLAnchorElement>('nav a[href], header a[href]'),
 			)
+				.filter(isMainNavVisible)
 				.map((el) => ({ href: el.href, text: el.innerText.trim().slice(0, 50) }))
 				.filter(
 					({ href }) =>
@@ -345,8 +369,8 @@ async function testNavigationLinks(
 						!href.startsWith('javascript:') &&
 						!href.startsWith('mailto:') &&
 						!href.startsWith('tel:'),
-				),
-		);
+				);
+		}, options.mainNavOnly);
 
 		const seen = new Set<string>();
 		const checkedNav = navHrefs
@@ -921,7 +945,7 @@ export async function collectInteractionTests(
 	page: Page,
 	pageUrl: string,
 	timing?: { scanId?: string; pageUrl?: string },
-	opts?: { linksPromise?: Promise<LinksResult | undefined> },
+	opts?: { linksPromise?: Promise<LinksResult | undefined>; mainNavOnly?: boolean },
 ): Promise<InteractionTestsPayload> {
 	const startedAt = Date.now();
 	const results: InteractionTestResult[] = [];
@@ -973,7 +997,7 @@ export async function collectInteractionTests(
 		: undefined;
 	const links = linksResult?.links ?? null;
 
-	await runTest(() => testNavigationLinks(page, links));
+	await runTest(() => testNavigationLinks(page, links, { mainNavOnly: opts?.mainNavOnly ?? false }));
 	await runTest(async () => testExternalLinkSecurity(links));
 
 	const durationMs = Date.now() - startedAt;

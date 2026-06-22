@@ -319,6 +319,9 @@ async function scanSingleUrl(
 			runStep(result.steps, 'interaction_tests', () =>
 				collectInteractionTests(page, url, stepTiming, {
 					linksPromise: linksStep,
+					// Free: main (visible top-level) nav items only. Paid: full nav,
+					// including items nested in collapsed dropdown / mega-menus.
+					mainNavOnly: pkg === 'free',
 				}),
 			),
 		]);

@@ -7,9 +7,13 @@ import { logScanTiming } from './scan-timing';
 // Reduced from 50 → 30: covers all meaningful navigation links without long tail
 // of footer/social links that rarely produce actionable broken-link findings.
 const MAX_LINKS = 30;
-// Reduced from 3 s → 2 s: genuine broken links time-out quickly; slow-but-alive
-// servers either respond in <2 s or aren't worth blocking the scan for.
-const LINK_TIMEOUT = 2_000;
+// 8 s, raised from 2 s. The old "slow-but-alive servers respond in <2 s" assumption
+// was wrong: real origins (e.g. slow WordPress/Webflow hosts) routinely take 2–9 s to
+// answer a HEAD/GET yet return HTTP 200. A 2 s abort turned every such link into a
+// status-0 false-positive "broken" verdict. 8 s covers those slow-but-alive responses
+// while still failing genuinely dead links quickly (links run concurrently, so the
+// per-link ceiling rarely moves the wall-clock on healthy sites).
+const LINK_TIMEOUT = 8_000;
 // True sliding-window concurrency: next link starts the moment any slot frees,
 // rather than waiting for the slowest link in a fixed batch.
 const LINK_CONCURRENCY = 25;
@@ -31,12 +35,16 @@ const FETCH_HEADERS = {
 	'Upgrade-Insecure-Requests': '1',
 };
 
-// 403 is the classic signature of bot-blocking, not a genuinely missing page (that
-// is 404). Before reporting any 403 as broken we re-verify it with the real
-// headless browser. Each re-verification is a full navigation (seconds), so we cap
-// how many we run per page and log when the cap is hit rather than silently
-// dropping the rest.
-const BROWSER_VERIFY_TIMEOUT = 8_000;
+// Two fetch verdicts are too weak to trust on their own, so we re-verify them with
+// a real headless-browser navigation (the source of truth) before reporting broken:
+//   • 403 — the classic bot-blocking signature, not a missing page (that is 404).
+//   • status 0 — HEAD *and* GET both timed out / errored. On pathologically slow
+//     origins a live page can exceed even the 8 s fetch ceiling on both methods, so
+//     a 0 is "couldn't confirm", not "confirmed broken".
+// Each re-verification is a full navigation (seconds), so we cap how many we run per
+// page and log when the cap is hit rather than silently dropping the rest. The
+// timeout is generous because the whole reason we land here is a slow-but-alive host.
+const BROWSER_VERIFY_TIMEOUT = 15_000;
 const MAX_BROWSER_REVERIFY = 8;
 const BROWSER_VERIFY_CONCURRENCY = 2;
 
@@ -96,8 +104,18 @@ async function validateLink(link: LinkRecord): Promise<ValidatedLink> {
 		}
 
 		return { ...link, status: response.status, ok: response.ok };
-	} catch (error) {
-		return { ...link, status: 0, ok: false, error: cleanError(error) };
+	} catch (headError) {
+		// HEAD threw (timeout / connection reset / refused). On slow origins HEAD is
+		// frequently SLOWER than GET — or blocked outright — so a HEAD failure is a
+		// weak "broken" signal. A genuinely missing page returns a status code (404),
+		// it does not throw. Retry once with GET before giving up; only record
+		// status 0 (truly unreachable) when GET also throws.
+		try {
+			const response = await requestWithTimeout(link.href, 'GET');
+			return { ...link, status: response.status, ok: response.ok };
+		} catch (getError) {
+			return { ...link, status: 0, ok: false, error: cleanError(getError) };
+		}
 	}
 }
 
@@ -199,20 +217,23 @@ export async function collectLinks(
 		checkedLinks.map((link) => limit(() => validateLink(link))),
 	);
 
-	// Re-verify 403s with the real browser before trusting them as broken (see
-	// MAX_BROWSER_REVERIFY). 403 ≠ 404: it usually means "bot blocked", not "gone".
+	// Re-verify 403s and timeouts (status 0) with the real browser before trusting
+	// them as broken (see MAX_BROWSER_REVERIFY). 403 ≠ 404 (usually "bot blocked",
+	// not "gone"); status 0 = "fetch couldn't confirm" (slow-but-alive host), not
+	// "confirmed broken". A real navigation sends the full browser fingerprint and
+	// tolerates a slower response, so a page that loads here is fine.
 	const suspicious = validatedLinks.filter(
-		(link) => !link.ok && link.status === 403,
+		(link) => !link.ok && (link.status === 403 || link.status === 0),
 	);
 	if (suspicious.length > 0) {
 		const context = page.context();
 		const toVerify = suspicious.slice(0, MAX_BROWSER_REVERIFY);
 		if (suspicious.length > toVerify.length) {
-			console.warn('[links] 403 re-verification cap hit', {
+			console.warn('[links] browser re-verification cap hit', {
 				pageUrl,
 				suspicious: suspicious.length,
 				verified: toVerify.length,
-				note: 'Remaining 403s are reported as broken without browser re-check.',
+				note: 'Remaining suspicious links are reported as broken without browser re-check.',
 			});
 		}
 		const verifyLimit = createConcurrencyLimit(BROWSER_VERIFY_CONCURRENCY);
@@ -221,7 +242,7 @@ export async function collectLinks(
 				verifyLimit(async () => {
 					const verified = await verifyLinkInBrowser(context, link.href);
 					// Only clear the broken verdict when the browser actually loaded it.
-					// A failed/null probe leaves the original 403 in place.
+					// A failed/null probe leaves the original verdict (403 / status 0) in place.
 					if (verified) {
 						link.status = verified.status;
 						link.ok = verified.ok;
