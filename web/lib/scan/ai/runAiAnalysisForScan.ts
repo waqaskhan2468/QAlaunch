@@ -238,11 +238,28 @@ function buildWebsiteTypeFocus(
 	return lines.join('\n');
 }
 
+/**
+ * Free-tier scope override. Placed right after the cached instructions (which tell
+ * the model to "walk the page top to bottom" and check the footer) so it narrows a
+ * free scan to the first impression — where conversion-critical issues concentrate.
+ * The free screenshot is viewport-only, so the model already only SEES the top;
+ * this stops it speculating about deep/footer content and cuts output tokens.
+ */
+const FREE_SCAN_FOCUS = [
+	'SCOPE OVERRIDE — FREE TOP-OF-PAGE SCAN:',
+	'This is a free scan focused on the FIRST IMPRESSION only. The screenshot is the top of the page (above the fold) — the hero and the very first section(s).',
+	'- Analyze ONLY the hero/banner and the first one or two sections below the fold.',
+	'- Ignore the cached instruction to walk the full page or inspect the footer. Do NOT report footer, deep-page, or below-the-fold content you cannot actually see.',
+	'- Do NOT invent or infer issues about parts of the page outside the attached screenshot.',
+	'- Prioritise hero clarity, the primary call-to-action, first-impression layout/contrast, and the first section(s).',
+].join('\n');
+
 /** Page-specific text placed before signed screenshot URLs (not prompt-cached). */
 function buildAnalysisPromptBeforeImages(input: {
 	pageUrl: string;
 	pageRole: string | null;
 	websiteType: string | null;
+	isFree?: boolean;
 }): string {
 	const websiteTypeFocus = buildWebsiteTypeFocus(
 		input.websiteType,
@@ -250,6 +267,7 @@ function buildAnalysisPromptBeforeImages(input: {
 	);
 
 	return [
+		...(input.isFree ? [FREE_SCAN_FOCUS, ''] : []),
 		'CONTEXT:',
 		`- Page URL: ${input.pageUrl}`,
 		`- Page role: ${input.pageRole ?? 'unknown'}`,
@@ -283,7 +301,7 @@ type AxeViolation = {
  * This reduces token count by 60–80 % on heavy pages while keeping all the
  * high-signal findings intact.
  */
-function trimAxeViolations(raw: unknown): unknown {
+function trimAxeViolations(raw: unknown, maxItems: number = MAX_AXE_VIOLATIONS): unknown {
 	if (!Array.isArray(raw)) return raw;
 
 	const sorted = [...(raw as AxeViolation[])].sort((a, b) => {
@@ -293,7 +311,7 @@ function trimAxeViolations(raw: unknown): unknown {
 	});
 
 	return sorted
-		.slice(0, MAX_AXE_VIOLATIONS)
+		.slice(0, maxItems)
 		// Strip nodes (verbose HTML) and tags (WCAG category codes) — useless to Claude.
 		.map(({ nodes: _nodes, tags: _tags, ...rest }) => rest);
 }
@@ -304,7 +322,15 @@ function buildAnalysisPromptAfterImages(input: {
 	playwrightData: unknown;
 	axeViolations: unknown;
 	hasScreenshots: boolean;
+	/** Free scans send a leaner payload (top-of-page focus) to cut tokens/latency. */
+	isFree?: boolean;
 }): string {
+	// Free scans focus on the first impression, so cap the whole-page data lists
+	// tighter — fewer tokens in and fewer issues out means a faster Claude call.
+	const maxBrokenLinks = input.isFree ? 6 : CLAUDE_PROMPT_MAX_BROKEN_LINKS;
+	const maxExternalLinks = input.isFree ? 6 : CLAUDE_PROMPT_MAX_EXTERNAL_LINKS;
+	const maxConsole = input.isFree ? 8 : MAX_CONSOLE_MESSAGES;
+	const maxAxe = input.isFree ? 8 : MAX_AXE_VIOLATIONS;
 	const pd = input.playwrightData as Record<string, unknown> | null;
 	const links = pd?.links as Record<string, unknown> | undefined;
 	const brokenLinks = links?.brokenLinks;
@@ -329,22 +355,22 @@ function buildAnalysisPromptAfterImages(input: {
 			if (!isRecord(link)) return false;
 			return link.isExternal === true && link.target !== '_blank';
 		})
-		.slice(0, CLAUDE_PROMPT_MAX_EXTERNAL_LINKS);
+		.slice(0, maxExternalLinks);
 
 	const brokenLinksForPrompt =
 		Array.isArray(brokenLinks) ?
-			(brokenLinks as unknown[]).slice(0, CLAUDE_PROMPT_MAX_BROKEN_LINKS)
+			(brokenLinks as unknown[]).slice(0, maxBrokenLinks)
 		:	[];
 
 	// Cap console messages to avoid prompt bloat from noisy pages
 	const rawConsoleMessages = pd?.consoleMessages ?? [];
 	const consoleMessages =
 		Array.isArray(rawConsoleMessages) ?
-			rawConsoleMessages.slice(0, MAX_CONSOLE_MESSAGES)
+			rawConsoleMessages.slice(0, maxConsole)
 		:	rawConsoleMessages;
 
-	// Trim axe violations: sort by severity, strip nodes, cap at 20
-	const axeViolations = trimAxeViolations(input.axeViolations);
+	// Trim axe violations: sort by severity, strip nodes, cap (tighter for free)
+	const axeViolations = trimAxeViolations(input.axeViolations, maxAxe);
 
 	const scanData = {
 		consoleMessages,
@@ -790,10 +816,12 @@ export async function analyzeScanPageWithClaude(
 			mobile: mobileSignedUrl ? mobileSignedUrl.slice(0, 80) : null,
 		});
 
+		const isFree = pkg === 'free';
 		const dynamicBeforeImagesText = buildAnalysisPromptBeforeImages({
 			pageUrl: page.page_url,
 			pageRole: page.page_role,
 			websiteType,
+			isFree,
 		});
 		// axeViolations: read from playwright_data.axeViolations (v4),
 		// fall back to the dedicated axe_violations DB column for older rows.
@@ -807,6 +835,7 @@ export async function analyzeScanPageWithClaude(
 			playwrightData: scanData,
 			axeViolations: axeViolationsData,
 			hasScreenshots: analysisMode !== 'text_only',
+			isFree,
 		});
 
 		const raw = await analyzeWithClaude({

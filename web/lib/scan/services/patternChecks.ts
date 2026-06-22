@@ -80,9 +80,16 @@ type StaticMeasurements = {
 /**
  * All of checks 1-5 in a single in-page pass. Pure DOM/computed-style reads —
  * returns raw measurements; the human-facing issue text is built in Node.
+ *
+ * `arg.cutoff` is the y-pixel below which elements are out of scope for this
+ * tier (free → bottom of hero + first sections; paid → effectively infinite).
+ * Element-based checks ignore anything starting below the cutoff.
  */
-function staticMeasureInPage(): StaticMeasurements {
+function staticMeasureInPage(arg: { cutoff: number }): StaticMeasurements {
+	const cutoff = arg?.cutoff ?? Number.POSITIVE_INFINITY;
 	const round = (n: number) => Math.round(n * 100) / 100;
+	const withinCutoff = (el: Element): boolean =>
+		(el as HTMLElement).getBoundingClientRect().top <= cutoff;
 
 	// — color helpers —
 	function parseColor(input: string): [number, number, number, number] | null {
@@ -221,7 +228,7 @@ function staticMeasureInPage(): StaticMeasurements {
 			const direct = Array.from(el.childNodes).some(
 				(n) => n.nodeType === 3 && (n.textContent ?? '').trim().length >= 3,
 			);
-			if (!direct || !isVisible(el)) continue;
+			if (!direct || !isVisible(el) || !withinCutoff(el)) continue;
 			const s = getComputedStyle(el);
 			const fg = parseColor(s.color);
 			if (!fg) continue;
@@ -314,7 +321,7 @@ function staticMeasureInPage(): StaticMeasurements {
 		];
 		const anchors = (
 			Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[]
-		).filter(isVisible);
+		).filter((a) => isVisible(a) && withinCutoff(a));
 		for (const a of anchors) {
 			if (destMismatches.length >= 6) break;
 			const label =
@@ -559,6 +566,7 @@ function readButtonState(el: Element): {
 	hidden: boolean;
 	w: number;
 	h: number;
+	top: number;
 	colorEqualsBg: boolean;
 } {
 	const parse = (input: string): [number, number, number, number] | null => {
@@ -598,24 +606,32 @@ function readButtonState(el: Element): {
 			r.height < 2,
 		w: Math.round(r.width),
 		h: Math.round(r.height),
+		top: Math.round(r.top),
 		colorEqualsBg,
 	};
 }
 
 type ButtonState = ReturnType<typeof readButtonState>;
 
-async function checkButtonStates(page: Page, startedAt: number): Promise<PatternCheckResult> {
+async function checkButtonStates(
+	page: Page,
+	startedAt: number,
+	cutoff: number,
+	maxButtons: number,
+): Promise<PatternCheckResult> {
 	const id = 'button-state-visibility';
 	const name = 'Button text stays visible when hovered/focused';
 	try {
 		const handles = await page.$$('button, [role="button"], a[class*="btn" i], a[class*="button" i]');
 		let checked = 0;
 		for (const handle of handles) {
-			if (checked >= MAX_BUTTONS_CHECKED) break;
+			if (checked >= maxButtons) break;
 			const base: ButtonState | null = await handle
 				.evaluate(readButtonState)
 				.catch(() => null);
-			if (!base || !base.hasText || base.hidden || base.colorEqualsBg) continue; // not a visible text button at baseline
+			// Skip non-text/hidden buttons and anything below this tier's scope cutoff.
+			if (!base || !base.hasText || base.hidden || base.colorEqualsBg) continue;
+			if (base.top > cutoff) continue;
 			checked += 1;
 
 			const broke = (st: ButtonState | null): boolean =>
@@ -675,6 +691,30 @@ async function checkButtonStates(page: Page, startedAt: number): Promise<Pattern
 	}
 }
 
+// ─── Scope helper ─────────────────────────────────────────────────────────────
+
+/**
+ * In-page: y-pixel marking the bottom of the "first impression" — the hero plus
+ * the next ~2 top-level sections. Bounded to [1.5×, ~4000px] of the viewport so
+ * it always covers the hero and first sections but never the whole page. Used to
+ * scope free-tier checks to where conversion-critical issues concentrate.
+ */
+function measureTopRegionCutoff(): number {
+	const vp = window.innerHeight || 900;
+	const main = document.querySelector('main') || document.body;
+	const blocks = (Array.from(main.children) as HTMLElement[]).filter(
+		(el) => el.getBoundingClientRect().height > 40,
+	);
+	const topBlocks = blocks.slice(0, 3); // hero + ~2 sections
+	let cutoff = vp * 1.5;
+	if (topBlocks.length > 0) {
+		cutoff = Math.max(
+			...topBlocks.map((el) => el.getBoundingClientRect().bottom),
+		);
+	}
+	return Math.min(Math.max(cutoff, vp * 1.5), 4000);
+}
+
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 export async function collectPatternChecks(
@@ -683,18 +723,33 @@ export async function collectPatternChecks(
 	options: {
 		isHomepage: boolean;
 		links?: LinksResult;
+		/** 'top' (free) limits checks to the hero + first sections; 'full' (paid) scans the whole page. */
+		scope?: 'top' | 'full';
 		timing?: { scanId?: string; pageUrl?: string; tier?: string };
 	},
 ): Promise<PatternChecksPayload> {
 	const startedAt = Date.now();
 	const results: PatternCheckResult[] = [];
+	const scope = options.scope ?? 'full';
+
+	// For the 'top' (free) scope, compute the y-pixel below which content is out of
+	// scope: the bottom of the hero plus the next ~2 top-level sections, bounded so
+	// it always covers the first impression but never the whole page. 'full' uses a
+	// large sentinel (Infinity is not JSON-serializable across page.evaluate).
+	const FULL_SCOPE_CUTOFF = 1_000_000_000;
+	let cutoff = FULL_SCOPE_CUTOFF;
+	if (scope === 'top') {
+		cutoff = await page
+			.evaluate(measureTopRegionCutoff)
+			.catch(() => FULL_SCOPE_CUTOFF);
+	}
 
 	// Checks 1-5: one static evaluate, guarded by a Node timeout.
 	const staticStarted = Date.now();
 	let measurements: StaticMeasurements | null = null;
 	try {
 		measurements = await Promise.race([
-			page.evaluate(staticMeasureInPage),
+			page.evaluate(staticMeasureInPage, { cutoff }),
 			new Promise<null>((resolve) => setTimeout(() => resolve(null), STATIC_EVAL_TIMEOUT_MS)),
 		]);
 	} catch {
@@ -715,12 +770,16 @@ export async function collectPatternChecks(
 	}
 
 	// Check 6: interactive hover/focus probe (mutates element state → runs last).
-	results.push(await checkButtonStates(page, Date.now()));
+	// This loop (hover + focus per button) dominates the phase, so free checks
+	// fewer buttons — the top region rarely has more than a couple of CTAs.
+	const maxButtons = scope === 'top' ? 3 : MAX_BUTTONS_CHECKED;
+	results.push(await checkButtonStates(page, Date.now(), cutoff, maxButtons));
 
 	const durationMs = Date.now() - startedAt;
 	logScanTiming('pattern_checks', durationMs, {
 		...options.timing,
 		pageUrl,
+		scope,
 		ok: true,
 		failed: results.filter((r) => r.status === 'fail').length,
 	});

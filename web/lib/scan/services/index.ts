@@ -351,7 +351,49 @@ async function scanSingleUrl(
 			}
 		}
 
-		// ── Phase 2 — mobile screenshot ───────────────────────────────────────
+		// ── Phase 3 — active interaction probes + pattern checks ───────────────
+		// Started HERE so it overlaps the mobile phase below. Phase 3 mutates only
+		// the now-idle desktop page (screenshots already captured); the mobile phase
+		// runs in a separate Browserbase context — independent targets, so running
+		// them concurrently reclaims the Phase 3 wall-clock that used to run *after*
+		// the mobile phase. Each probe is independently guarded + time-boxed.
+		const phase3StartedAt = Date.now();
+		const phase3Promise = (async () => {
+			try {
+				result.interactionProbes = await collectInteractionProbes(page, url, {
+					siteWide: isHomepage,
+					links: result.links,
+					timing: stepTiming,
+				});
+			} catch (error) {
+				result.warnings.push(
+					`interaction_probes_failed: ${error instanceof Error ? error.message : 'unknown'}`,
+				);
+			}
+
+			// Deterministic verified-pattern checks (logo link, contrast, nav active,
+			// link dest, hero height, button hover state). Free scopes to the hero +
+			// first sections; paid scans the full page.
+			try {
+				result.patternChecks = await collectPatternChecks(page, url, {
+					isHomepage,
+					links: result.links,
+					scope: pkg === 'free' ? 'top' : 'full',
+					timing: stepTiming,
+				});
+			} catch (error) {
+				result.warnings.push(
+					`pattern_checks_failed: ${error instanceof Error ? error.message : 'unknown'}`,
+				);
+			}
+
+			logScanTiming('phase3_probes', Date.now() - phase3StartedAt, {
+				...stepTiming,
+				ok: true,
+			});
+		})();
+
+		// ── Phase 2 — mobile screenshot (concurrent with Phase 3 above) ────────
 		const phase2StartedAt = Date.now();
 		let mobileContextToClose: BrowserContext | null = null;
 
@@ -396,39 +438,9 @@ async function scanSingleUrl(
 			}
 		}
 
-		// ── Phase 3 — active interaction probes ────────────────────────────────
-		// Runs LAST, on the now-idle desktop page, because these checks scroll /
-		// click / navigate (unlike the Phase 1 collectors, which must not). Each
-		// probe is independently guarded + time-boxed; the whole phase is wrapped
-		// so it can never crash the page scan. Site-wide checks (sticky nav, footer
-		// scroll) run only on the homepage; per-page checks run on every page.
-		try {
-			result.interactionProbes = await collectInteractionProbes(page, url, {
-				siteWide: isHomepage,
-				links: result.links,
-				timing: stepTiming,
-			});
-		} catch (error) {
-			result.warnings.push(
-				`interaction_probes_failed: ${error instanceof Error ? error.message : 'unknown'}`,
-			);
-		}
-
-		// ── Phase 3b — deterministic verified-pattern checks ───────────────────
-		// Also on the idle desktop page (the button check mutates hover/focus
-		// state). Failing checks become verified_pattern issues directly, with no
-		// AI judgement. Guarded so it can never crash the page scan.
-		try {
-			result.patternChecks = await collectPatternChecks(page, url, {
-				isHomepage,
-				links: result.links,
-				timing: stepTiming,
-			});
-		} catch (error) {
-			result.warnings.push(
-				`pattern_checks_failed: ${error instanceof Error ? error.message : 'unknown'}`,
-			);
-		}
+		// Wait for the concurrent Phase 3 (desktop probes + pattern checks) to finish
+		// before finalizing the result.
+		await phase3Promise;
 
 		const navigationOk = hasSuccessfulNavigation(result.steps);
 		const axeOk = hasSuccessfulAxe(result);
