@@ -22,8 +22,12 @@ type IssueRow = {
 	screenshot_url: string | null;
 	is_in_free_preview: boolean | null;
 	display_order: number | null;
+	finding_type: string | null;
 	created_at: string | null;
 };
+
+/** Suggestions are advisory — excluded from the health score + bug totals. */
+const isBug = (issue: IssueRow): boolean => issue.finding_type !== 'suggestion';
 
 export async function GET(
 	_: Request,
@@ -62,7 +66,9 @@ export async function GET(
 	}
 
 	const allIssues = (issues ?? []) as IssueRow[];
-	const healthScore = computeHealthScore(allIssues.map((issue) => issue.severity));
+	const healthScore = computeHealthScore(
+		allIssues.filter(isBug).map((issue) => issue.severity),
+	);
 	const healthGrade = gradeFromScore(healthScore);
 	const healthLabel = labelFromScore(healthScore);
 	const isFree = scan.package === 'free';
@@ -84,7 +90,7 @@ export async function GET(
 
 	const visibleIssues = allIssues.filter((issue) => issue.is_in_free_preview);
 	const previewHealthScore = computeHealthScore(
-		visibleIssues.map((issue) => issue.severity),
+		visibleIssues.filter(isBug).map((issue) => issue.severity),
 	);
 	const lockedIssues = allIssues
 		.filter((issue) => !issue.is_in_free_preview)
@@ -93,6 +99,7 @@ export async function GET(
 			category: issue.category,
 			severity: issue.severity,
 			title: issue.title,   // exposed as teaser — no description/impact/fix
+			finding_type: issue.finding_type,
 			isLocked: true as const,
 		}));
 

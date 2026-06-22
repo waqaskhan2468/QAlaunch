@@ -195,6 +195,48 @@ ACCESSIBILITY GUIDANCE:
 - For serious/critical violations, confirm visually whether the issue affects visible UI
 - Do NOT re-report an axe violation verbatim; only include it if you can add visual context or a clearer fix instruction than axe provides
 
+CONSOLE & NETWORK ERRORS — VISUAL CORROBORATION REQUIRED:
+- A console error/warning, CORS message, or blocked/failed network request is NOT by itself a user-facing issue. Real pages routinely log errors from third-party scripts, analytics, ad blockers, and CORS that have ZERO visible effect on what the visitor sees.
+- Report a console or network error as a functionality/UI issue ONLY when the screenshot or the OBSERVED INTERACTION BEHAVIOUR shows a matching visible symptom — e.g. missing content, an unstyled or broken element, a blank/placeholder area, a stuck loading spinner, a failed image, or a feature that demonstrably does not work. Name that visible symptom in the description.
+- If you cannot point to a visible symptom, do NOT report it as a user-facing bug. Ignore it entirely when it has no visible front-end impact. At most — and only if it plausibly merits an engineer's attention — record it ONCE as a single "low" severity "functionality" issue framed as a technical note (e.g. "Background errors appear in the browser console but have no visible effect on the page"), clearly separate from user-facing bugs.
+- Never infer a broken UI element from a console or network error alone. The screenshot and observed behaviour are the source of truth for what the user actually experiences.
+
+SEVERITY CALIBRATION (match severity to confirmed, observed impact — never inflate):
+- critical: the core task is blocked for most users (checkout/signup/contact cannot complete, page fails to load, primary content missing).
+- high: a real, confirmed problem that significantly degrades the experience for many users (a broken primary navigation link, a key image that fails to load, a serious accessibility barrier).
+- medium: a genuine issue with limited or situational impact (secondary content glitch, moderate layout inconsistency, slow-but-usable performance).
+- low: minor, cosmetic, stylistic, or convention-based items, and anything debatable or preference-driven — e.g. external links opening in the same tab instead of a new tab, small spacing inconsistencies, optional copy tweaks. Opening links in the same tab is a LOW-severity style choice, not a conversion blocker, UNLESS you have direct evidence it breaks a flow.
+- When the evidence is weak or the impact is uncertain, lower BOTH the severity and the confidence — do not round up.
+
+LANGUAGE — FACTUAL, NOT DRAMATIC:
+- Describe the actual, confirmed user impact in plain, neutral, factual language, proportionate to the evidence.
+- Do NOT use dramatized or alarmist phrasing ("destroying trust", "directly preventing conversions", "catastrophic", "severely damaging the brand", "critical conversion blocker") for issues that are minor, stylistic, or unverified.
+- State what the visitor sees or experiences and the plausible consequence (e.g. "External links open in the same tab, so visitors who follow one leave your site and may not return" — NOT "This destroys user trust and kills conversions").
+- Reserve strong impact language for issues where you have actually observed the blocking behaviour.
+
+KNOWN-PATTERN CHECKLIST (check each item explicitly on the homepage — do not free-associate):
+For each item below, look specifically for the pattern. If it is present, report ONE issue and set finding_type="verified_pattern". If it is not present, say nothing. These are concrete, recurring patterns across real ecommerce, Shopify, AI-built, personal, and brand sites:
+1. The hero/banner does not clearly state what is being offered, OR has no visible call-to-action button.
+2. A sticky/fixed navigation bar has no background or shadow when the page is scrolled, so it blends into the content behind it (judge from the OBSERVED INTERACTION BEHAVIOUR sticky-nav result + screenshot).
+3. Important text content appears baked into an image instead of being real, selectable text (e.g. a headline or paragraph that is clearly part of a graphic).
+4. Navigational icons (slider/carousel arrows, dropdown carets, hamburger/menu indicators) have low visibility or contrast against their background.
+5. A carousel/slider places a repeated UI element inconsistently across slides (e.g. a button at the bottom on one slide and the top on another).
+6. If the site supports dark mode, the logo is invisible or very low-contrast specifically in dark mode.
+7. A primary call-to-action is presented as plain text or a bare link rather than a visually distinct button.
+
+DO NOT re-report what the deterministic checks already cover. The "DETERMINISTIC PATTERN CHECKS ALREADY REPORTED" block (after the screenshots) lists issues already filed programmatically — logo-home link, text contrast, current-nav active state, social/link destinations, hero-taller-than-viewport, and button text breaking on hover/focus. Skip any issue already listed there.
+
+SUGGESTIONS (soft, lower-confidence — set finding_type="suggestion" AND severity="low"):
+Only these two qualify as suggestions. Phrase them gently as advice ("Consider…"), never as defects:
+- The page feels visually plain or generic (weak visual interest), where this is a matter of taste rather than a concrete defect.
+- The conversion path feels high-friction (e.g. more steps or fields than necessary), where you are inferring rather than observing a hard blocker.
+Suggestions are advisory only: they are excluded from the critical/high issue totals and the health score. Do NOT label anything else as a suggestion.
+
+FINDING_TYPE (required mindset; defaults to "general" if omitted):
+- "verified_pattern": a match for an item in the KNOWN-PATTERN CHECKLIST above.
+- "suggestion": one of the two soft items above (with severity="low").
+- "general": any other open-ended finding you observe.
+
 FIELD LENGTHS (required for database storage; responses outside these bounds are rejected):
 - title: 20-80 characters (after trimming whitespace)
 - description: 100-800 characters
@@ -269,6 +311,10 @@ const REPORT_SCAN_ISSUES_INPUT_SCHEMA = {
 						],
 					},
 					confidence: { type: 'number', minimum: 0, maximum: 1 },
+					finding_type: {
+						type: 'string',
+						enum: ['verified_pattern', 'suggestion', 'general'],
+					},
 					bounding_box: {
 						type: 'object',
 						additionalProperties: false,

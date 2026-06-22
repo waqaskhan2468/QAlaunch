@@ -40,6 +40,7 @@ export function buildPlaywrightPayloadFromScanResult(result: ScanResult) {
 		axeViolations: result.axe ?? null,
 		interactionTests: result.interactionTests ?? null,
 		interactionProbes: result.interactionProbes ?? null,
+		patternChecks: result.patternChecks ?? null,
 	};
 
 	if (result.ok) {

@@ -214,6 +214,8 @@ export type ScanResult = {
 	interactionTests?: import('@/lib/scan/services/interactionTests').InteractionTestsPayload;
 	/** Active interaction probes: sticky nav, footer scroll, ext-link target, CTA click state. */
 	interactionProbes?: import('@/lib/scan/services/interactionProbes').InteractionProbesPayload | null;
+	/** Deterministic verified-pattern checks: logo link, contrast, nav active, link dest, hero height, button state. */
+	patternChecks?: import('@/lib/scan/services/patternChecks').PatternChecksPayload | null;
 };
 
 // ─── Axe ───────────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ import { captureResponsiveFromPage, startMobileNavigation } from './responsive';
 import { blockThirdPartyResources } from './resourceBlocklist';
 import { captureDesktopScreenshot } from './screenshots';
 import { collectInteractionProbes } from './interactionProbes';
+import { collectPatternChecks } from './patternChecks';
 import { collectBrokenStates } from './brokenStates';
 import { collectInteractionTests } from './interactionTests';
 import { logScanTiming } from './scan-timing';
@@ -410,6 +411,22 @@ async function scanSingleUrl(
 		} catch (error) {
 			result.warnings.push(
 				`interaction_probes_failed: ${error instanceof Error ? error.message : 'unknown'}`,
+			);
+		}
+
+		// ── Phase 3b — deterministic verified-pattern checks ───────────────────
+		// Also on the idle desktop page (the button check mutates hover/focus
+		// state). Failing checks become verified_pattern issues directly, with no
+		// AI judgement. Guarded so it can never crash the page scan.
+		try {
+			result.patternChecks = await collectPatternChecks(page, url, {
+				isHomepage,
+				links: result.links,
+				timing: stepTiming,
+			});
+		} catch (error) {
+			result.warnings.push(
+				`pattern_checks_failed: ${error instanceof Error ? error.message : 'unknown'}`,
 			);
 		}
 

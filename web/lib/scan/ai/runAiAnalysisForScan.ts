@@ -23,7 +23,12 @@ import {
 	updateScanPageAiAnalysis,
 } from '@/lib/db/supabase-retry';
 import { failScan, toUserFacingScanError } from '@/lib/scan/fail-scan';
-import type { ClaudeIssue } from './types';
+import {
+	CLAUDE_ISSUE_STRING_LIMITS,
+	clampClaudeString,
+	type ClaudeIssue,
+	type IssueFindingType,
+} from './types';
 import type { ScanPackage } from '@/types/zod';
 
 type ServiceSupabase = ReturnType<typeof getServiceSupabase>;
@@ -309,6 +314,15 @@ function buildAnalysisPromptAfterImages(input: {
 	const responseSecurity = pd?.responseSecurity ?? null;
 	const interactionTests = pd?.interactionTests ?? null;
 	const interactionProbes = pd?.interactionProbes ?? null;
+	const patternChecks = pd?.patternChecks as
+		| { results?: Array<Record<string, unknown>> }
+		| null
+		| undefined;
+	const verifiedPatternTitles = Array.isArray(patternChecks?.results)
+		? patternChecks.results
+				.filter((r) => r.status === 'fail' && typeof r.title === 'string')
+				.map((r) => r.title as string)
+		: [];
 
 	const externalLinksSameTab = allLinks
 		.filter((link) => {
@@ -356,13 +370,14 @@ function buildAnalysisPromptAfterImages(input: {
 		'',
 		formatPageSpeedForClaude(input.pageSpeedData),
 		'',
-		'JAVASCRIPT CONSOLE ERRORS:',
+		'JAVASCRIPT CONSOLE ERRORS (context only — NOT proof of a user-facing bug):',
+		'Report these as an issue ONLY when the screenshot or observed behaviour shows a matching visible symptom. If nothing visible is wrong, ignore them (or note once as a single low-severity technical note). Never infer a broken element from a console error alone.',
 		JSON.stringify(scanData.consoleMessages, null, 2),
 		'',
-		'BROKEN / FAILED LINKS (HTTP 4xx/5xx):',
+		'BROKEN / FAILED LINKS (already re-verified: 403s confirmed by real browser navigation, not bare fetch):',
 		JSON.stringify(scanData.brokenLinks, null, 2),
 		'',
-		'EXTERNAL LINKS WITHOUT target="_blank":',
+		'EXTERNAL LINKS WITHOUT target="_blank" (low-severity style/convention choice — report as "low" unless you have evidence it breaks a real flow):',
 		JSON.stringify(scanData.externalLinksSameTab, null, 2),
 		'',
 		'FORMS DETECTED:',
@@ -387,7 +402,7 @@ function buildAnalysisPromptAfterImages(input: {
 		'RESPONSIVENESS DATA (per-viewport scroll + layout flags):',
 		JSON.stringify(scanData.responsiveResults, null, 2),
 		'',
-		'NETWORK FAILURES:',
+		'NETWORK FAILURES (context only — same rule as console errors: report ONLY with a visible symptom in the screenshot/observed behaviour; ignore otherwise):',
 		JSON.stringify(
 			{
 				httpErrors: scanData.httpErrors,
@@ -396,6 +411,9 @@ function buildAnalysisPromptAfterImages(input: {
 			null,
 			2,
 		),
+		'',
+		'DETERMINISTIC PATTERN CHECKS ALREADY REPORTED (filed programmatically — do NOT duplicate these in your output):',
+		JSON.stringify(verifiedPatternTitles, null, 2),
 		'',
 		'INTERACTION TEST RESULTS (automated checks — treat status="fail" as high-signal findings):',
 		'Each entry: { id, name, status, detail }. Only failed/errored tests are listed.',
@@ -448,7 +466,117 @@ type IssueInsert = {
 	screenshot_url: string | null;
 	is_in_free_preview: boolean;
 	display_order: number;
+	/** verified_pattern (deterministic + AI checklist) | suggestion | general. */
+	finding_type: IssueFindingType;
 };
+
+/**
+ * Build verified_pattern issues directly from the deterministic pattern checks
+ * stored on `scan_pages.playwright_data.patternChecks`. No AI judgement — a
+ * failing check's fixed payload becomes an issue verbatim (clamped to the DB
+ * length constraints for safety).
+ */
+function buildVerifiedPatternIssues(
+	scanId: string,
+	page: ScanPageForIssuePersist,
+): IssueInsert[] {
+	const pd = page.playwright_data as Record<string, unknown> | null;
+	const patternChecks = pd?.patternChecks as
+		| { results?: Array<Record<string, unknown>> }
+		| null
+		| undefined;
+	const results = Array.isArray(patternChecks?.results)
+		? patternChecks.results
+		: [];
+
+	const issues: IssueInsert[] = [];
+	for (const r of results) {
+		if (r.status !== 'fail') continue;
+		if (!r.category || !r.severity || !r.title || !r.description || !r.impact) {
+			continue;
+		}
+		issues.push({
+			scan_id: scanId,
+			scan_page_id: page.id,
+			category: r.category as ClaudeIssue['category'],
+			severity: r.severity as ClaudeIssue['severity'],
+			title: clampClaudeString(
+				r.title,
+				CLAUDE_ISSUE_STRING_LIMITS.title.min,
+				CLAUDE_ISSUE_STRING_LIMITS.title.max,
+			),
+			description: clampClaudeString(
+				r.description,
+				CLAUDE_ISSUE_STRING_LIMITS.description.min,
+				CLAUDE_ISSUE_STRING_LIMITS.description.max,
+			),
+			impact: clampClaudeString(
+				r.impact,
+				CLAUDE_ISSUE_STRING_LIMITS.impact.min,
+				CLAUDE_ISSUE_STRING_LIMITS.impact.max,
+			),
+			page_section:
+				typeof r.pageSection === 'string' && r.pageSection.length > 0
+					? r.pageSection
+					: null,
+			fix_instructions: FIX_INSTRUCTIONS_PLACEHOLDER,
+			screenshot_url: page.screenshot_desktop_url ?? null,
+			is_in_free_preview: false,
+			display_order: 0,
+			finding_type: 'verified_pattern',
+		});
+	}
+	return issues;
+}
+
+/**
+ * Collapse a title/section to a comparison key: lowercased, punctuation and
+ * extra whitespace removed. "Footer links open pages without scrolling to top!"
+ * and "Footer links open pages without scrolling to the top" collapse close
+ * enough that, combined with category, they key the same.
+ */
+function normalizeForDedup(text: string): string {
+	return text
+		.toLowerCase()
+		.replace(/[^a-z0-9 ]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+/**
+ * Merge near-duplicate issues before finalizing the list. Per-page Claude calls
+ * routinely surface the SAME underlying problem more than once — the same
+ * site-wide footer/nav defect reported on every page, or the same root cause
+ * restated with slightly different wording. We treat issues sharing a category
+ * and a normalized title (same affected element + same root cause) as one, and
+ * keep the highest-severity instance as the representative.
+ */
+function dedupeIssues(issues: IssueInsert[]): IssueInsert[] {
+	const byKey = new Map<string, IssueInsert>();
+
+	for (const issue of issues) {
+		const key = `${issue.category}::${normalizeForDedup(issue.title)}`;
+		const existing = byKey.get(key);
+
+		if (!existing) {
+			byKey.set(key, issue);
+			continue;
+		}
+
+		// Same root cause already seen. Prefer the deterministic verified_pattern
+		// write-up over a general AI restatement of the same thing; otherwise keep
+		// whichever is more severe so the merged issue never under-states impact.
+		const rank = (i: IssueInsert): number => {
+			const finding = i.finding_type === 'verified_pattern' ? 0 : 1;
+			return finding * 10 + (SEVERITY_RANK[i.severity] ?? 9);
+		};
+		if (rank(issue) < rank(existing)) {
+			byKey.set(key, issue);
+		}
+	}
+
+	return Array.from(byKey.values());
+}
 
 function pickFirstMatching(
 	issues: IssueInsert[],
@@ -489,11 +617,24 @@ function selectBalancedPreview(
 	issues: IssueInsert[],
 	count: number,
 ): IssueInsert[] {
-	const remaining = [...issues];
+	// Suggestions are soft advice — never spend a free-preview slot on one.
+	const remaining = issues.filter((i) => i.finding_type !== 'suggestion');
 	const selected: IssueInsert[] = [];
 
 	const isCriticalOrHigh = (issue: IssueInsert) =>
 		issue.severity === 'critical' || issue.severity === 'high';
+
+	// 0. Verified patterns first — deterministic + AI-checklist findings are the
+	//    highest-confidence, most concrete issues to show a non-technical owner,
+	//    regardless of severity. They are already severity-sorted within the list.
+	while (selected.length < count) {
+		const next = pickFirstMatching(
+			remaining,
+			(issue) => issue.finding_type === 'verified_pattern',
+		);
+		if (!next) break;
+		selected.push(next);
+	}
 
 	// 1–4. Strong converters first, in category priority order. Functional and
 	//       usability issues lead; visual defects come after them.
@@ -743,6 +884,8 @@ type ScanPageForIssuePersist = {
 	screenshot_desktop_url: string | null;
 	ai_analysis: unknown;
 	page_role?: string | null;
+	/** Holds the deterministic patternChecks results (see buildVerifiedPatternIssues). */
+	playwright_data?: unknown;
 };
 
 export async function persistScanIssuesFromAnalysis(
@@ -753,7 +896,9 @@ export async function persistScanIssuesFromAnalysis(
 ): Promise<void> {
 	const { data: pages, error: pagesError } = await supabase
 		.from('scan_pages')
-		.select('id, page_url, screenshot_desktop_url, ai_analysis, page_role')
+		.select(
+			'id, page_url, screenshot_desktop_url, ai_analysis, page_role, playwright_data',
+		)
 		.eq('scan_id', scanId);
 
 	if (pagesError || !pages?.length) {
@@ -764,12 +909,16 @@ export async function persistScanIssuesFromAnalysis(
 		pages as ScanPageForIssuePersist[],
 		pagesToTest,
 	) as ScanPageForIssuePersist[];
-	const pending: IssueInsert[] = [];
+	let pending: IssueInsert[] = [];
 	const analysisFailures: string[] = [];
 	let attemptedAnalysisCount = 0;
 	let successfulAnalysisCount = 0;
 
 	for (const page of ordered) {
+		// Deterministic verified-pattern issues are independent of the AI — emit
+		// them even when this page's AI analysis is missing or failed.
+		pending.push(...buildVerifiedPatternIssues(scanId, page));
+
 		const analysis = page.ai_analysis as AiAnalysisRecord | null;
 		if (!analysis) continue;
 
@@ -792,11 +941,17 @@ export async function persistScanIssuesFromAnalysis(
 					issue.page_section
 				:	null;
 
+			const findingType: IssueFindingType = issue.finding_type ?? 'general';
+			// Suggestions are a soft, separate tier — never let one carry a
+			// critical/high severity that would inflate the bug totals.
+			const severity =
+				findingType === 'suggestion' ? 'low' : issue.severity;
+
 			pending.push({
 				scan_id: scanId,
 				scan_page_id: page.id,
 				category: issue.category,
-				severity: issue.severity,
+				severity,
 				title: issue.title,
 				description: issue.description,
 				impact: issue.impact,
@@ -808,6 +963,7 @@ export async function persistScanIssuesFromAnalysis(
 				screenshot_url: page.screenshot_desktop_url ?? null,
 				is_in_free_preview: false,
 				display_order: 0,
+				finding_type: findingType,
 			});
 		}
 	}
@@ -835,6 +991,19 @@ export async function persistScanIssuesFromAnalysis(
 			attemptedAnalysisCount,
 			successfulAnalysisCount,
 			failedAnalysisCount: analysisFailures.length,
+		});
+	}
+
+	// Merge near-duplicates (same category + same root cause) before sorting,
+	// previewing, and inserting — so a site-wide defect is reported once.
+	const beforeDedup = pending.length;
+	pending = dedupeIssues(pending);
+	if (pending.length < beforeDedup) {
+		console.log('[runAiAnalysisForScan] deduped issues', {
+			scanId,
+			before: beforeDedup,
+			after: pending.length,
+			merged: beforeDedup - pending.length,
 		});
 	}
 

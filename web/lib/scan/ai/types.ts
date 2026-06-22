@@ -21,6 +21,20 @@ export const issueSeveritySchema = z.enum([
 	'low',
 ]);
 
+/**
+ * Tier of a finding. Mirrors the `public.issues.finding_type` check constraint.
+ *  - verified_pattern: deterministic Playwright checks + the specific AI-vision
+ *    checklist (known high-confidence patterns). Prioritised for the free preview.
+ *  - suggestion: soft, lower-confidence advice. Separate tier — different language,
+ *    excluded from the health score and from critical/high totals.
+ *  - general: open-ended AI-judgment findings (default).
+ */
+export const issueFindingTypeSchema = z.enum([
+	'verified_pattern',
+	'suggestion',
+	'general',
+]);
+
 const trimmed = z.string().trim();
 
 /** Where the finding is grounded (tool output + `scan_pages.ai_analysis`). */
@@ -63,6 +77,9 @@ export const claudeIssueSchema = z.object({
 	evidence: issueEvidenceSchema,
 	confidence: z.number().min(0).max(1),
 	bounding_box: claudeBoundingBoxSchema.optional(),
+	// Optional: the model tags checklist matches as verified_pattern and the two
+	// soft items as suggestion. Defaults to 'general' at persist time when omitted.
+	finding_type: issueFindingTypeSchema.optional(),
 });
 
 export const claudeIssuesResponseSchema = z.object({
@@ -88,6 +105,7 @@ export const legacyClaudeIssuesResponseSchema = z.object({
 export type ClaudeIssue = z.infer<typeof claudeIssueSchema>;
 export type IssueCategory = z.infer<typeof issueCategorySchema>;
 export type IssueSeverity = z.infer<typeof issueSeveritySchema>;
+export type IssueFindingType = z.infer<typeof issueFindingTypeSchema>;
 export type IssueEvidence = z.infer<typeof issueEvidenceSchema>;
 export type ClaudeBoundingBox = z.infer<typeof claudeBoundingBoxSchema>;
 
@@ -143,8 +161,16 @@ function normalizeIssueRow(row: unknown): unknown {
 			Math.min(1, Math.max(0, row.confidence))
 		:	row.confidence;
 
+	// Drop an out-of-enum finding_type rather than failing the whole payload;
+	// persistence defaults a missing value to 'general'.
+	const findingType =
+		issueFindingTypeSchema.safeParse(row.finding_type).success ?
+			row.finding_type
+		:	undefined;
+
 	return {
 		...row,
+		finding_type: findingType,
 		title: clampClaudeString(
 			row.title,
 			CLAUDE_ISSUE_STRING_LIMITS.title.min,
