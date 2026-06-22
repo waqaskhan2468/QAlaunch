@@ -50,6 +50,12 @@ export type InteractionProbesPayload = {
 const PROBE_TIMEOUT_MS = 5_000;
 // Playwright action timeout, kept below the Node ceiling so actions self-abort first.
 const ACTION_TIMEOUT_MS = 3_000;
+// Navigation-completion wait for the footer-link probe: a real client-side route
+// change can take several seconds, so we wait for it explicitly (not a fixed
+// delay) with a generous ceiling. The footer probe gets its own larger Node
+// ceiling (FOOTER_PROBE_TIMEOUT_MS) to accommodate this.
+const NAV_WAIT_TIMEOUT_MS = 9_000;
+const FOOTER_PROBE_TIMEOUT_MS = 14_000;
 
 const CTA_TEXT_PATTERN =
 	'\\b(submit|get started|buy|add to cart|continue|sign up|start free|checkout|order now)\\b';
@@ -90,6 +96,7 @@ function sameUrl(a: string, b: string): boolean {
 /** Node-level race backstop so a hung Playwright action can't exceed the ceiling. */
 async function withProbeTimeout(
 	fn: () => Promise<InteractionProbeResult>,
+	timeoutMs: number = PROBE_TIMEOUT_MS,
 ): Promise<InteractionProbeResult> {
 	const startedAt = Date.now();
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -101,10 +108,10 @@ async function withProbeTimeout(
 					name: 'Interaction probe',
 					scope: 'per-page',
 					status: 'error',
-					observation: `Probe exceeded ${PROBE_TIMEOUT_MS}ms and was abandoned`,
+					observation: `Probe exceeded ${timeoutMs}ms and was abandoned`,
 					durationMs: Date.now() - startedAt,
 				}),
-			PROBE_TIMEOUT_MS,
+			timeoutMs,
 		);
 	});
 	try {
@@ -192,7 +199,8 @@ async function footerLinkScrollProbe(page: Page, pageUrl: string): Promise<Inter
 
 	try {
 		const origin = new URL(pageUrl).origin;
-		const deadline = startedAt + PROBE_TIMEOUT_MS - 400;
+		// Leave headroom under the probe's (larger) ceiling for one more nav wait.
+		const deadline = startedAt + FOOTER_PROBE_TIMEOUT_MS - NAV_WAIT_TIMEOUT_MS - 1_000;
 		const observations: string[] = [];
 		let tested = 0;
 		let flagged = 0;
@@ -227,7 +235,7 @@ async function footerLinkScrollProbe(page: Page, pageUrl: string): Promise<Inter
 				}
 			})
 			.filter((h): h is string => h !== null)
-			.slice(0, 3);
+			.slice(0, 2);
 
 		if (internal.length === 0) {
 			return makeResult(id, name, 'site-wide', 'skip', 'All footer links are external', startedAt);
@@ -264,10 +272,28 @@ async function footerLinkScrollProbe(page: Page, pageUrl: string): Promise<Inter
 
 				if (!clicked) continue;
 
-				await page.waitForTimeout(600);
+				// Wait for the transition to ACTUALLY complete before measuring, rather
+				// than a fixed delay that races a fast or slow client-side router. We wait
+				// for the URL to change (history push or full load), then for the network
+				// to settle, then a short beat for scroll restoration to apply.
+				const navigated = await page
+					.waitForURL((u) => !sameUrl(u.toString(), pageUrl), {
+						timeout: NAV_WAIT_TIMEOUT_MS,
+					})
+					.then(() => true)
+					.catch(() => false);
+				await page
+					.waitForLoadState('networkidle', { timeout: 3_000 })
+					.catch(() => {});
+				await page.waitForTimeout(200); // let SPA scroll-restoration settle
 				const afterY = await page.evaluate(() => Math.round(window.scrollY)).catch(() => null);
 				const afterUrl = page.url();
 				tested += 1;
+
+				if (!navigated && sameUrl(afterUrl, pageUrl)) {
+					observations.push(`${href}: did not navigate within ${NAV_WAIT_TIMEOUT_MS}ms (in-page anchor or blocked) — not flagged`);
+					continue;
+				}
 
 				if (afterY === null) {
 					observations.push(`${href}: full reload (loads at top)`);
@@ -479,9 +505,15 @@ export async function collectInteractionProbes(
 	// Per-page, may navigate.
 	results.push(await withProbeTimeout(() => buttonClickStateProbe(page)));
 
-	// Site-wide, navigates — runs last and re-establishes its own baseline.
+	// Site-wide, navigates — runs last and re-establishes its own baseline. Gets a
+	// larger ceiling because it waits for real navigation completion (not a fixed delay).
 	if (options.siteWide) {
-		results.push(await withProbeTimeout(() => footerLinkScrollProbe(page, pageUrl)));
+		results.push(
+			await withProbeTimeout(
+				() => footerLinkScrollProbe(page, pageUrl),
+				FOOTER_PROBE_TIMEOUT_MS,
+			),
+		);
 	}
 
 	const durationMs = Date.now() - startedAt;

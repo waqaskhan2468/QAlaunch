@@ -23,3 +23,14 @@ export function pageMobileScreenshotPath(
 ): string {
 	return `${pageStoragePrefix(scanId, pageUrl)}/mobile.${extension}`;
 }
+
+/** Per-check evidence crop (highlighted element) for a deterministic finding. */
+export function pageElementCropPath(
+	scanId: string,
+	pageUrl: string,
+	checkId: string,
+	extension: 'jpg' | 'png',
+): string {
+	const safe = checkId.replace(/[^a-z0-9-]/gi, '-').slice(0, 40);
+	return `${pageStoragePrefix(scanId, pageUrl)}/crop-${safe}.${extension}`;
+}

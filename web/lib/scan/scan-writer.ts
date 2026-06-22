@@ -12,6 +12,7 @@ import {
 import { buildPlaywrightPayloadFromScanResult } from '@/lib/scan/playwright-payload';
 import {
 	pageDesktopScreenshotPath,
+	pageElementCropPath,
 	pageMobileScreenshotPath,
 } from '@/lib/scan/screenshot-paths';
 import { withRetry } from '@/lib/scan/services/retry';
@@ -153,6 +154,27 @@ export class ScanWriter {
 				label,
 				error: getErrorMessage(error),
 			});
+		}
+	}
+
+	/**
+	 * Upload a per-check evidence crop (already a JPEG buffer). Returns the public
+	 * URL, or null on failure (the caller treats null as a reliability concern).
+	 * Best-effort — never throws, so a crop upload can't fail the scan.
+	 */
+	async uploadCrop(checkId: string, buffer: Buffer): Promise<string | null> {
+		if (!buffer?.length) return null;
+		try {
+			const path = pageElementCropPath(this.scanId, this.pageUrl, checkId, 'jpg');
+			return await uploadScreenshotBytes(path, buffer, 'image/jpeg');
+		} catch (error) {
+			console.warn('[scan] crop upload failed', {
+				scanId: this.scanId,
+				pageUrl: this.pageUrl,
+				checkId,
+				error: getErrorMessage(error),
+			});
+			return null;
 		}
 	}
 

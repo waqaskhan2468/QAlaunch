@@ -379,6 +379,8 @@ async function scanSingleUrl(
 					isHomepage,
 					links: result.links,
 					scope: pkg === 'free' ? 'top' : 'full',
+					// Each failing check uploads a highlighted crop of its element.
+					uploadCrop: writer ? (id, buf) => writer.uploadCrop(id, buf) : undefined,
 					timing: stepTiming,
 				});
 			} catch (error) {

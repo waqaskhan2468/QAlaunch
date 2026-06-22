@@ -546,7 +546,12 @@ function buildVerifiedPatternIssues(
 					? r.pageSection
 					: null,
 			fix_instructions: FIX_INSTRUCTIONS_PLACEHOLDER,
-			screenshot_url: page.screenshot_desktop_url ?? null,
+			// Prefer the highlighted evidence crop captured at check time; fall back
+			// to the full desktop screenshot if the crop could not be produced.
+			screenshot_url:
+				(typeof r.cropScreenshotUrl === 'string' && r.cropScreenshotUrl) ||
+				page.screenshot_desktop_url ||
+				null,
 			is_in_free_preview: false,
 			display_order: 0,
 			finding_type: 'verified_pattern',

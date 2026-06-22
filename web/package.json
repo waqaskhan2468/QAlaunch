@@ -11,7 +11,8 @@
 		"build": "next build",
 		"start": "next start",
 		"lint": "eslint",
-		"test": "pnpm exec vitest run"
+		"test": "pnpm exec vitest run",
+		"validate:checks": "pnpm exec vitest run --config vitest.validation.config.ts"
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.88.0",
