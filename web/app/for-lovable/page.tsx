@@ -5,6 +5,8 @@
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { SiteNav } from '@/components/site/site-nav'
+import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
   title: 'Test Your Lovable Website — Find Frontend Bugs Before Launch | QAlaunch',
@@ -103,7 +105,8 @@ export default function ForLovablePage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
       />
-      <main className="bg-white min-h-screen">
+      <SiteNav />
+      <main className="bg-white min-h-screen pt-16">
 
       {/* Hero */}
       <section className="bg-[#09111f] text-white pt-20 pb-16 px-6">
@@ -122,19 +125,12 @@ export default function ForLovablePage() {
             exactly what&apos;s broken — mobile issues, broken links, invisible buttons, forms that don&apos;t work — 
             before your visitors find out.
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 max-w-xl">
-            <input
-              type="text"
-              placeholder="https://your-lovable-app.lovable.app"
-              className="flex-1 bg-[#0e1729] border border-[#1f2c44] rounded px-4 py-3 text-white text-sm placeholder:text-[#5c6884] outline-none focus:border-[#22c55e]"
-            />
-            <Link
-              href="/"
-              className="bg-[#22c55e] text-[#06140d] font-bold px-6 py-3 text-sm hover:bg-[#16a34a] transition-colors whitespace-nowrap"
-            >
-              Audit My Lovable Site →
-            </Link>
-          </div>
+          <Link
+            href="/#audit-input"
+            className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-6 py-3 text-sm hover:bg-[#16a34a] transition-colors whitespace-nowrap"
+          >
+            Audit My Website Free →
+          </Link>
           <p className="text-[#5c6884] text-xs mt-3">Free · No signup · Results in ~2 min</p>
         </div>
       </section>
@@ -196,7 +192,7 @@ export default function ForLovablePage() {
           <h2 className="text-xl font-bold mb-2">Try it free on your Lovable site</h2>
           <p className="text-sm text-[#5b6472] mb-5">No account needed. See your top issues in about 2 minutes.</p>
           <Link
-            href="/"
+            href="/#audit-input"
             className="inline-block bg-[#09111f] text-white font-bold px-8 py-3 hover:bg-[#1f2c44] transition-colors"
           >
             Start Free Audit →
@@ -225,7 +221,7 @@ export default function ForLovablePage() {
           <h2 className="text-2xl font-bold mb-3">Stop guessing what&apos;s broken</h2>
           <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from $9.</p>
           <Link
-            href="/"
+            href="/#audit-input"
             className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors"
           >
             Audit My Lovable Website Free →
@@ -234,6 +230,7 @@ export default function ForLovablePage() {
       </section>
 
     </main>
+      <SiteFooter />
     </>
   )
 }

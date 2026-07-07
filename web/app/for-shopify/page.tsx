@@ -2,6 +2,8 @@
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { SiteNav } from '@/components/site/site-nav'
+import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
   title: 'Check Your Shopify Store for Bugs Before Launch | QAlaunch',
@@ -100,7 +102,8 @@ export default function ForShopifyPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
       />
-    <main className="bg-white min-h-screen">
+    <SiteNav />
+      <main className="bg-white min-h-screen pt-16">
 
       <section className="bg-[#09111f] text-white pt-20 pb-16 px-6">
         <div className="max-w-3xl mx-auto">
@@ -118,19 +121,12 @@ export default function ForShopifyPage() {
             find on mobile. QAlaunch opens your store in a real browser — desktop and mobile — and shows
             you every issue in plain English.
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 max-w-xl">
-            <input
-              type="text"
-              placeholder="https://yourstore.com"
-              className="flex-1 bg-[#0e1729] border border-[#1f2c44] rounded px-4 py-3 text-white text-sm placeholder:text-[#5c6884] outline-none focus:border-[#22c55e]"
-            />
-            <Link
-              href="/"
-              className="bg-[#22c55e] text-[#06140d] font-bold px-6 py-3 text-sm hover:bg-[#16a34a] transition-colors whitespace-nowrap"
-            >
-              Audit My Store →
-            </Link>
-          </div>
+          <Link
+            href="/#audit-input"
+            className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-6 py-3 text-sm hover:bg-[#16a34a] transition-colors whitespace-nowrap"
+          >
+            Audit My Website Free →
+          </Link>
           <p className="text-[#5c6884] text-xs mt-3">Free · No signup · Results in ~2 min</p>
         </div>
       </section>
@@ -193,7 +189,7 @@ export default function ForShopifyPage() {
         <div className="max-w-xl mx-auto text-center">
           <h2 className="text-xl font-bold mb-2">Run a free check on your store</h2>
           <p className="text-sm text-[#5b6472] mb-5">No account needed. Top issues in about 2 minutes.</p>
-          <Link href="/" className="inline-block bg-[#09111f] text-white font-bold px-8 py-3 hover:bg-[#1f2c44] transition-colors">
+          <Link href="/#audit-input" className="inline-block bg-[#09111f] text-white font-bold px-8 py-3 hover:bg-[#1f2c44] transition-colors">
             Start Free Audit →
           </Link>
         </div>
@@ -217,13 +213,14 @@ export default function ForShopifyPage() {
         <div className="max-w-xl mx-auto">
           <h2 className="text-2xl font-bold mb-3">Find what&apos;s costing you sales</h2>
           <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from $9.</p>
-          <Link href="/" className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
+          <Link href="/#audit-input" className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
             Audit My Shopify Store Free →
           </Link>
         </div>
       </section>
 
     </main>
+      <SiteFooter />
     </>
   )
 }
