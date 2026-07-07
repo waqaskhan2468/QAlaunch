@@ -4,6 +4,8 @@
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { SiteNav } from '@/components/site/site-nav'
+import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
   title: 'Vibe Coding Website Bugs: The 9 Problems Every AI-Built Site Ships With | QAlaunch',
@@ -66,7 +68,9 @@ const BUGS = [
 
 export default function VibeCodingBugsPost() {
   return (
-    <main className="bg-white min-h-screen">
+    <>
+      <SiteNav />
+      <main className="bg-white min-h-screen pt-16">
 
       <article className="max-w-2xl mx-auto px-6 py-16">
         <div className="text-xs font-bold tracking-widest uppercase text-[#16a34a] mb-4">
@@ -80,11 +84,22 @@ export default function VibeCodingBugsPost() {
           build it — is the fastest way anyone has ever been able to ship a website. It is also the
           fastest way anyone has ever been able to ship bugs they don&apos;t know exist.
         </p>
-        <p className="text-[#5b6472] text-lg leading-relaxed mb-10">
+        <p className="text-[#5b6472] text-lg leading-relaxed mb-4">
           The pattern is always the same: the site looks finished in the builder&apos;s preview, so it
           feels finished. But the preview is not a real browser, not a real phone, and not a real
           first-time visitor. Here are the nine bugs we see most often in AI-built websites — each with
           a way to check for it yourself in under a minute.
+        </p>
+        <p className="text-[#5b6472] text-lg leading-relaxed mb-10">
+          Two of them cause so much damage that they&apos;ve earned full deep-dives:{' '}
+          <Link href="/blog/contact-form-not-working" className="text-[#16a34a] font-semibold hover:underline">
+            why contact forms fail silently
+          </Link>{' '}
+          and{' '}
+          <Link href="/blog/website-looks-fine-on-desktop-broken-on-mobile" className="text-[#16a34a] font-semibold hover:underline">
+            why sites look fine on desktop but break on mobile
+          </Link>
+          . Start there if either sounds familiar.
         </p>
 
         <div className="space-y-10">
@@ -119,5 +134,7 @@ export default function VibeCodingBugsPost() {
       </article>
 
     </main>
+      <SiteFooter />
+    </>
   )
 }
