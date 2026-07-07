@@ -19,6 +19,14 @@ const legalLinks = [
   { href: "/refund", label: "Refund Policy" },
 ]
 
+const platformLinks = [
+  { href: "/for-lovable", label: "For Lovable" },
+  { href: "/for-bolt", label: "For Bolt" },
+  { href: "/for-shopify", label: "For Shopify" },
+  { href: "/for-wordpress", label: "For WordPress" },
+  { href: "/blog/vibe-coding-website-bugs", label: "Vibe Coding Bugs" },
+]
+
 const socialLinks = [
   {
     href: "https://x.com/QAlaunchHQ",
@@ -48,7 +56,7 @@ export function SiteFooter() {
   return (
     <footer className="bg-slate-deep px-5 py-14 text-white md:px-12 md:pt-14">
       <div className="mx-auto max-w-7xl">
-        <div className="grid gap-10 pb-10 md:grid-cols-[2fr_1fr_1fr_1fr] md:gap-11">
+        <div className="grid gap-10 pb-10 md:grid-cols-[2fr_1fr_1fr_1fr_1fr] md:gap-11">
           <div>
             <div className="flex items-center">
               <Image
@@ -71,6 +79,7 @@ export function SiteFooter() {
             </a>
           </div>
           <FooterColumn title="Product" links={productLinks} />
+          <FooterColumn title="Platforms" links={platformLinks} />
           <FooterColumn title="Company" links={companyLinks} />
           <FooterColumn title="Legal" links={legalLinks} />
         </div>
