@@ -16,6 +16,30 @@ export const metadata: Metadata = {
   },
 }
 
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'QAlaunch',
+  applicationCategory: 'BusinessApplication',
+  applicationSubCategory: 'Website Audit & QA Testing Tool',
+  operatingSystem: 'Web',
+  url: 'https://getqalaunch.com/for-lovable',
+  description:
+    'Free automated QA audit for websites built with Lovable. Find broken links, mobile layout bugs, invisible CTAs, and usability issues in 2 minutes. No signup.',
+  offers: {
+    '@type': 'AggregateOffer',
+    priceCurrency: 'USD',
+    lowPrice: '9',
+    highPrice: '59',
+    offerCount: '3',
+  },
+  creator: {
+    '@type': 'Organization',
+    name: 'QAlaunch',
+    url: 'https://getqalaunch.com',
+  },
+}
+
 const COMMON_ISSUES = [
   {
     title: 'Navigation links that go nowhere',
@@ -74,7 +98,12 @@ const FAQS = [
 
 export default function ForLovablePage() {
   return (
-    <main className="bg-white min-h-screen">
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
+      <main className="bg-white min-h-screen">
 
       {/* Hero */}
       <section className="bg-[#09111f] text-white pt-20 pb-16 px-6">
@@ -205,5 +234,6 @@ export default function ForLovablePage() {
       </section>
 
     </main>
+    </>
   )
 }

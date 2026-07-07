@@ -13,6 +13,30 @@ export const metadata: Metadata = {
   },
 }
 
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'QAlaunch',
+  applicationCategory: 'BusinessApplication',
+  applicationSubCategory: 'Website Audit & QA Testing Tool',
+  operatingSystem: 'Web',
+  url: 'https://getqalaunch.com/for-wordpress',
+  description:
+    'Free automated audit for WordPress websites. Find broken links, mobile layout problems, plugin conflicts visible to visitors, and usability issues — in 2 minutes, no signup.',
+  offers: {
+    '@type': 'AggregateOffer',
+    priceCurrency: 'USD',
+    lowPrice: '9',
+    highPrice: '59',
+    offerCount: '3',
+  },
+  creator: {
+    '@type': 'Organization',
+    name: 'QAlaunch',
+    url: 'https://getqalaunch.com',
+  },
+}
+
 const COMMON_ISSUES = [
   {
     title: 'Dropdown menus that confuse instead of guide',
@@ -71,6 +95,11 @@ const FAQS = [
 
 export default function ForWordPressPage() {
   return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
     <main className="bg-white min-h-screen">
 
       <section className="bg-[#09111f] text-white pt-20 pb-16 px-6">
@@ -197,5 +226,6 @@ export default function ForWordPressPage() {
       </section>
 
     </main>
+    </>
   )
 }

@@ -13,6 +13,30 @@ export const metadata: Metadata = {
   },
 }
 
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'QAlaunch',
+  applicationCategory: 'BusinessApplication',
+  applicationSubCategory: 'Website Audit & QA Testing Tool',
+  operatingSystem: 'Web',
+  url: 'https://getqalaunch.com/for-shopify',
+  description:
+    'Free automated audit for Shopify stores. Find broken links, mobile checkout issues, invisible buttons, and usability problems costing you sales — in 2 minutes, no signup.',
+  offers: {
+    '@type': 'AggregateOffer',
+    priceCurrency: 'USD',
+    lowPrice: '9',
+    highPrice: '59',
+    offerCount: '3',
+  },
+  creator: {
+    '@type': 'Organization',
+    name: 'QAlaunch',
+    url: 'https://getqalaunch.com',
+  },
+}
+
 const COMMON_ISSUES = [
   {
     title: 'Slider arrows customers can\'t see',
@@ -71,6 +95,11 @@ const FAQS = [
 
 export default function ForShopifyPage() {
   return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
     <main className="bg-white min-h-screen">
 
       <section className="bg-[#09111f] text-white pt-20 pb-16 px-6">
@@ -195,5 +224,6 @@ export default function ForShopifyPage() {
       </section>
 
     </main>
+    </>
   )
 }
