@@ -80,9 +80,9 @@ export default function VibeCodingBugsPost() {
           Vibe Coding Website Bugs: The 9 Problems Every AI-Built Site Ships With
         </h1>
         <p className="text-[#5b6472] text-lg leading-relaxed mb-4">
-          Vibe coding — describing what you want and letting Lovable, Bolt.new, Replit, v0, or Claude
-          build it — is the fastest way anyone has ever been able to ship a website. It is also the
-          fastest way anyone has ever been able to ship bugs they don&apos;t know exist.
+          Vibe coding — describing what you want and letting Lovable, Bolt.new, Base44, Replit, v0,
+          or Claude build it — is the fastest way anyone has ever been able to ship a website. It is
+          also the fastest way anyone has ever been able to ship bugs they don&apos;t know exist.
         </p>
         <p className="text-[#5b6472] text-lg leading-relaxed mb-4">
           The pattern is always the same: the site looks finished in the builder&apos;s preview, so it
@@ -99,7 +99,12 @@ export default function VibeCodingBugsPost() {
           <Link href="/blog/website-looks-fine-on-desktop-broken-on-mobile" className="text-[#16a34a] font-semibold hover:underline">
             why sites look fine on desktop but break on mobile
           </Link>
-          . Start there if either sounds familiar.
+          . Start there if either sounds familiar — and if you built a full app rather than a
+          site, see{' '}
+          <Link href="/blog/test-base44-app-before-launch" className="text-[#16a34a] font-semibold hover:underline">
+            how to test a Base44 app before launch
+          </Link>
+          .
         </p>
 
         <div className="space-y-10">

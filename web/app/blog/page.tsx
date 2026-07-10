@@ -18,6 +18,13 @@ export const metadata: Metadata = {
 
 const POSTS = [
   {
+    title: 'How to Test a Base44 App Before Launch — a QA Engineer’s Checklist',
+    description:
+      'The bugs we find most often in Base44 apps, why the editor preview hides them, and the 25-minute pre-launch test that catches them before your users do.',
+    url: '/blog/test-base44-app-before-launch',
+    date: '2026-07-09',
+  },
+  {
     title: 'Why Your Website Looks Fine on Desktop but Broken on Mobile',
     description:
       'The six most common reasons websites break at phone widths, why owners never notice, and how to check your own site the way a QA engineer would.',
