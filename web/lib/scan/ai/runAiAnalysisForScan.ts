@@ -27,6 +27,7 @@ import { failScan, toUserFacingScanError } from '@/lib/scan/fail-scan';
 import {
 	CLAUDE_ISSUE_STRING_LIMITS,
 	clampClaudeString,
+	type ClaudeBoundingBox,
 	type ClaudeIssue,
 	type IssueFindingType,
 } from './types';
@@ -530,6 +531,13 @@ type IssueInsert = {
 	 * Column added by supabase/issues_confidence.sql — run before deploy.
 	 */
 	confidence: number;
+	/**
+	 * Evidence highlight in the screenshot's pixel space, rendered as an overlay
+	 * on the results page. Null for verified patterns (their screenshot_url is
+	 * already a highlighted crop) and when Claude omitted or mis-targeted the box.
+	 * Column added by supabase/issues_bounding_box.sql — run before deploy.
+	 */
+	bounding_box: ClaudeBoundingBox | null;
 };
 
 /**
@@ -593,6 +601,8 @@ function buildVerifiedPatternIssues(
 			finding_type: 'verified_pattern',
 			// Deterministic Playwright check — not a judgement call.
 			confidence: 1,
+			// The crop itself is the highlighted evidence; no overlay needed.
+			bounding_box: null,
 		});
 	}
 	return issues;
@@ -983,6 +993,8 @@ type ScanPageForIssuePersist = {
 	id: string;
 	page_url: string;
 	screenshot_desktop_url: string | null;
+	/** Needed so mobile-targeted bounding boxes point at the mobile screenshot. */
+	screenshot_mobile_url: string | null;
 	ai_analysis: unknown;
 	page_role?: string | null;
 	/** Holds the deterministic patternChecks results (see buildVerifiedPatternIssues). */
@@ -998,7 +1010,7 @@ export async function persistScanIssuesFromAnalysis(
 	const { data: pages, error: pagesError } = await supabase
 		.from('scan_pages')
 		.select(
-			'id, page_url, screenshot_desktop_url, ai_analysis, page_role, playwright_data',
+			'id, page_url, screenshot_desktop_url, screenshot_mobile_url, ai_analysis, page_role, playwright_data',
 		)
 		.eq('scan_id', scanId);
 
@@ -1059,6 +1071,28 @@ export async function persistScanIssuesFromAnalysis(
 				continue;
 			}
 
+			// Visual evidence: keep Claude's bounding box only when it is sane and
+			// the screenshot it targets actually exists — a wrong-target or negative
+			// box would render a garbage overlay on the results page.
+			const rawBox = issue.bounding_box ?? null;
+			const boundingBox =
+				(
+					rawBox &&
+					rawBox.x >= 0 &&
+					rawBox.y >= 0 &&
+					(rawBox.target === 'desktop' ?
+						Boolean(page.screenshot_desktop_url)
+					:	Boolean(page.screenshot_mobile_url))
+				) ?
+					rawBox
+				:	null;
+			// Point the issue at the screenshot its evidence refers to; without a
+			// box, keep the historical default (desktop screenshot).
+			const screenshotUrl =
+				boundingBox?.target === 'mobile' ?
+					(page.screenshot_mobile_url ?? null)
+				:	(page.screenshot_desktop_url ?? null);
+
 			pending.push({
 				scan_id: scanId,
 				scan_page_id: page.id,
@@ -1072,11 +1106,12 @@ export async function persistScanIssuesFromAnalysis(
 				// column is NOT NULL, so write a constant, never-displayed placeholder to
 				// satisfy it without a schema migration (see FIX_INSTRUCTIONS_PLACEHOLDER).
 				fix_instructions: FIX_INSTRUCTIONS_PLACEHOLDER,
-				screenshot_url: page.screenshot_desktop_url ?? null,
+				screenshot_url: screenshotUrl,
 				is_in_free_preview: false,
 				display_order: 0,
 				finding_type: findingType,
 				confidence,
+				bounding_box: boundingBox,
 			});
 		}
 	}
@@ -1128,10 +1163,24 @@ export async function persistScanIssuesFromAnalysis(
 		});
 	}
 
+	// Within the same severity, prefer issues that carry specific visual
+	// evidence — a highlighted crop (uploaded under `/crop-…`, see
+	// lib/scan/screenshot-paths.ts) or a bounding box on the screenshot — and
+	// then higher model confidence. These are the findings a site owner can see
+	// with their own eyes, so they lead both the free preview and the report.
+	const hasSpecificEvidence = (issue: IssueInsert): boolean =>
+		issue.finding_type === 'verified_pattern' ?
+			Boolean(issue.screenshot_url?.includes('/crop-'))
+		:	issue.bounding_box != null;
+
 	pending.sort((a, b) => {
 		const ra = SEVERITY_RANK[a.severity] ?? 99;
 		const rb = SEVERITY_RANK[b.severity] ?? 99;
 		if (ra !== rb) return ra - rb;
+		const ea = hasSpecificEvidence(a) ? 0 : 1;
+		const eb = hasSpecificEvidence(b) ? 0 : 1;
+		if (ea !== eb) return ea - eb;
+		if (a.confidence !== b.confidence) return b.confidence - a.confidence;
 		return a.scan_page_id.localeCompare(b.scan_page_id);
 	});
 

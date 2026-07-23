@@ -193,6 +193,17 @@ type ScanIssue = {
 	title: string;
 	description: string;
 	impact: string;
+	finding_type?: string | null;
+	/** Highlighted evidence crop, or the full page screenshot (see getIssueEvidence). */
+	screenshot_url?: string | null;
+	/** Evidence highlight in the screenshot's pixel space (AI findings only). */
+	bounding_box?: {
+		target: 'desktop' | 'mobile';
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+	} | null;
 };
 
 type LockedIssue = {
@@ -1542,9 +1553,145 @@ function ResultsView({
 	);
 }
 
+// ─── Evidence image (screenshot proof on a finding card) ─────────────────────
+
+type EvidenceBox = NonNullable<ScanIssue['bounding_box']>;
+
+/**
+ * Decide what visual evidence a finding can show. Only SPECIFIC evidence is
+ * rendered — either a pre-highlighted element crop (uploaded under `/crop-…`,
+ * see lib/scan/screenshot-paths.ts) or a full screenshot with a bounding box
+ * to overlay. A bare full-page screenshot proves nothing and would repeat the
+ * same image under every card, so it renders no evidence at all.
+ */
+function getIssueEvidence(
+	finding: ScanIssue,
+): { src: string; box: EvidenceBox | null; deviceLabel: string } | null {
+	const src = finding.screenshot_url;
+	if (!src) return null;
+
+	if (src.includes('/crop-')) {
+		return { src, box: null, deviceLabel: 'desktop view' };
+	}
+
+	const box = finding.bounding_box;
+	if (
+		box &&
+		typeof box.x === 'number' &&
+		typeof box.y === 'number' &&
+		box.width > 0 &&
+		box.height > 0
+	) {
+		return {
+			src,
+			box,
+			deviceLabel: box.target === 'mobile' ? 'mobile view' : 'desktop view',
+		};
+	}
+
+	return null;
+}
+
+/**
+ * Screenshot evidence with an optional highlight overlay. The box arrives in
+ * the screenshot's natural pixel space; it is converted to percentages once
+ * the image loads, so the overlay stays glued to the right spot at any
+ * rendered size (desktop and mobile visitors alike). Degenerate boxes —
+ * outside the image, nearly invisible, or covering most of the page — are
+ * silently dropped and the screenshot renders without an overlay.
+ */
+function EvidenceImage({
+	src,
+	box,
+	deviceLabel,
+	alt,
+}: {
+	src: string;
+	box: EvidenceBox | null;
+	deviceLabel: string;
+	alt: string;
+}) {
+	const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+	const [failed, setFailed] = useState(false);
+
+	if (failed) return null;
+
+	let rect: { left: number; top: number; width: number; height: number } | null =
+		null;
+	if (box && dims && dims.w > 0 && dims.h > 0) {
+		const x = Math.max(0, Math.min(box.x, dims.w));
+		const y = Math.max(0, Math.min(box.y, dims.h));
+		const w = Math.min(box.width, dims.w - x);
+		const h = Math.min(box.height, dims.h - y);
+		const tooSmall = w < 8 || h < 8;
+		const tooBig = (w * h) / (dims.w * dims.h) > 0.85;
+		if (!tooSmall && !tooBig) {
+			rect = {
+				left: (x / dims.w) * 100,
+				top: (y / dims.h) * 100,
+				width: (w / dims.w) * 100,
+				height: (h / dims.h) * 100,
+			};
+		}
+	}
+
+	// Portrait screenshots (mobile viewport) rendered at full card width would
+	// tower over the card text — cap and centre them instead.
+	const isPortrait = dims ? dims.h > dims.w : false;
+
+	return (
+		<figure className='mt-4'>
+			<div
+				className={cn(
+					'relative overflow-hidden rounded-xl border border-border-soft bg-surface-soft',
+					isPortrait && 'mx-auto max-w-[280px]',
+				)}>
+				{/* Supabase storage URL — next/image remote config not needed for evidence shots. */}
+				{/* eslint-disable-next-line @next/next/no-img-element */}
+				<img
+					src={src}
+					alt={alt}
+					loading='lazy'
+					className='block h-auto w-full'
+					onLoad={(event) => {
+						const img = event.currentTarget;
+						setDims({ w: img.naturalWidth, h: img.naturalHeight });
+					}}
+					onError={() => setFailed(true)}
+				/>
+				{rect && (
+					<span
+						aria-hidden='true'
+						className='pointer-events-none absolute rounded-[3px] border-2 border-danger'
+						style={{
+							left: `${rect.left}%`,
+							top: `${rect.top}%`,
+							width: `${rect.width}%`,
+							height: `${rect.height}%`,
+							// Spotlight: dim everything outside the highlighted box.
+							boxShadow: '0 0 0 9999px rgba(15, 23, 42, 0.30)',
+						}}
+					/>
+				)}
+			</div>
+			<figcaption className='mt-1.5 flex items-center justify-between gap-3 text-[11px] font-semibold text-muted-ink'>
+				<span>Evidence — captured on your page ({deviceLabel})</span>
+				<a
+					href={src}
+					target='_blank'
+					rel='noopener noreferrer'
+					className='shrink-0 underline decoration-border-soft underline-offset-2 hover:text-brand'>
+					View full size
+				</a>
+			</figcaption>
+		</figure>
+	);
+}
+
 // ─── FindingCard ──────────────────────────────────────────────────────────────
 
 function FindingCard({ finding }: { finding: ScanIssue }) {
+	const evidence = getIssueEvidence(finding);
 	const normSev = finding.severity.toUpperCase();
 	const normCat = (v: string) => {
 		const map: Record<string, string> = {
@@ -1598,6 +1745,14 @@ function FindingCard({ finding }: { finding: ScanIssue }) {
 					<span className='font-extrabold'>Impact:</span> {finding.impact}
 				</span>
 			</div>
+			{evidence && (
+				<EvidenceImage
+					src={evidence.src}
+					box={evidence.box}
+					deviceLabel={evidence.deviceLabel}
+					alt={`Screenshot evidence: ${finding.title}`}
+				/>
+			)}
 		</article>
 	);
 }

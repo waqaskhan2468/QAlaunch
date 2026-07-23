@@ -23,6 +23,10 @@ type IssueRow = {
 	is_in_free_preview: boolean | null;
 	display_order: number | null;
 	finding_type: string | null;
+	/** 0–1 model confidence (1 for deterministic checks); null on historical rows. */
+	confidence: number | null;
+	/** Evidence overlay box in screenshot pixel space; null when not applicable. */
+	bounding_box: unknown;
 	created_at: string | null;
 };
 
