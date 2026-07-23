@@ -59,8 +59,10 @@ export const claudeBoundingBoxSchema = z.object({
 
 /**
  * Single issue from Claude — lengths aligned with Postgres CHECKs on `public.issues`.
- * `evidence`, `confidence`, and optional `bounding_box` are stored on `scan_pages.ai_analysis` JSON;
- * `public.issues` rows keep the core columns only.
+ * `evidence` and optional `bounding_box` are stored on `scan_pages.ai_analysis` JSON;
+ * `confidence` is additionally persisted per `public.issues` row (see
+ * supabase/issues_confidence.sql) where it gates persistence and free-preview
+ * eligibility.
  *
  * Note: the model no longer produces "how to fix" text — issues carry only
  * title / area / description / impact / severity / category.

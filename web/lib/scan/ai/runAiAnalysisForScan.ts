@@ -1,4 +1,5 @@
 import { createConcurrencyLimit } from '@/lib/utils/concurrency-limit';
+import { referencesBlockedResource } from '@/lib/scan/services/resourceBlocklist';
 import {
 	analyzeWithClaude,
 	CLAUDE_SCAN_CACHEABLE_USER_TEXT,
@@ -64,6 +65,24 @@ const AXE_IMPACT_RANK: Record<string, number> = {
 };
 
 const FREE_PREVIEW_ISSUE_COUNT = 3;
+
+// ── Confidence gates ──────────────────────────────────────────────────────
+// Claude reports 0–1 confidence per issue (the prompt instructs it to go below
+// 0.6 when guessing). Deterministic verified-pattern checks are written with
+// confidence 1. Legacy payloads without the field default to 0.7.
+//
+// Below MIN_ISSUE_CONFIDENCE an AI issue is dropped entirely — too speculative
+// to show anyone, free or paid. The free preview additionally demands
+// MIN_PREVIEW_CONFIDENCE: one weak issue in the 3-slot preview costs more
+// trust than the other two earn, so a shorter preview of solid findings beats
+// a padded one.
+const MIN_ISSUE_CONFIDENCE = 0.5;
+const MIN_PREVIEW_CONFIDENCE = 0.7;
+
+// Verified patterns are concrete and reproducible but often minor. Cap how many
+// preview slots they can occupy so a run of small deterministic findings can
+// never crowd out a genuinely severe AI-observed problem.
+const MAX_PATTERN_PREVIEW_SLOTS = 2;
 
 type ScanPageRow = {
 	id: string;
@@ -362,8 +381,18 @@ function buildAnalysisPromptAfterImages(input: {
 			(brokenLinks as unknown[]).slice(0, maxBrokenLinks)
 		:	[];
 
+	// Errors from domains the scanner itself blocked (trackers, chat widgets,
+	// video embeds, consent scripts) are artifacts of the scan environment —
+	// strip them so the model never mistakes self-inflicted noise for site bugs.
+	const dropBlockedResourceEntries = (value: unknown): unknown =>
+		Array.isArray(value) ?
+			value.filter((entry) => !referencesBlockedResource(JSON.stringify(entry)))
+		:	value;
+
 	// Cap console messages to avoid prompt bloat from noisy pages
-	const rawConsoleMessages = pd?.consoleMessages ?? [];
+	const rawConsoleMessages = dropBlockedResourceEntries(
+		pd?.consoleMessages ?? [],
+	);
 	const consoleMessages =
 		Array.isArray(rawConsoleMessages) ?
 			rawConsoleMessages.slice(0, maxConsole)
@@ -380,8 +409,8 @@ function buildAnalysisPromptAfterImages(input: {
 			(pd?.interactive as Record<string, unknown> | undefined)?.forms ?? null,
 		seoData: pd?.seoData ?? null,
 		responsiveResults: pd?.responsive ?? null,
-		httpErrors: pd?.httpErrors ?? [],
-		failedRequests: pd?.failedRequests ?? [],
+		httpErrors: dropBlockedResourceEntries(pd?.httpErrors ?? []),
+		failedRequests: dropBlockedResourceEntries(pd?.failedRequests ?? []),
 	};
 
 	const dataHeader =
@@ -494,6 +523,13 @@ type IssueInsert = {
 	display_order: number;
 	/** verified_pattern (deterministic + AI checklist) | suggestion | general. */
 	finding_type: IssueFindingType;
+	/**
+	 * 0–1. Claude's self-reported confidence for AI findings; 1 for deterministic
+	 * verified-pattern checks. Gates persistence (MIN_ISSUE_CONFIDENCE) and free
+	 * preview eligibility (MIN_PREVIEW_CONFIDENCE).
+	 * Column added by supabase/issues_confidence.sql — run before deploy.
+	 */
+	confidence: number;
 };
 
 /**
@@ -555,6 +591,8 @@ function buildVerifiedPatternIssues(
 			is_in_free_preview: false,
 			display_order: 0,
 			finding_type: 'verified_pattern',
+			// Deterministic Playwright check — not a judgement call.
+			confidence: 1,
 		});
 	}
 	return issues;
@@ -623,16 +661,26 @@ function pickFirstMatching(
  * Pick the FREE_PREVIEW_ISSUE_COUNT issues most likely to convince a
  * non-technical site owner that there are real problems worth fixing.
  *
- * Functional and usability problems (broken buttons/links/forms, navigation
- * issues) convert best, so they lead. Purely visual (ui_bugs) and especially
- * accessibility issues are deprioritised. Priority:
- *  1. functionality   (critical OR high) — broken things stop visitors cold
- *  2. usability_ux    (critical OR high) — confusing navigation / flows
- *  3. responsiveness  (critical OR high) — mobile breaks, widest audience
- *  4. ui_bugs         (critical OR high) — visible visual defects
- *  5. Any other critical/high EXCEPT accessibility (broadens coverage)
- *  6. Any remaining critical/high (now including accessibility)
- *  7. Anything left (sorted by display_order, already severity-ranked)
+ * Eligibility: suggestions never spend a slot, and every issue must clear
+ * MIN_PREVIEW_CONFIDENCE (deterministic checks carry confidence 1, so only
+ * weak AI findings are excluded). The preview may come back SHORTER than
+ * `count` when little clears the bar — two solid findings convert better
+ * than three with a dud that the owner cannot reproduce.
+ *
+ * Selection order:
+ *  1. Guaranteed converter slot — the single most severe critical/high issue
+ *     in category-priority order (broken things > confusing flows > mobile
+ *     breaks > visual defects). Picked FIRST so a run of minor verified
+ *     patterns can never crowd out a genuinely severe problem.
+ *  2. Verified patterns at medium+ severity, capped at
+ *     MAX_PATTERN_PREVIEW_SLOTS total — concrete and reproducible, but
+ *     low-severity patterns (e.g. a missing nav active state) compete in the
+ *     filler tier instead of leading the pitch.
+ *  3. Remaining critical/high by category priority.
+ *  4. Any other critical/high EXCEPT accessibility (least persuasive to
+ *     non-technical owners).
+ *  5. Any remaining critical/high (now including accessibility).
+ *  6. Anything left (already severity-ranked).
  *
  * Using pickFirstMatching removes the chosen item from `remaining` so the same
  * issue can never appear twice and we always progress toward `count`.
@@ -648,27 +696,44 @@ function selectBalancedPreview(
 	issues: IssueInsert[],
 	count: number,
 ): IssueInsert[] {
-	// Suggestions are soft advice — never spend a free-preview slot on one.
-	const remaining = issues.filter((i) => i.finding_type !== 'suggestion');
+	const remaining = issues.filter(
+		(issue) =>
+			issue.finding_type !== 'suggestion' &&
+			issue.confidence >= MIN_PREVIEW_CONFIDENCE,
+	);
 	const selected: IssueInsert[] = [];
 
 	const isCriticalOrHigh = (issue: IssueInsert) =>
 		issue.severity === 'critical' || issue.severity === 'high';
+	const patternCount = () =>
+		selected.filter((i) => i.finding_type === 'verified_pattern').length;
 
-	// 0. Verified patterns first — deterministic + AI-checklist findings are the
-	//    highest-confidence, most concrete issues to show a non-technical owner,
-	//    regardless of severity. They are already severity-sorted within the list.
-	while (selected.length < count) {
+	// 1. Guaranteed converter slot. `issues` is already severity-sorted, so the
+	//    first match per category is its most severe representative.
+	for (const category of FREE_PREVIEW_CATEGORY_PRIORITY) {
+		const picked = pickFirstMatching(
+			remaining,
+			(issue) => issue.category === category && isCriticalOrHigh(issue),
+		);
+		if (picked) {
+			selected.push(picked);
+			break;
+		}
+	}
+
+	// 2. Verified patterns — medium+ severity only, capped. (The guaranteed
+	//    pick above may itself be a verified pattern; it counts toward the cap.)
+	while (selected.length < count && patternCount() < MAX_PATTERN_PREVIEW_SLOTS) {
 		const next = pickFirstMatching(
 			remaining,
-			(issue) => issue.finding_type === 'verified_pattern',
+			(issue) =>
+				issue.finding_type === 'verified_pattern' && issue.severity !== 'low',
 		);
 		if (!next) break;
 		selected.push(next);
 	}
 
-	// 1–4. Strong converters first, in category priority order. Functional and
-	//       usability issues lead; visual defects come after them.
+	// 3. Remaining strong converters, in category priority order.
 	for (const category of FREE_PREVIEW_CATEGORY_PRIORITY) {
 		if (selected.length >= count) break;
 		const picked = pickFirstMatching(
@@ -678,7 +743,7 @@ function selectBalancedPreview(
 		if (picked) selected.push(picked);
 	}
 
-	// 5. Any other critical/high issue that is NOT accessibility (accessibility
+	// 4. Any other critical/high issue that is NOT accessibility (accessibility
 	//    is the least persuasive to non-technical owners, so it waits).
 	while (selected.length < count) {
 		const next = pickFirstMatching(
@@ -689,14 +754,16 @@ function selectBalancedPreview(
 		selected.push(next);
 	}
 
-	// 6. Any remaining critical/high (now including accessibility).
+	// 5. Any remaining critical/high (now including accessibility).
 	while (selected.length < count) {
 		const next = pickFirstMatching(remaining, isCriticalOrHigh);
 		if (!next) break;
 		selected.push(next);
 	}
 
-	// 7. Fill with whatever remains (already sorted by display_order/severity).
+	// 6. Fill with whatever remains (already sorted by display_order/severity).
+	//    Only confidence-cleared issues are ever used — a short preview is the
+	//    intended outcome when nothing else qualifies.
 	while (selected.length < count && remaining.length > 0) {
 		const next = remaining.shift();
 		if (!next) break;
@@ -947,6 +1014,7 @@ export async function persistScanIssuesFromAnalysis(
 	const analysisFailures: string[] = [];
 	let attemptedAnalysisCount = 0;
 	let successfulAnalysisCount = 0;
+	let droppedLowConfidenceCount = 0;
 
 	for (const page of ordered) {
 		// Deterministic verified-pattern issues are independent of the AI — emit
@@ -981,6 +1049,16 @@ export async function persistScanIssuesFromAnalysis(
 			const severity =
 				findingType === 'suggestion' ? 'low' : issue.severity;
 
+			// Schema guarantees confidence on current payloads; legacy fallback
+			// already maps to 0.7. Below the floor the issue is too speculative to
+			// store at all — showing it (free or paid) costs more trust than it adds.
+			const confidence =
+				typeof issue.confidence === 'number' ? issue.confidence : 0.7;
+			if (confidence < MIN_ISSUE_CONFIDENCE) {
+				droppedLowConfidenceCount += 1;
+				continue;
+			}
+
 			pending.push({
 				scan_id: scanId,
 				scan_page_id: page.id,
@@ -998,8 +1076,17 @@ export async function persistScanIssuesFromAnalysis(
 				is_in_free_preview: false,
 				display_order: 0,
 				finding_type: findingType,
+				confidence,
 			});
 		}
+	}
+
+	if (droppedLowConfidenceCount > 0) {
+		console.log('[runAiAnalysisForScan] dropped low-confidence issues', {
+			scanId,
+			dropped: droppedLowConfidenceCount,
+			floor: MIN_ISSUE_CONFIDENCE,
+		});
 	}
 
 	if (attemptedAnalysisCount > 0 && successfulAnalysisCount === 0) {

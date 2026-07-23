@@ -201,6 +201,11 @@ CONSOLE & NETWORK ERRORS — VISUAL CORROBORATION REQUIRED:
 - If you cannot point to a visible symptom, do NOT report it as a user-facing bug. Ignore it entirely when it has no visible front-end impact. At most — and only if it plausibly merits an engineer's attention — record it ONCE as a single "low" severity "functionality" issue framed as a technical note (e.g. "Background errors appear in the browser console but have no visible effect on the page"), clearly separate from user-facing bugs.
 - Never infer a broken UI element from a console or network error alone. The screenshot and observed behaviour are the source of truth for what the user actually experiences.
 
+SCAN ENVIRONMENT — DELIBERATELY BLOCKED THIRD-PARTY RESOURCES:
+To keep scans fast, the scanning browser intentionally blocks these third-party categories before the page loads: video embeds (YouTube, Vimeo, Wistia), live-chat/support widgets (Intercom, Crisp, Tawk.to, Drift, LiveChat), consent-manager scripts (Cookiebot, OneTrust), analytics/tag managers, ad and social tracking pixels, and error-tracking scripts.
+- NEVER report as an issue: a blank or placeholder video/embed area, a missing live-chat bubble, a missing cookie/consent banner, or any console/network error caused by one of these blocked domains. These are artifacts of the scan environment — for real visitors these widgets load normally.
+- If an embed area looks empty, a video appears to not load, or a third-party widget seems missing in the screenshot, assume the scanner blocked it and say nothing about it.
+
 SEVERITY CALIBRATION (match severity to confirmed, observed impact — never inflate):
 - critical: the core task is blocked for most users (checkout/signup/contact cannot complete, page fails to load, primary content missing).
 - high: a real, confirmed problem that significantly degrades the experience for many users (a broken primary navigation link, a key image that fails to load, a serious accessibility barrier).

@@ -76,3 +76,13 @@ export async function blockThirdPartyResources(page: Page): Promise<void> {
 		// Non-fatal — scan proceeds without resource blocking
 	}
 }
+
+/**
+ * True when the serialized diagnostic entry (console message, failed request,
+ * HTTP error) references a domain this scanner deliberately blocked. Used to
+ * strip those entries from the AI prompt: an error we caused by blocking a
+ * tracker/widget must never be presented to the model as a site defect.
+ */
+export function referencesBlockedResource(serialized: string): boolean {
+	return BLOCKED_URL_PATTERN.test(serialized);
+}
