@@ -437,58 +437,6 @@ async function testBrokenImages(page: Page): Promise<InteractionTestResult> {
 	}
 }
 
-// ─── Test 7: Tap target size ──────────────────────────────────────────────────
-//
-// Checks interactive elements against the 44×44 px Apple HIG / WCAG 2.5.5 minimum.
-// Runs on the desktop page — element sizes are the same regardless of viewport
-// because we check computed dimensions, not CSS breakpoints.
-
-async function testTapTargetSize(page: Page): Promise<InteractionTestResult> {
-	const id = 'test-tap-targets';
-	const name = 'Tap target size';
-	const startedAt = Date.now();
-	const MIN_PX = 44;
-
-	try {
-		const small = await page.evaluate((min) => {
-			const sel = 'a, button, [role="button"], input[type="submit"], input[type="button"], input[type="checkbox"], input[type="radio"]';
-			return Array.from(document.querySelectorAll<HTMLElement>(sel))
-				.filter((el) => {
-					const rect = el.getBoundingClientRect();
-					const style = window.getComputedStyle(el);
-					const visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-					return visible && (rect.width < min || rect.height < min);
-				})
-				.slice(0, 10)
-				.map((el) => {
-					const rect = el.getBoundingClientRect();
-					return {
-						tag: el.tagName.toLowerCase(),
-						text: (el.textContent ?? '').trim().slice(0, 40),
-						w: Math.round(rect.width),
-						h: Math.round(rect.height),
-					};
-				});
-		}, MIN_PX);
-
-		if (small.length === 0) {
-			return makeResult(id, name, 'pass', startedAt, `All interactive elements meet the ${MIN_PX}×${MIN_PX}px minimum tap target size`);
-		}
-
-		const examples = small.slice(0, 3).map((el) => `"${el.text || el.tag}" (${el.w}×${el.h}px)`).join(', ');
-		const extra = small.length > 3 ? ` and ${small.length - 3} more` : '';
-		return makeResult(
-			id,
-			name,
-			'fail',
-			startedAt,
-			`${small.length} interactive element(s) smaller than ${MIN_PX}×${MIN_PX}px: ${examples}${extra}. Hard to tap accurately on mobile.`,
-		);
-	} catch (error) {
-		return makeResult(id, name, 'error', startedAt, error instanceof Error ? error.message : 'test error');
-	}
-}
-
 // ─── Test 8: External link security (reverse tabnapping) ─────────────────────
 //
 // Links with target="_blank" without rel="noopener" allow the opened page to
@@ -973,7 +921,11 @@ export async function collectInteractionTests(
 		() => testSearchFunctionality(page),                 // type only — no Enter key
 		() => testPrimaryCtaReachability(page, pageUrl),     // fetch only — no navigation
 		() => testBrokenImages(page),
-		() => testTapTargetSize(page),
+		// testTapTargetSize was REMOVED from the battery: it ran on the DESKTOP
+		// rendering (1440px) but judged 44px TOUCH-target standards, flagging
+		// perfectly normal mouse-sized nav links as mobile tap problems — a
+		// systematic false-positive source. If re-added, it must run against the
+		// mobile-viewport page, not this one.
 		() => testCookieBanner(page),
 		() => testFontSizeReadability(page),
 		() => testAboveFoldCta(page),

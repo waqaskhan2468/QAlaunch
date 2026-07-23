@@ -486,7 +486,7 @@ function buildAnalysisPromptAfterImages(input: {
 		),
 		'',
 		'OBSERVED INTERACTION BEHAVIOUR (real scroll / click / navigation actions performed on the page — this is GROUND TRUTH, not inference from the screenshot):',
-		'When an entry describes a real observed behaviour, describe THAT behaviour in plain English in the issue (e.g. "When you scroll down, the navigation menu disappears instead of staying visible") instead of guessing from the static screenshot. Prefer this observed behaviour over any screenshot-based assumption when they conflict. Each entry: { name, scope, status, observation }.',
+		'When an entry describes a real observed behaviour, describe THAT behaviour in plain English in the issue instead of guessing from the static screenshot. Prefer this observed behaviour over any screenshot-based assumption when they conflict. Treat status "warn" entries as WEAK signals: report them only when the screenshots independently corroborate a real user-facing problem — otherwise say nothing about them. Each entry: { name, scope, status, observation }.',
 		JSON.stringify(
 			(Array.isArray((interactionProbes as Record<string, unknown> | null)?.results)
 				? ((interactionProbes as Record<string, unknown>).results as Array<Record<string, unknown>>)

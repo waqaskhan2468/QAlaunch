@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Check, Lock, Zap } from 'lucide-react';
+import { Check, Lock, X, Zap, ZoomIn } from 'lucide-react';
+import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
 import { trackFunnelEvent } from '@/lib/analytics/funnel-client';
@@ -1555,36 +1556,33 @@ function ResultsView({
 
 // ─── Evidence image (screenshot proof on a finding card) ─────────────────────
 
-type EvidenceBox = NonNullable<ScanIssue['bounding_box']>;
-
 /**
- * Decide what visual evidence a finding can show. Only SPECIFIC evidence is
- * rendered — either a pre-highlighted element crop (uploaded under `/crop-…`,
- * see lib/scan/screenshot-paths.ts) or a full screenshot with a bounding box
- * to overlay. A bare full-page screenshot proves nothing and would repeat the
+ * Decide what visual evidence a finding can show:
+ *  - a pre-highlighted element crop (uploaded under `/crop-…`, see
+ *    lib/scan/screenshot-paths.ts) renders at natural size — never upscaled;
+ *  - an AI finding that carried a bounding box renders the page screenshot as
+ *    a thumbnail. The box itself is deliberately NOT drawn — model-produced
+ *    boxes are not yet reliable enough, and a wrong annotation costs more
+ *    trust than no annotation. Its presence is used only as a signal that the
+ *    finding is visual and worth showing a screenshot for.
+ * A bare full-page screenshot with no box proves nothing and would repeat the
  * same image under every card, so it renders no evidence at all.
  */
 function getIssueEvidence(
 	finding: ScanIssue,
-): { src: string; box: EvidenceBox | null; deviceLabel: string } | null {
+): { src: string; kind: 'crop' | 'page'; deviceLabel: string } | null {
 	const src = finding.screenshot_url;
 	if (!src) return null;
 
 	if (src.includes('/crop-')) {
-		return { src, box: null, deviceLabel: 'desktop view' };
+		return { src, kind: 'crop', deviceLabel: 'desktop view' };
 	}
 
 	const box = finding.bounding_box;
-	if (
-		box &&
-		typeof box.x === 'number' &&
-		typeof box.y === 'number' &&
-		box.width > 0 &&
-		box.height > 0
-	) {
+	if (box && box.width > 0 && box.height > 0) {
 		return {
 			src,
-			box,
+			kind: 'page',
 			deviceLabel: box.target === 'mobile' ? 'mobile view' : 'desktop view',
 		};
 	}
@@ -1593,58 +1591,54 @@ function getIssueEvidence(
 }
 
 /**
- * Screenshot evidence with an optional highlight overlay. The box arrives in
- * the screenshot's natural pixel space; it is converted to percentages once
- * the image loads, so the overlay stays glued to the right spot at any
- * rendered size (desktop and mobile visitors alike). Degenerate boxes —
- * outside the image, nearly invisible, or covering most of the page — are
- * silently dropped and the screenshot renders without an overlay.
+ * Compact evidence thumbnail with a click-to-enlarge lightbox.
+ *
+ * Thumbnails keep the results page short: page screenshots render as a fixed-
+ * height top-crop; element crops render at their natural size (upscaling small
+ * crops to card width made them a blurry mess). The lightbox is portalled to
+ * <body> (the card has a hover transform, which would break `position: fixed`)
+ * and closes on backdrop click, the ✕ button, or Escape.
  */
 function EvidenceImage({
 	src,
-	box,
+	kind,
 	deviceLabel,
 	alt,
 }: {
 	src: string;
-	box: EvidenceBox | null;
+	kind: 'crop' | 'page';
 	deviceLabel: string;
 	alt: string;
 }) {
-	const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+	const [open, setOpen] = useState(false);
 	const [failed, setFailed] = useState(false);
+
+	useEffect(() => {
+		if (!open) return;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') setOpen(false);
+		};
+		document.addEventListener('keydown', onKey);
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		return () => {
+			document.removeEventListener('keydown', onKey);
+			document.body.style.overflow = previousOverflow;
+		};
+	}, [open]);
 
 	if (failed) return null;
 
-	let rect: { left: number; top: number; width: number; height: number } | null =
-		null;
-	if (box && dims && dims.w > 0 && dims.h > 0) {
-		const x = Math.max(0, Math.min(box.x, dims.w));
-		const y = Math.max(0, Math.min(box.y, dims.h));
-		const w = Math.min(box.width, dims.w - x);
-		const h = Math.min(box.height, dims.h - y);
-		const tooSmall = w < 8 || h < 8;
-		const tooBig = (w * h) / (dims.w * dims.h) > 0.85;
-		if (!tooSmall && !tooBig) {
-			rect = {
-				left: (x / dims.w) * 100,
-				top: (y / dims.h) * 100,
-				width: (w / dims.w) * 100,
-				height: (h / dims.h) * 100,
-			};
-		}
-	}
-
-	// Portrait screenshots (mobile viewport) rendered at full card width would
-	// tower over the card text — cap and centre them instead.
-	const isPortrait = dims ? dims.h > dims.w : false;
-
 	return (
 		<figure className='mt-4'>
-			<div
+			<button
+				type='button'
+				onClick={() => setOpen(true)}
+				aria-label='Enlarge screenshot evidence'
 				className={cn(
-					'relative overflow-hidden rounded-xl border border-border-soft bg-surface-soft',
-					isPortrait && 'mx-auto max-w-[280px]',
+					'group relative block w-full overflow-hidden rounded-xl border border-border-soft bg-surface-soft text-left',
+					'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
+					kind === 'crop' && 'flex justify-center p-2',
 				)}>
 				{/* Supabase storage URL — next/image remote config not needed for evidence shots. */}
 				{/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1652,38 +1646,49 @@ function EvidenceImage({
 					src={src}
 					alt={alt}
 					loading='lazy'
-					className='block h-auto w-full'
-					onLoad={(event) => {
-						const img = event.currentTarget;
-						setDims({ w: img.naturalWidth, h: img.naturalHeight });
-					}}
 					onError={() => setFailed(true)}
+					className={cn(
+						kind === 'page' ?
+							'h-[170px] w-full object-cover object-top'
+						:	'max-h-[170px] w-auto max-w-full object-contain',
+					)}
 				/>
-				{rect && (
-					<span
-						aria-hidden='true'
-						className='pointer-events-none absolute rounded-[3px] border-2 border-danger'
-						style={{
-							left: `${rect.left}%`,
-							top: `${rect.top}%`,
-							width: `${rect.width}%`,
-							height: `${rect.height}%`,
-							// Spotlight: dim everything outside the highlighted box.
-							boxShadow: '0 0 0 9999px rgba(15, 23, 42, 0.30)',
-						}}
-					/>
-				)}
-			</div>
-			<figcaption className='mt-1.5 flex items-center justify-between gap-3 text-[11px] font-semibold text-muted-ink'>
-				<span>Evidence — captured on your page ({deviceLabel})</span>
-				<a
-					href={src}
-					target='_blank'
-					rel='noopener noreferrer'
-					className='shrink-0 underline decoration-border-soft underline-offset-2 hover:text-brand'>
-					View full size
-				</a>
+				<span className='pointer-events-none absolute inset-x-0 bottom-0 flex justify-end bg-gradient-to-t from-black/20 to-transparent p-2'>
+					<span className='inline-flex items-center gap-1 rounded-md bg-white/95 px-2 py-1 text-[10.5px] font-bold text-ink shadow-sm transition-transform group-hover:scale-105'>
+						<ZoomIn className='size-3' /> Click to enlarge
+					</span>
+				</span>
+			</button>
+			<figcaption className='mt-1.5 text-[11px] font-semibold text-muted-ink'>
+				Evidence — captured on your page ({deviceLabel})
 			</figcaption>
+
+			{open &&
+				typeof document !== 'undefined' &&
+				createPortal(
+					<div
+						role='dialog'
+						aria-modal='true'
+						aria-label='Screenshot evidence — full size'
+						className='fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 p-4 sm:p-10'
+						onClick={() => setOpen(false)}>
+						<button
+							type='button'
+							onClick={() => setOpen(false)}
+							aria-label='Close screenshot preview'
+							className='absolute right-4 top-4 z-10 inline-flex size-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/25'>
+							<X className='size-5' />
+						</button>
+						{/* eslint-disable-next-line @next/next/no-img-element */}
+						<img
+							src={src}
+							alt={alt}
+							className='max-h-full max-w-full rounded-lg object-contain shadow-2xl'
+							onClick={(event) => event.stopPropagation()}
+						/>
+					</div>,
+					document.body,
+				)}
 		</figure>
 	);
 }
@@ -1748,7 +1753,7 @@ function FindingCard({ finding }: { finding: ScanIssue }) {
 			{evidence && (
 				<EvidenceImage
 					src={evidence.src}
-					box={evidence.box}
+					kind={evidence.kind}
 					deviceLabel={evidence.deviceLabel}
 					alt={`Screenshot evidence: ${finding.title}`}
 				/>

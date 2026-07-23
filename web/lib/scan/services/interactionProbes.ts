@@ -130,20 +130,16 @@ async function stickyNavProbe(page: Page): Promise<InteractionProbeResult> {
 	const name = 'Sticky navigation on scroll';
 	const startedAt = Date.now();
 
-	try {
-		const before = await page.evaluate(() => {
-			const nav = document.querySelector('header, nav, [role="banner"]');
-			return nav ? true : false;
-		});
-		if (!before) {
-			return makeResult(id, name, 'site-wide', 'skip', 'No <header>/<nav> element found', startedAt);
-		}
-
-		await page.evaluate(() => window.scrollTo(0, 600));
-		await page.waitForTimeout(500);
-
-		const after = await page.evaluate(() => {
-			const nav = document.querySelector('header, nav, [role="banner"]');
+	// Measure a specific candidate by index so the SAME element is re-measured
+	// after scrolling. The old querySelector('header, nav, …') took the FIRST
+	// match in the DOM — often an announcement bar or a hidden mobile drawer —
+	// and produced false "nav disappeared" findings for perfectly sticky navs.
+	const measureNavAt = (index: number) =>
+		page.evaluate((i) => {
+			const candidates = Array.from(
+				document.querySelectorAll<HTMLElement>('header, nav, [role="banner"]'),
+			);
+			const nav = candidates[i];
 			if (!nav) return null;
 			const r = nav.getBoundingClientRect();
 			const s = window.getComputedStyle(nav);
@@ -157,31 +153,85 @@ async function stickyNavProbe(page: Page): Promise<InteractionProbeResult> {
 				bottom: Math.round(r.bottom),
 				position: s.position,
 				visible,
+				onScreen: visible && r.bottom > 0 && r.top < window.innerHeight,
 				scrollY: Math.round(window.scrollY),
 			};
+		}, index);
+
+	try {
+		// Pick the page's real navigation bar: the first candidate that is
+		// actually visible near the top of the viewport at scrollY=0.
+		const navIndex = await page.evaluate(() => {
+			const candidates = Array.from(
+				document.querySelectorAll<HTMLElement>('header, nav, [role="banner"]'),
+			);
+			return candidates.findIndex((el) => {
+				const r = el.getBoundingClientRect();
+				const s = window.getComputedStyle(el);
+				return (
+					r.height > 8 &&
+					r.width > 100 &&
+					r.top < 200 &&
+					s.display !== 'none' &&
+					s.visibility !== 'hidden' &&
+					Number(s.opacity) > 0.05
+				);
+			});
 		});
+		if (navIndex === -1) {
+			return makeResult(id, name, 'site-wide', 'skip', 'No visible navigation bar found at the top of the page', startedAt);
+		}
+
+		await page.evaluate(() => window.scrollTo(0, 600));
+		await page.waitForTimeout(500);
+
+		const after = await measureNavAt(navIndex);
+
+		if (after && after.scrollY < 100) {
+			await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+			return makeResult(id, name, 'site-wide', 'skip', `Page did not scroll (height too short, y=${after.scrollY})`, startedAt);
+		}
+
+		if (after?.onScreen && after.top >= -4 && after.top < 80) {
+			await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+			return makeResult(id, name, 'site-wide', 'pass', `Nav stayed fixed at the top after scrolling ${after.scrollY}px (position:${after.position}, top:${after.top}px).`, startedAt);
+		}
+
+		// Nav is hidden or off-screen after scrolling down. Very many sites use
+		// the intentional hide-on-scroll-down / reveal-on-scroll-up pattern —
+		// scroll up a little and re-measure before calling anything a problem.
+		await page.evaluate(() => window.scrollBy(0, -250)).catch(() => {});
+		await page.waitForTimeout(450);
+		const rechecked = await measureNavAt(navIndex);
 
 		// Restore scroll so later checks see a clean baseline.
 		await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 
-		if (!after) {
-			return makeResult(id, name, 'site-wide', 'fail', 'Nav element disappeared from the DOM after scrolling', startedAt);
+		if (rechecked?.onScreen && rechecked.top >= -4 && rechecked.top < 80) {
+			return makeResult(
+				id,
+				name,
+				'site-wide',
+				'pass',
+				`Nav hides while scrolling down and reappears on scroll-up (position:${rechecked.position}) — an intentional, common design pattern, not a defect.`,
+				startedAt,
+			);
 		}
 
-		if (after.scrollY < 100) {
-			return makeResult(id, name, 'site-wide', 'skip', `Page did not scroll (height too short, y=${after.scrollY})`, startedAt);
+		if (!after || !rechecked) {
+			return makeResult(id, name, 'site-wide', 'warn', 'Nav element could not be re-measured after scrolling (page re-rendered). Weak signal — do not report without visual confirmation.', startedAt);
 		}
 
-		if (!after.visible) {
-			return makeResult(id, name, 'site-wide', 'fail', `Nav disappeared after scrolling ${after.scrollY}px (hidden or removed).`, startedAt);
-		}
-		if (after.top >= 0 && after.top < 80) {
-			return makeResult(id, name, 'site-wide', 'pass', `Nav stayed fixed at the top after scrolling ${after.scrollY}px (position:${after.position}, top:${after.top}px).`, startedAt);
-		}
-		if (after.bottom <= 0) {
-			return makeResult(id, name, 'site-wide', 'warn', `Nav scrolled away with the page after scrolling ${after.scrollY}px (bottom:${after.bottom}px, position:${after.position}).`, startedAt);
-		}
-		return makeResult(id, name, 'site-wide', 'warn', `Nav partially in view after scrolling ${after.scrollY}px (top:${after.top}px, position:${after.position}).`, startedAt);
+		// Static header that scrolls away with the page — extremely common and
+		// NOT inherently a defect. Neutral wording so the AI does not dramatize.
+		return makeResult(
+			id,
+			name,
+			'site-wide',
+			'warn',
+			`Navigation is not sticky: it scrolls away with the page and did not reappear on a short scroll-up (position:${after.position}). This is a common, acceptable pattern — only worth reporting if the page is very long AND the screenshots confirm visitors have no way to navigate without scrolling all the way back up.`,
+			startedAt,
+		);
 	} catch (error) {
 		return makeResult(id, name, 'site-wide', 'error', errMsg(error), startedAt);
 	}

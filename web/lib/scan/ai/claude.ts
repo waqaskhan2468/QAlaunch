@@ -206,6 +206,10 @@ To keep scans fast, the scanning browser intentionally blocks these third-party 
 - NEVER report as an issue: a blank or placeholder video/embed area, a missing live-chat bubble, a missing cookie/consent banner, or any console/network error caused by one of these blocked domains. These are artifacts of the scan environment — for real visitors these widgets load normally.
 - If an embed area looks empty, a video appears to not load, or a third-party widget seems missing in the screenshot, assume the scanner blocked it and say nothing about it.
 
+NAVIGATION & TOUCH-TARGET GUARDRAILS (frequent false-positive sources — apply strictly):
+- Navigation that hides while scrolling down and reappears on scroll-up is an intentional, widespread design pattern — NOT a defect. A non-sticky header that simply scrolls away with the page is also a normal, acceptable pattern. Only report a navigation-visibility issue when the observed probe result explicitly confirms a real problem AND the screenshots corroborate it.
+- Do NOT report touch-target / tap-size issues from desktop measurements or the desktop screenshot — desktop links and buttons are mouse targets, and mobile CSS renders them differently. Only report tap-size problems that are clearly visible in the MOBILE screenshot (elements obviously tiny or cramped together), and even then be conservative.
+
 SEVERITY CALIBRATION (match severity to confirmed, observed impact — never inflate):
 - critical: the core task is blocked for most users (checkout/signup/contact cannot complete, page fails to load, primary content missing).
 - high: a real, confirmed problem that significantly degrades the experience for many users (a broken primary navigation link, a key image that fails to load, a serious accessibility barrier).
