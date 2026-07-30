@@ -1593,11 +1593,17 @@ function getIssueEvidence(
 /**
  * Compact evidence thumbnail with a click-to-enlarge lightbox.
  *
- * Thumbnails keep the results page short: page screenshots render as a fixed-
- * height top-crop; element crops render at their natural size (upscaling small
- * crops to card width made them a blurry mess). The lightbox is portalled to
- * <body> (the card has a hover transform, which would break `position: fixed`)
- * and closes on backdrop click, the ✕ button, or Escape.
+ * Sits in a fixed-width side column next to the finding text on desktop (the
+ * finding text gets the room; the thumbnail is a small proof-of-evidence
+ * teaser) and stacks full-width below the text on mobile — sizing is
+ * responsive via Tailwind breakpoints, no JS layout logic needed. Element
+ * crops render via object-contain (upscaling small crops to fill the column
+ * made them a blurry mess); page screenshots use object-cover so an
+ * arbitrary-aspect screenshot still fills the thumbnail box cleanly.
+ *
+ * The lightbox is portalled to <body> (the card has a hover transform, which
+ * would break `position: fixed`) and closes on backdrop click, the ✕ button,
+ * or Escape.
  */
 function EvidenceImage({
 	src,
@@ -1630,15 +1636,16 @@ function EvidenceImage({
 	if (failed) return null;
 
 	return (
-		<figure className='mt-4'>
+		<>
 			<button
 				type='button'
 				onClick={() => setOpen(true)}
-				aria-label='Enlarge screenshot evidence'
+				aria-label={`Enlarge screenshot evidence (${deviceLabel})`}
+				title='Click to view full-size evidence'
 				className={cn(
 					'group relative block w-full overflow-hidden rounded-xl border border-border-soft bg-surface-soft text-left',
 					'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
-					kind === 'crop' && 'flex justify-center p-2',
+					kind === 'crop' && 'flex items-center justify-center p-2',
 				)}>
 				{/* Supabase storage URL — next/image remote config not needed for evidence shots. */}
 				{/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1649,19 +1656,19 @@ function EvidenceImage({
 					onError={() => setFailed(true)}
 					className={cn(
 						kind === 'page' ?
-							'h-[170px] w-full object-cover object-top'
-						:	'max-h-[170px] w-auto max-w-full object-contain',
+							'h-[170px] w-full object-cover object-top sm:h-28'
+						:	'max-h-[170px] w-auto max-w-full object-contain sm:max-h-28',
 					)}
 				/>
-				<span className='pointer-events-none absolute inset-x-0 bottom-0 flex justify-end bg-gradient-to-t from-black/20 to-transparent p-2'>
-					<span className='inline-flex items-center gap-1 rounded-md bg-white/95 px-2 py-1 text-[10.5px] font-bold text-ink shadow-sm transition-transform group-hover:scale-105'>
-						<ZoomIn className='size-3' /> Click to enlarge
-					</span>
+				{/* Persistent (not hover-only) zoom cue — the column is too narrow on
+				    desktop for a text banner, and hover doesn't exist on touch. */}
+				<span className='pointer-events-none absolute bottom-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded-full bg-white/95 shadow-sm transition-transform group-hover:scale-110'>
+					<ZoomIn className='size-3.5 text-ink' />
 				</span>
 			</button>
-			<figcaption className='mt-1.5 text-[11px] font-semibold text-muted-ink'>
-				Evidence — captured on your page ({deviceLabel})
-			</figcaption>
+			<span className='mt-1.5 block text-center text-[10.5px] font-semibold text-muted-ink sm:text-left'>
+				View evidence
+			</span>
 
 			{open &&
 				typeof document !== 'undefined' &&
@@ -1670,7 +1677,7 @@ function EvidenceImage({
 						role='dialog'
 						aria-modal='true'
 						aria-label='Screenshot evidence — full size'
-						className='fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 p-4 sm:p-10'
+						className='fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 bg-slate-950/85 p-4 sm:p-10'
 						onClick={() => setOpen(false)}>
 						<button
 							type='button'
@@ -1686,10 +1693,13 @@ function EvidenceImage({
 							className='max-h-full max-w-full rounded-lg object-contain shadow-2xl'
 							onClick={(event) => event.stopPropagation()}
 						/>
+						<span className='text-[12.5px] font-semibold text-white/70'>
+							Evidence — captured on your page ({deviceLabel})
+						</span>
 					</div>,
 					document.body,
 				)}
-		</figure>
+		</>
 	);
 }
 
@@ -1726,38 +1736,51 @@ function FindingCard({ finding }: { finding: ScanIssue }) {
 				'rounded-2xl border-[1.5px] border-border-soft bg-white p-6 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5',
 				tone.card,
 			)}>
-			<div className='mb-3 flex flex-wrap items-center gap-2'>
-				<span
-					className={cn(
-						'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-extrabold tracking-wider',
-						tone.badge,
-					)}>
-					● {normSev}
-				</span>
-				<span className='text-[11px] font-bold uppercase tracking-widest text-muted-ink'>
-					{normCat(finding.category)}
-				</span>
+			<div
+				className={cn(
+					'flex flex-col gap-4',
+					// Thumbnail sits in a fixed-width side column on desktop (text gets
+					// the room); on mobile it's a full-width row below the text — order
+					// classes reorder visually without touching DOM order.
+					evidence && 'sm:flex-row sm:items-start',
+				)}>
+				{evidence && (
+					<div className='order-2 sm:order-1 sm:w-[132px] sm:shrink-0'>
+						<EvidenceImage
+							src={evidence.src}
+							kind={evidence.kind}
+							deviceLabel={evidence.deviceLabel}
+							alt={`Screenshot evidence: ${finding.title}`}
+						/>
+					</div>
+				)}
+				<div className={cn('order-1 min-w-0', evidence && 'sm:order-2 sm:flex-1')}>
+					<div className='mb-3 flex flex-wrap items-center gap-2'>
+						<span
+							className={cn(
+								'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-extrabold tracking-wider',
+								tone.badge,
+							)}>
+							● {normSev}
+						</span>
+						<span className='text-[11px] font-bold uppercase tracking-widest text-muted-ink'>
+							{normCat(finding.category)}
+						</span>
+					</div>
+					<h3 className='font-heading text-[17px] font-extrabold leading-snug text-ink'>
+						{finding.title}
+					</h3>
+					<p className='mt-2.5 text-[13.5px] leading-[1.65] text-body'>
+						{finding.description}
+					</p>
+					<div className='mt-3.5 flex items-start gap-2 rounded-lg bg-warn-pale px-3.5 py-2.5 text-[12.5px] font-semibold text-[#78350F]'>
+						<Zap className='mt-0.5 size-3.5 shrink-0 text-warn' />
+						<span>
+							<span className='font-extrabold'>Impact:</span> {finding.impact}
+						</span>
+					</div>
+				</div>
 			</div>
-			<h3 className='font-heading text-[17px] font-extrabold leading-snug text-ink'>
-				{finding.title}
-			</h3>
-			<p className='mt-2.5 text-[13.5px] leading-[1.65] text-body'>
-				{finding.description}
-			</p>
-			<div className='mt-3.5 flex items-start gap-2 rounded-lg bg-warn-pale px-3.5 py-2.5 text-[12.5px] font-semibold text-[#78350F]'>
-				<Zap className='mt-0.5 size-3.5 shrink-0 text-warn' />
-				<span>
-					<span className='font-extrabold'>Impact:</span> {finding.impact}
-				</span>
-			</div>
-			{evidence && (
-				<EvidenceImage
-					src={evidence.src}
-					kind={evidence.kind}
-					deviceLabel={evidence.deviceLabel}
-					alt={`Screenshot evidence: ${finding.title}`}
-				/>
-			)}
 		</article>
 	);
 }
