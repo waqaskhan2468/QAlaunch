@@ -18,6 +18,20 @@ export const metadata: Metadata = {
 
 const POSTS = [
   {
+    title: 'Why Your Shopify Store Loses Mobile Customers at Checkout',
+    description:
+      'The mobile checkout bugs that cost Shopify stores real sales, why they’re invisible on desktop, and how to check your own store in 15 minutes.',
+    url: '/blog/shopify-mobile-checkout-bugs',
+    date: '2026-08-05',
+  },
+  {
+    title: 'Why Your WordPress Site Looks Broken After Every Update',
+    description:
+      'The silent regressions WordPress updates cause — the site stays up but something breaks — and the 10-minute check that catches them before a visitor does.',
+    url: '/blog/wordpress-broken-after-update',
+    date: '2026-08-05',
+  },
+  {
     title: 'How to Test a Base44 App Before Launch — a QA Engineer’s Checklist',
     description:
       'The bugs we find most often in Base44 apps, why the editor preview hides them, and the 25-minute pre-launch test that catches them before your users do.',

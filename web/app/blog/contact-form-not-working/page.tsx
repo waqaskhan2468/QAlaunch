@@ -267,7 +267,11 @@ export default function ContactFormNotWorkingPost() {
           plugin says &quot;sent&quot; and nothing arrives, the fix is almost always routing mail
           through an authenticated SMTP service instead of the server default, via a plugin like WP
           Mail SMTP. Form and mail plugins should be on your shortlist of things to re-test after{' '}
-          <em>every</em> update — more in our{' '}
+          <em>every</em> update — this is one specific case of the pattern covered in{' '}
+          <Link href="/blog/wordpress-broken-after-update" className="text-[#16a34a] font-semibold hover:underline">
+            why WordPress sites break after every update
+          </Link>
+          , plus more in our{' '}
           <Link href="/for-wordpress" className="text-[#16a34a] font-semibold hover:underline">
             WordPress site check guide
           </Link>
@@ -277,11 +281,16 @@ export default function ContactFormNotWorkingPost() {
           <strong>Shopify:</strong> the built-in contact form is reliable at sending — to the
           store&apos;s configured sender email, which after years of admin changes isn&apos;t always
           an inbox anyone reads. Verify where it actually delivers. Custom-theme forms and
-          app-injected forms need the full protocol above; our{' '}
+          app-injected forms need the full protocol above; if the bigger issue on your store is
+          mobile checkout rather than the contact form, see{' '}
+          <Link href="/blog/shopify-mobile-checkout-bugs" className="text-[#16a34a] font-semibold hover:underline">
+            why Shopify stores lose mobile customers at checkout
+          </Link>
+          , or our{' '}
           <Link href="/for-shopify" className="text-[#16a34a] font-semibold hover:underline">
             Shopify store audit guide
           </Link>{' '}
-          covers the other conversion killers that tend to accompany them.
+          for the other conversion killers that tend to accompany them.
         </p>
         <p className="text-[#3b4253] leading-relaxed mb-10">
           <strong>Lovable / Bolt / Replit / v0:</strong> assume the form is broken until the

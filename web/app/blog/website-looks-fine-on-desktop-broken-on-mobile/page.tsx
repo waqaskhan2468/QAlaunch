@@ -326,7 +326,7 @@ export default function DesktopFineMobileBrokenPost() {
             overflow, invisible buttons, unreadable text, and broken layouts in plain English. The
             free scan takes about two minutes, no signup.
           </p>
-          <p className="text-sm text-[#3b4253]">
+          <p className="text-sm text-[#3b4253] mb-4">
             Built with an AI tool? See the platform guides:{' '}
             <Link href="/for-lovable" className="text-[#16a34a] font-semibold hover:underline">testing Lovable sites</Link>{' '}
             and{' '}
@@ -334,6 +334,13 @@ export default function DesktopFineMobileBrokenPost() {
             , or the full list of{' '}
             <Link href="/blog/vibe-coding-website-bugs" className="text-[#16a34a] font-semibold hover:underline">
               nine bugs AI-built sites ship with
+            </Link>
+            .
+          </p>
+          <p className="text-sm text-[#3b4253]">
+            Running a Shopify store? Mobile is where checkout specifically breaks down — see{' '}
+            <Link href="/blog/shopify-mobile-checkout-bugs" className="text-[#16a34a] font-semibold hover:underline">
+              why Shopify stores lose mobile customers at checkout
             </Link>
             .
           </p>
