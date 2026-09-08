@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { normalizeUrl, urlHash, isPrivateUrl } from '@/lib/utils/url';
+import { sendFreeScanAlert } from '@/lib/notifications/internal-alert';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { scanStartSchema } from '@/types/zod';
 import { AppError, asyncHandler } from '@/lib/api/error';
@@ -177,6 +178,17 @@ export const POST = asyncHandler(async (req: Request) => {
 		eventType: 'scan_started',
 		url: normalized,
 		email: email ?? null,
+	});
+
+	// Internal alert. Runs after the response is sent (`after` keeps the
+	// serverless invocation alive via waitUntil), so it adds no latency to the
+	// submit — which is deliberately kept instant for free scans.
+	after(async () => {
+		await sendFreeScanAlert({
+			scanId: scan.id,
+			targetUrl: normalized,
+			userEmail: email ?? null,
+		});
 	});
 
 	await queueScanJob({

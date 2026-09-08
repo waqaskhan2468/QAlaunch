@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { verifyAndParsePaddleWebhook } from "@/lib/api/paddle";
 import { getServiceSupabase } from "@/lib/db/supabase";
 import { queueScanJob } from "@/lib/api/queue-scan-job";
 import { scanPackageSchema } from "@/types/zod";
 import { logFunnelEvent } from "@/lib/analytics/funnel";
+import { sendPaidScanAlert } from "@/lib/notifications/internal-alert";
 
 export const runtime = "nodejs";
 
@@ -31,6 +32,11 @@ export async function POST(req: Request) {
     data?: {
       id?: string;
       status?: string;
+      currencyCode?: string;
+      currency_code?: string;
+      details?: {
+        totals?: { grandTotal?: string; grand_total?: string; currencyCode?: string; currency_code?: string };
+      };
       customData?: {
         scanId?: string;
         package?: string;
@@ -123,6 +129,35 @@ export async function POST(req: Request) {
     eventType: "payment_completed",
     url: targetUrl,
     email: userEmail ?? null,
+  });
+
+  // Internal sale alert. Scheduled here — before the queue step — because the
+  // payment is already confirmed and persisted at this point, so the sale is
+  // worth knowing about even if queueing then fails (arguably more so: that
+  // case needs manual follow-up). `after` runs it once the response is sent, so
+  // a slow or failing email can never delay the webhook ack and trigger a
+  // Paddle retry. Paddle reports totals in minor units ("2400" = $24.00).
+  const totals = eventData.details?.totals;
+  const rawTotal = totals?.grandTotal ?? totals?.grand_total;
+  const currency =
+    totals?.currencyCode ??
+    totals?.currency_code ??
+    eventData.currencyCode ??
+    eventData.currency_code;
+  const amount =
+    rawTotal && Number.isFinite(Number(rawTotal)) ?
+      `${(Number(rawTotal) / 100).toFixed(2)}${currency ? ` ${currency}` : ""}`
+    : null;
+
+  after(async () => {
+    await sendPaidScanAlert({
+      scanId,
+      targetUrl,
+      userEmail: userEmail ?? null,
+      pkg,
+      transactionId,
+      amount,
+    });
   });
 
   try {
