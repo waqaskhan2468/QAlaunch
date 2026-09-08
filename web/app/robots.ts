@@ -5,7 +5,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: '*',
       allow: '/',
-      disallow: ['/api/', '/scan/', '/checkout/'],
+      disallow: ['/api/', '/scan/', '/checkout/', '/admin'],
     },
     sitemap: 'https://getqalaunch.com/sitemap.xml',
   }
