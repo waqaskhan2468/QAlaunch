@@ -59,6 +59,30 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
+      url: `${baseUrl}/compare`,
+      lastModified: new Date('2026-09-09'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
+      url: `${baseUrl}/compare/google-lighthouse`,
+      lastModified: new Date('2026-09-09'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
+      url: `${baseUrl}/compare/hiring-a-qa-tester`,
+      lastModified: new Date('2026-09-09'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
+      url: `${baseUrl}/compare/browserstack`,
+      lastModified: new Date('2026-09-09'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
       url: `${baseUrl}/for-base44`,
       lastModified: new Date('2026-09-09'),
       changeFrequency: 'monthly',

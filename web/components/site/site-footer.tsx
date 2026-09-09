@@ -4,6 +4,7 @@ import Link from "next/link"
 const productLinks = [
   { href: "/result", label: "Free Website Audit" },
   { href: "/pricing", label: "Pricing" },
+  { href: "/compare", label: "Compare" },
   { href: "/#sample-report", label: "Sample Report" },
 ]
 
