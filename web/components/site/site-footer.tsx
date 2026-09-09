@@ -24,6 +24,8 @@ const platformLinks = [
   { href: "/for-bolt", label: "For Bolt" },
   { href: "/for-shopify", label: "For Shopify" },
   { href: "/for-wordpress", label: "For WordPress" },
+  { href: "/for-base44", label: "For Base44" },
+  { href: "/for-replit", label: "For Replit" },
   { href: "/blog/test-base44-app-before-launch", label: "Base44 App Testing" },
   { href: "/blog/vibe-coding-website-bugs", label: "Vibe Coding Bugs" },
 ]

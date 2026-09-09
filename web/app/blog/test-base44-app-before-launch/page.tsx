@@ -289,7 +289,7 @@ export default function TestBase44AppPost() {
           </h2>
           <p className="text-sm text-[#3b4253] mb-4 leading-relaxed">
             Paste your published base44.app URL or custom domain into{' '}
-            <Link href="/" className="text-[#16a34a] font-semibold hover:underline">QAlaunch</Link>{' '}
+            <Link href="/for-base44" className="text-[#16a34a] font-semibold hover:underline">QAlaunch for Base44</Link>{' '}
             and a real cloud browser opens your live app at desktop and phone widths, runs 35+
             automated checks plus an AI visual review, and hands you your top issues in about two
             minutes. Free, no signup — the fastest way to see what a stranger sees.

@@ -59,6 +59,30 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
+      url: `${baseUrl}/for-base44`,
+      lastModified: new Date('2026-09-09'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
+      url: `${baseUrl}/for-replit`,
+      lastModified: new Date('2026-09-09'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
+      url: `${baseUrl}/for-v0`,
+      lastModified: new Date('2026-09-09'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
+      url: `${baseUrl}/for-claude`,
+      lastModified: new Date('2026-09-09'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
       url: `${baseUrl}/for-lovable`,
       lastModified: new Date('2026-07-07'),
       changeFrequency: 'monthly',

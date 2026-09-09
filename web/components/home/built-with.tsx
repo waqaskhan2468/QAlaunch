@@ -12,6 +12,10 @@ import { SectionHeader } from '@/components/site/section-header'
 const PLATFORMS = [
 	{ href: '/for-lovable', label: 'Lovable', anchor: 'Test a Lovable site' },
 	{ href: '/for-bolt', label: 'Bolt.new', anchor: 'Test a Bolt.new site' },
+	{ href: '/for-base44', label: 'Base44', anchor: 'Test a Base44 app' },
+	{ href: '/for-replit', label: 'Replit', anchor: 'Test a Replit app' },
+	{ href: '/for-v0', label: 'v0', anchor: 'Test a v0 app' },
+	{ href: '/for-claude', label: 'Claude', anchor: 'Test a Claude-built site' },
 	{ href: '/for-shopify', label: 'Shopify', anchor: 'Check a Shopify store' },
 	{ href: '/for-wordpress', label: 'WordPress', anchor: 'Check a WordPress site' },
 ]
