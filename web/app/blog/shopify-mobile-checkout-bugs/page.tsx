@@ -5,9 +5,9 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Why Your Shopify Store Loses Mobile Customers at Checkout',
+  title: 'Shopify Mobile Checkout Bugs Costing You Sales',
   description:
-    'Your Shopify store looks fine on your laptop. On the phone most of your customers actually use, hidden theme and app bugs are quietly killing checkout. A QA engineer explains where these bugs hide and how to find them in 15 minutes.',
+    'Your store looks fine on your laptop. On the phone most customers use, hidden theme bugs quietly kill checkout. Where they hide and how to find them.',
   openGraph: {
     title: 'Why Your Shopify Store Loses Mobile Customers at Checkout',
     description:
@@ -24,6 +24,7 @@ const structuredData = {
   description:
     'The mobile checkout bugs that cost Shopify stores real sales, why they’re invisible on desktop, and how to check your own store in 15 minutes.',
   datePublished: '2026-08-05',
+  dateModified: '2026-09-09',
   author: {
     '@type': 'Organization',
     name: 'QAlaunch',

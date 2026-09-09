@@ -5,9 +5,9 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'How to Test a Base44 App Before Launch — a QA Engineer’s Checklist',
+  title: 'How to Test a Base44 App Before Launch (6 Steps)',
   description:
-    'Built an app with Base44? The editor preview hides the bugs your users will hit. A QA engineer’s pre-launch checklist for Base44 apps: what breaks most often, why it worked for you, and how to test it in 25 minutes.',
+    'Your Base44 app works in the editor and breaks for real users. The 6-step pre-launch test: what fails most often, and how to check it in 25 minutes.',
   openGraph: {
     title: 'How to Test a Base44 App Before Launch — a QA Engineer’s Checklist',
     description:
@@ -24,6 +24,7 @@ const structuredData = {
   description:
     'The bugs we find most often in Base44 apps, why the editor preview hides them, and the 25-minute pre-launch test that catches them before your users do.',
   datePublished: '2026-07-09',
+  dateModified: '2026-09-09',
   author: {
     '@type': 'Organization',
     name: 'QAlaunch',

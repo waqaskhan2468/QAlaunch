@@ -5,9 +5,9 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Contact Form Not Working? Why Forms Fail Silently and How to Test Yours',
+  title: 'Contact Form Not Working? Test It in 5 Minutes',
   description:
-    'Most broken contact forms show visitors a success message while the submission vanishes. A QA engineer explains the five ways forms fail silently, why yours worked when you tested it, and the 5-minute test that actually proves it works.',
+    'Most broken forms show “message sent” while the submission vanishes. The 5 ways forms fail silently, and the 5-minute test that proves yours works.',
   openGraph: {
     title: 'Contact Form Not Working? Why Forms Fail Silently and How to Test Yours',
     description:
@@ -24,6 +24,7 @@ const structuredData = {
   description:
     'The five ways contact forms fail without showing an error, why they pass the owner’s test and fail for real visitors, and how to test yours properly in five minutes.',
   datePublished: '2026-07-07',
+  dateModified: '2026-09-09',
   author: {
     '@type': 'Organization',
     name: 'QAlaunch',

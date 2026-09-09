@@ -8,6 +8,7 @@ import { HowItWorks } from "@/components/home/how-it-works"
 import { Testimonials } from "@/components/home/testimonials"
 import { PricingPreview } from "@/components/home/pricing-preview"
 import { Comparison } from "@/components/home/comparison"
+import { BuiltWith } from "@/components/home/built-with"
 import { FAQ } from "@/components/home/faq"
 import { CtaBand } from "@/components/home/cta-band"
 
@@ -64,6 +65,7 @@ export default function HomePage() {
         <Testimonials />
         <PricingPreview />
         <Comparison />
+        <BuiltWith />
         <FAQ />
         <CtaBand />
       </main>

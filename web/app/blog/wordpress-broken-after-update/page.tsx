@@ -5,9 +5,9 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Why Your WordPress Site Looks Broken After Every Update',
+  title: 'WordPress Broken After Update? 4 Things to Check',
   description:
-    'WordPress updates don’t just crash sites with a white screen — they quietly shift layouts, break forms, and disable buttons while the page keeps loading. A QA engineer explains why this keeps happening and how to catch it before visitors do.',
+    'Updates rarely crash a site — they quietly shift layouts, break forms, and kill the mobile menu while the page still loads. The 4 regressions to check.',
   openGraph: {
     title: 'Why Your WordPress Site Looks Broken After Every Update',
     description:
@@ -24,6 +24,7 @@ const structuredData = {
   description:
     'The silent regressions WordPress updates cause — the site stays up but something breaks — and the 10-minute check that catches them before a visitor does.',
   datePublished: '2026-08-05',
+  dateModified: '2026-09-09',
   author: {
     '@type': 'Organization',
     name: 'QAlaunch',

@@ -6,8 +6,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Check Your Shopify Store for Bugs Before Launch | QAlaunch',
-  description: 'Free automated audit for Shopify stores. Find broken links, mobile checkout issues, invisible buttons, and usability problems costing you sales — in 2 minutes, no signup.',
+  title: 'Shopify Store Bug Check — Free 2-Minute Audit',
+  description: 'Free Shopify store audit. A real browser finds broken links, mobile checkout problems, and invisible buttons costing you sales — in 2 minutes, no app needed.',
   openGraph: {
     title: 'Check Your Shopify Store for Bugs Before Launch',
     description: 'Free automated audit for Shopify stores. Find the frontend bugs quietly costing you sales — in 2 minutes.',

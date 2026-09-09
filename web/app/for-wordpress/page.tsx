@@ -6,8 +6,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Check Your WordPress Site for Bugs & Issues | QAlaunch',
-  description: 'Free automated audit for WordPress websites. Find broken links, mobile layout problems, plugin conflicts visible to visitors, and usability issues — in 2 minutes, no signup.',
+  title: 'WordPress Site Checker — Find Bugs in 2 Minutes',
+  description: 'Free WordPress site checker. A real browser finds broken links, mobile layout problems, and plugin conflicts visitors can see — in 2 minutes, no plugin needed.',
   openGraph: {
     title: 'Check Your WordPress Site for Bugs & Issues',
     description: 'Free automated audit for WordPress sites. Broken links, mobile issues, and usability problems found in 2 minutes.',

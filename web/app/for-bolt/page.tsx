@@ -6,8 +6,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Test Your Bolt.new Website — Find Bugs Before Launch | QAlaunch',
-  description: 'Free automated QA audit for websites built with Bolt.new. Find mobile layout bugs, broken buttons, invisible CTAs, and usability issues in 2 minutes. No signup.',
+  title: 'Bolt.new App Testing — Find Bugs in 2 Minutes',
+  description: 'Free QA audit for Bolt.new sites. A real browser finds mobile layout breaks, broken buttons, invisible CTAs, and Safari bugs — in 2 minutes, no signup.',
   openGraph: {
     title: 'Test Your Bolt.new Website — Find Bugs Before Launch',
     description: 'Free automated QA audit for sites built with Bolt.new. Mobile bugs, broken links, usability issues found in 2 minutes.',

@@ -9,8 +9,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Test Your Lovable Website — Find Frontend Bugs Before Launch | QAlaunch',
-  description: 'Free automated QA audit for websites built with Lovable. Find broken links, mobile layout bugs, invisible CTAs, and usability issues in 2 minutes. No signup.',
+  title: 'Lovable App Testing — Find Bugs in 2 Minutes',
+  description: 'Free QA audit for Lovable sites. A real browser finds broken links, mobile layout bugs, invisible buttons, and forms that fail — in 2 minutes, no signup.',
   openGraph: {
     title: 'Test Your Lovable Website — Find Frontend Bugs Before Launch',
     description: 'Free automated QA audit for websites built with Lovable. Broken links, mobile issues, usability bugs found in 2 minutes.',

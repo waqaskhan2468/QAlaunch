@@ -8,14 +8,30 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Vibe Coding Website Bugs: The 9 Problems Every AI-Built Site Ships With | QAlaunch',
-  description: 'Built your website with vibe coding — Lovable, Bolt, Replit, v0, or Claude? These are the 9 frontend bugs almost every AI-built site ships with, and how to check for each one.',
+  title: '9 Bugs Every AI-Built Website Ships With',
+  description: 'Built with Lovable, Bolt, Base44, Replit, or v0? The 9 frontend bugs almost every AI-built site ships with — and how to check each one yourself in a minute.',
   openGraph: {
     title: 'Vibe Coding Website Bugs: The 9 Problems Every AI-Built Site Ships With',
     description: 'The frontend bugs almost every vibe-coded website ships with, and how to check for each one before your users find them.',
     url: 'https://getqalaunch.com/blog/vibe-coding-website-bugs',
     type: 'article',
   },
+}
+
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: 'Vibe Coding Website Bugs: The 9 Problems Every AI-Built Site Ships With',
+  description:
+    'The frontend bugs almost every vibe-coded website ships with, and how to check for each one before your users find them.',
+  datePublished: '2026-07-07',
+  dateModified: '2026-09-09',
+  author: {
+    '@type': 'Organization',
+    name: 'QAlaunch',
+    url: 'https://getqalaunch.com',
+  },
+  url: 'https://getqalaunch.com/blog/vibe-coding-website-bugs',
 }
 
 const BUGS = [
@@ -69,6 +85,10 @@ const BUGS = [
 export default function VibeCodingBugsPost() {
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
       <SiteNav />
       <main className="bg-white min-h-screen pt-16">
 

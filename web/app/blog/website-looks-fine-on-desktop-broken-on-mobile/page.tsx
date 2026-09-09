@@ -5,9 +5,9 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Why Your Website Looks Fine on Desktop but Broken on Mobile',
+  title: 'Site Looks Fine on Desktop but Broken on Mobile?',
   description:
-    'Your site looks perfect on your monitor and broken on your visitors’ phones. A QA engineer explains the six most common causes, why you never noticed, and how to find every mobile bug on your site in minutes.',
+    'Perfect on your monitor, broken on your visitors’ phones. The 6 most common causes, why owners never notice, and the 15-minute check that finds them all.',
   openGraph: {
     title: 'Why Your Website Looks Fine on Desktop but Broken on Mobile',
     description:
@@ -24,6 +24,7 @@ const structuredData = {
   description:
     'The six most common reasons websites break at phone widths, why owners never notice, and how to check your own site the way a QA engineer would.',
   datePublished: '2026-07-07',
+  dateModified: '2026-09-09',
   author: {
     '@type': 'Organization',
     name: 'QAlaunch',
