@@ -11,6 +11,8 @@ import {
 	type RangeKey,
 } from '@/lib/admin/analytics';
 import { AdminLogoutButton } from '@/components/admin/admin-logout-button';
+import { FollowUpComposer } from '@/components/admin/followup-composer';
+import { buildFollowUpDraft } from '@/lib/admin/followup-draft';
 
 export const metadata: Metadata = {
 	title: 'Analytics',
@@ -266,6 +268,75 @@ export default async function AdminDashboardPage({
 										</td>
 									</tr>
 								))}
+							</tbody>
+						</table>
+					}
+				</Section>
+
+				{/* Free scans to follow up — the conversion queue */}
+				<Section
+					title="Free scans to follow up"
+					note="Completed free scans not yet emailed, most unseen issues first. The draft is written from that scan's real findings; everything stays editable.">
+					{data.followUps.length === 0 ?
+						<Empty>
+							No free scans waiting. {data.followUpsSent > 0 &&
+								`${fmt(data.followUpsSent)} already contacted in this range.`}
+						</Empty>
+					:	<table className="w-full">
+							<thead className="border-b-2 border-slate-deep bg-surface-soft">
+								<tr>
+									<th className={TH}>When</th>
+									<th className={TH}>Website</th>
+									<th className={TH}>Issues</th>
+									<th className={TH}>Unseen</th>
+									<th className={TH}>Email</th>
+									<th className={TH}>Action</th>
+								</tr>
+							</thead>
+							<tbody>
+								{data.followUps.map((row) => {
+									const draft = buildFollowUpDraft({
+										host: row.host,
+										totalIssues: row.totalIssues,
+										highSeverityCount: row.highSeverityCount,
+										lockedTitles: row.lockedTitles,
+									});
+									return (
+										<tr
+											key={row.id}
+											className="border-b border-border-soft last:border-0">
+											<td className={TD}>{shortDate(row.createdAt)}</td>
+											<td className={`${TD} font-semibold`}>{row.host}</td>
+											<td className={TD}>
+												{fmt(row.totalIssues)}
+												{row.highSeverityCount > 0 && (
+													<span className="ml-1 text-danger font-semibold">
+														({fmt(row.highSeverityCount)} high)
+													</span>
+												)}
+											</td>
+											<td className={TD}>{fmt(row.lockedTitles.length)}</td>
+											<td className={TD}>
+												{row.email ?? (
+													<span className="text-muted-ink">not captured</span>
+												)}
+											</td>
+											<td className={TD}>
+												<FollowUpComposer
+													target={{
+														id: row.id,
+														host: row.host,
+														email: row.email,
+														totalIssues: row.totalIssues,
+														highSeverityCount: row.highSeverityCount,
+														draftSubject: draft.subject,
+														draftBody: draft.body,
+													}}
+												/>
+											</td>
+										</tr>
+									);
+								})}
 							</tbody>
 						</table>
 					}

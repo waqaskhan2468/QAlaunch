@@ -4,6 +4,7 @@ type Row = Record<string, unknown>;
 
 let scanRows: Row[] = [];
 let funnelRows: Row[] = [];
+let issueRows: Row[] = [];
 
 /** Minimal chainable stand-in for the supabase-js query builder. */
 function makeQuery(rows: Row[], count: number | null) {
@@ -11,7 +12,7 @@ function makeQuery(rows: Row[], count: number | null) {
 	const builder: Record<string, unknown> = {
 		then: (resolve: (v: typeof result) => unknown) => Promise.resolve(resolve(result)),
 	};
-	for (const method of ['select', 'order', 'limit', 'gte', 'eq']) {
+	for (const method of ['select', 'order', 'limit', 'gte', 'eq', 'in']) {
 		builder[method] = () => builder;
 	}
 	// `select(..., {head:true})` resolves to a count-only result.
@@ -35,9 +36,9 @@ function makeQuery(rows: Row[], count: number | null) {
 vi.mock('@/lib/db/supabase', () => ({
 	getServiceSupabase: () => ({
 		from: (table: string) =>
-			table === 'scans' ?
-				makeQuery(scanRows, scanRows.length)
-			:	makeQuery(funnelRows, funnelRows.length),
+			table === 'scans' ? makeQuery(scanRows, scanRows.length)
+			: table === 'issues' ? makeQuery(issueRows, issueRows.length)
+			: makeQuery(funnelRows, funnelRows.length),
 	}),
 }));
 
@@ -48,6 +49,7 @@ const now = new Date().toISOString();
 beforeEach(() => {
 	scanRows = [];
 	funnelRows = [];
+	issueRows = [];
 });
 
 function scan(over: Partial<Row> = {}): Row {
@@ -60,6 +62,8 @@ function scan(over: Partial<Row> = {}): Row {
 		user_email: null,
 		website_type: 'business',
 		created_at: now,
+		followup_sent_at: null,
+		followup_email: null,
 		...over,
 	};
 }
@@ -209,4 +213,76 @@ test('survives a missing funnel_events table', async () => {
 	// Mock always returns rows; this asserts the flag exists and scans still load.
 	expect(d.summary.freeScans).toBe(1);
 	expect(typeof d.funnelAvailable).toBe('boolean');
+});
+
+function issue(scanId: string, over: Partial<Row> = {}): Row {
+	return {
+		scan_id: scanId,
+		title: 'Some issue title',
+		severity: 'medium',
+		finding_type: 'general',
+		is_in_free_preview: false,
+		display_order: 0,
+		...over,
+	};
+}
+
+test('follow-up queue lists completed free scans with their real findings', async () => {
+	scanRows = [scan({ id: 's1', url: 'https://shop.com' })];
+	issueRows = [
+		issue('s1', { severity: 'critical', is_in_free_preview: true, title: 'Shown in preview' }),
+		issue('s1', { severity: 'high', title: 'Hidden A' }),
+		issue('s1', { severity: 'medium', title: 'Hidden B' }),
+	];
+
+	const d = await loadAdminAnalytics('30d');
+	const row = d.followUps[0];
+
+	expect(d.followUps).toHaveLength(1);
+	expect(row.host).toBe('shop.com');
+	expect(row.totalIssues).toBe(3);
+	expect(row.highSeverityCount).toBe(2); // critical + high
+	// Only issues the visitor never saw are offered as the hook.
+	expect(row.lockedTitles).toEqual(['Hidden A', 'Hidden B']);
+});
+
+test('suggestions never inflate the follow-up pitch', async () => {
+	scanRows = [scan({ id: 's1' })];
+	issueRows = [
+		issue('s1', { title: 'Real issue' }),
+		issue('s1', { finding_type: 'suggestion', severity: 'high', title: 'Just advice' }),
+	];
+
+	const d = await loadAdminAnalytics('30d');
+	expect(d.followUps[0].totalIssues).toBe(1);
+	expect(d.followUps[0].lockedTitles).toEqual(['Real issue']);
+});
+
+test('already-contacted and unfinished scans are excluded', async () => {
+	scanRows = [
+		scan({ id: 'contacted', followup_sent_at: now }),
+		scan({ id: 'running', status: 'crawling' }),
+		scan({ id: 'paid', package: 'basic', payment_status: 'paid' }),
+		scan({ id: 'eligible' }),
+	];
+	const d = await loadAdminAnalytics('30d');
+
+	expect(d.followUps.map((f) => f.id)).toEqual(['eligible']);
+	expect(d.followUpsSent).toBe(1);
+});
+
+test('queue ranks the most persuasive email first', async () => {
+	scanRows = [
+		scan({ id: 'weak', url: 'https://weak.com' }),
+		scan({ id: 'strong', url: 'https://strong.com' }),
+	];
+	issueRows = [
+		issue('weak', { title: 'One hidden' }),
+		issue('strong', { title: 'A' }),
+		issue('strong', { title: 'B' }),
+		issue('strong', { title: 'C' }),
+	];
+
+	const d = await loadAdminAnalytics('30d');
+	expect(d.followUps[0].id).toBe('strong');
 });

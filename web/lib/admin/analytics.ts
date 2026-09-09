@@ -59,6 +59,8 @@ type ScanRow = {
 	user_email: string | null;
 	website_type: string | null;
 	created_at: string;
+	followup_sent_at: string | null;
+	followup_email: string | null;
 };
 
 type FunnelRow = {
@@ -93,7 +95,7 @@ export async function loadAdminAnalytics(range: RangeKey) {
 	let scanQuery = supabase
 		.from('scans')
 		.select(
-			'id, url, package, status, payment_status, user_email, website_type, created_at',
+			'id, url, package, status, payment_status, user_email, website_type, created_at, followup_sent_at, followup_email',
 		)
 		.order('created_at', { ascending: false })
 		.limit(ROW_LIMIT);
@@ -267,6 +269,72 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		createdAt: s.created_at,
 	}));
 
+	// ── Free scans worth a follow-up ───────────────────────────────────────
+	// Completed free scans that have not been emailed yet, richest findings
+	// first — the strongest pitch is the one with the most unseen issues.
+	const followUpPool = freeScans
+		.filter((s) => s.status === 'done' && !s.followup_sent_at)
+		.slice(0, 40);
+
+	const issuesByScan = new Map<
+		string,
+		{ total: number; high: number; lockedTitles: string[] }
+	>();
+
+	if (followUpPool.length > 0) {
+		const { data: issueRows } = await supabase
+			.from('issues')
+			.select('scan_id, title, severity, finding_type, is_in_free_preview, display_order')
+			.in('scan_id', followUpPool.map((s) => s.id))
+			.order('display_order', { ascending: true });
+
+		for (const row of (issueRows ?? []) as Array<{
+			scan_id: string;
+			title: string | null;
+			severity: string | null;
+			finding_type: string | null;
+			is_in_free_preview: boolean | null;
+		}>) {
+			// Suggestions are advisory — they never counted toward the bug totals
+			// shown to the visitor, so they must not inflate the pitch either.
+			if (row.finding_type === 'suggestion') continue;
+
+			const entry =
+				issuesByScan.get(row.scan_id) ?? { total: 0, high: 0, lockedTitles: [] };
+			entry.total += 1;
+			if (row.severity === 'critical' || row.severity === 'high') entry.high += 1;
+			if (!row.is_in_free_preview && row.title && entry.lockedTitles.length < 4) {
+				entry.lockedTitles.push(row.title);
+			}
+			issuesByScan.set(row.scan_id, entry);
+		}
+	}
+
+	const followUps = followUpPool
+		.map((s) => {
+			const found = issuesByScan.get(s.id) ?? { total: 0, high: 0, lockedTitles: [] };
+			return {
+				id: s.id,
+				host: hostOf(s.url),
+				url: s.url ?? '',
+				email: s.user_email,
+				createdAt: s.created_at,
+				totalIssues: found.total,
+				highSeverityCount: found.high,
+				lockedTitles: found.lockedTitles,
+			};
+		})
+		// Most unseen issues first: that is the most persuasive email to send.
+		.sort(
+			(a, b) =>
+				b.lockedTitles.length - a.lockedTitles.length ||
+				b.highSeverityCount - a.highSeverityCount ||
+				b.createdAt.localeCompare(a.createdAt),
+		)
+		.slice(0, 25);
+
+	const followUpsSent = freeScans.filter((s) => s.followup_sent_at).length;
+
 	// Paid rows that never completed payment — the follow-up list.
 	const abandonedCheckouts = abandoned.slice(0, 25).map((s) => ({
 		id: s.id,
@@ -305,5 +373,7 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		emails,
 		recentScans,
 		abandonedCheckouts,
+		followUps,
+		followUpsSent,
 	};
 }
