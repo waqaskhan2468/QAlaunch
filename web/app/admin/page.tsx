@@ -273,6 +273,67 @@ export default async function AdminDashboardPage({
 					}
 				</Section>
 
+				{/* Why scans fail */}
+				<Section
+					title="Why scans failed"
+					note="Grouped by the reason shown to the visitor. Expand a row below for the raw technical cause.">
+					{data.failureReasons.length === 0 ?
+						<Empty>No failed scans in this range.</Empty>
+					:	<table className="w-full">
+							<thead className="border-b-2 border-slate-deep bg-surface-soft">
+								<tr>
+									<th className={TH}>Reason shown to visitor</th>
+									<th className={TH}>Count</th>
+								</tr>
+							</thead>
+							<tbody>
+								{data.failureReasons.map((r) => (
+									<tr key={r.reason} className="border-b border-border-soft last:border-0">
+										<td className="px-3 py-2.5 text-[13px] text-ink">{r.reason}</td>
+										<td className={`${TD} font-semibold`}>{fmt(r.count)}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					}
+				</Section>
+
+				<Section
+					title="Failed scans — technical detail"
+					note="The raw cause behind each failure. Copy these when reporting a problem.">
+					{data.failedScans.length === 0 ?
+						<Empty>No failed scans in this range.</Empty>
+					:	<table className="w-full">
+							<thead className="border-b-2 border-slate-deep bg-surface-soft">
+								<tr>
+									<th className={TH}>When</th>
+									<th className={TH}>Website</th>
+									<th className={TH}>Reason</th>
+									<th className={TH}>Technical cause</th>
+								</tr>
+							</thead>
+							<tbody>
+								{data.failedScans.map((f) => (
+									<tr key={f.id} className="border-b border-border-soft last:border-0 align-top">
+										<td className={TD}>{shortDate(f.createdAt)}</td>
+										<td className={`${TD} font-semibold`}>{f.host}</td>
+										<td className="px-3 py-2.5 text-[13px] text-ink">
+											{f.reason ?? <span className="text-muted-ink">—</span>}
+										</td>
+										<td className="px-3 py-2.5 text-[12px] font-mono leading-relaxed text-body">
+											{f.detail ?? (
+												<span className="text-muted-ink">
+													not captured (scan ran before failure logging)
+												</span>
+											)}
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					}
+				</Section>
+
 				{/* Free scans to follow up — the conversion queue */}
 				<Section
 					title="Free scans to follow up"

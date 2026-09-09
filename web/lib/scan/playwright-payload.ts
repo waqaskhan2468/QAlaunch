@@ -55,9 +55,14 @@ export function buildPlaywrightPayloadFromScanResult(result: ScanResult) {
 }
 
 /** Minimal payload for pages that failed after Inngest retries. */
-export function buildPlaywrightIndexPayload(scanOk: boolean) {
+export function buildPlaywrightIndexPayload(
+	scanOk: boolean,
+	/** Raw failure reason, kept so a failed page can explain itself later. */
+	failureReason?: string | null,
+) {
 	return {
 		playwrightDataVersion: 3 as const,
 		scanOk,
+		...(failureReason ? { failureReason } : {}),
 	};
 }

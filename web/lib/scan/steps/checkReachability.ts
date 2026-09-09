@@ -32,12 +32,17 @@ export async function checkReachabilityStep(input: {
 	const { scanId, targetUrl } = input;
 
 	let reason: string | null = null;
+	// Technical counterpart to `reason`, stored for the admin console so a
+	// failure can be diagnosed without the user-facing wording getting in the way.
+	let detail: string | null = null;
 	try {
 		const validation = await validateScanTarget(targetUrl);
 		if (validation.status === 'unreachable') {
 			reason = UNREACHABLE_MESSAGE;
+			detail = `reachability: target did not respond to the pre-scan fetch (${targetUrl})`;
 		} else if (validation.isWebApp) {
 			reason = WEBAPP_MESSAGE;
+			detail = `reachability: homepage looks login-gated or app-shell only (${targetUrl})`;
 		}
 	} catch (error) {
 		console.warn('[check-reachability] validation threw — proceeding', {
@@ -51,7 +56,7 @@ export async function checkReachabilityStep(input: {
 		const supabase = getServiceSupabase();
 		await supabase
 			.from('scans')
-			.update({ status: 'failed', error_message: reason })
+			.update({ status: 'failed', error_message: reason, error_detail: detail })
 			.eq('id', scanId);
 		return { ok: false, reason };
 	}

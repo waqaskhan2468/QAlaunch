@@ -1,5 +1,5 @@
 import type { ServiceSupabase } from '@/lib/db/supabase';
-import { updateScanPageRecord } from '@/lib/db/supabase-retry';
+import { formatErrorWithCause, updateScanPageRecord } from '@/lib/db/supabase-retry';
 import { buildPlaywrightIndexPayload } from '@/lib/scan/playwright-payload';
 import type { ScanStatus } from '@/types/zod';
 
@@ -53,10 +53,12 @@ async function markScanFailed(
 	supabase: ServiceSupabase,
 	scanId: string,
 	message: string,
+	detail?: string | null,
 ): Promise<void> {
 	await updateScanStatus(supabase, scanId, {
 		status: 'failed',
 		error_message: message,
+		...(detail ? { error_detail: detail.slice(0, 1000) } : {}),
 		completed_at: nowIso(),
 	});
 }
@@ -65,11 +67,18 @@ async function markScanFailed(
 export async function persistFailedPageIndex(input: {
 	scanId: string;
 	pageUrl: string;
+	/** Why the page failed. Persisted so the admin console can explain it. */
+	error?: unknown;
 }): Promise<void> {
+	const reason =
+		input.error === undefined ? null : (
+			formatErrorWithCause(input.error).slice(0, 500)
+		);
+
 	await updateScanPageRecord(input.scanId, input.pageUrl, {
 		screenshot_desktop_url: null,
 		screenshot_mobile_url: null,
-		playwright_data: buildPlaywrightIndexPayload(false),
+		playwright_data: buildPlaywrightIndexPayload(false, reason),
 		axe_violations: null,
 		raw_html: null,
 	});
@@ -77,6 +86,7 @@ export async function persistFailedPageIndex(input: {
 	slog('warn', 'scan:page_failed_indexed', {
 		scanId: input.scanId,
 		pageUrl: input.pageUrl,
+		reason,
 	});
 }
 
@@ -102,25 +112,41 @@ export async function finalizeScannerFromDb(
 ): Promise<ScanStatus> {
 	const { data: pages, error } = await supabase
 		.from('scan_pages')
-		.select('playwright_data')
+		.select('page_url, playwright_data')
 		.eq('scan_id', scanId);
 
 	if (error) {
 		throw new ScannerError(`Failed to load scan pages: ${error.message}`, 500);
 	}
 
-	const hasSuccessfulPage = (pages ?? []).some((row) =>
-		pageScanSucceeded({
-			playwright_data: row.playwright_data as { scanOk?: boolean } | null,
-		}),
+	const rows = (pages ?? []) as Array<{
+		page_url: string | null;
+		playwright_data: { scanOk?: boolean; failureReason?: string } | null;
+	}>;
+
+	const hasSuccessfulPage = rows.some((row) =>
+		pageScanSucceeded({ playwright_data: row.playwright_data }),
 	);
 
 	const status: ScanStatus = hasSuccessfulPage ? 'analyzing' : 'failed';
+
+	// When every page failed, carry the per-page reasons forward. Without this
+	// the scan was marked failed with a flat "All pages failed to scan." and the
+	// real cause survived only in the logs.
+	const failureDetail =
+		status === 'failed' ?
+			rows
+				.filter((row) => row.playwright_data?.failureReason)
+				.map((row) => `${row.page_url ?? 'page'}: ${row.playwright_data!.failureReason}`)
+				.join(' | ')
+				.slice(0, 1000) || null
+		:	null;
 
 	await updateScanStatus(supabase, scanId, {
 		status,
 		completed_at: status === 'failed' ? nowIso() : null,
 		error_message: status === 'failed' ? 'All pages failed to scan.' : null,
+		error_detail: failureDetail,
 	});
 
 	return status;
@@ -130,10 +156,11 @@ export async function markScannerFailed(
 	supabase: ServiceSupabase,
 	scanId: string,
 	message: string,
+	detail?: string | null,
 ): Promise<void> {
-	slog('error', 'scan:failed', { scanId, error: message });
+	slog('error', 'scan:failed', { scanId, error: message, detail });
 	try {
-		await markScanFailed(supabase, scanId, message);
+		await markScanFailed(supabase, scanId, message, detail);
 	} catch (markFailedError: unknown) {
 		slog('error', 'scan:mark_failed_error', {
 			scanId,

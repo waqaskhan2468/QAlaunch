@@ -126,9 +126,11 @@ export const runScan = inngest.createFunction(
 				await step.run(`scan-browser:${slug}`, () =>
 					scanBrowserOnlyStep({ scanId, pageUrl, pkg, isHomepage }),
 				);
-			} catch {
+			} catch (error) {
+				// Carry the reason through — it is the only record of why this page
+				// failed once the Inngest step output is gone.
 				await step.run(`scan-persist-failed:${slug}`, () =>
-					persistFailedPageIndex({ scanId, pageUrl }),
+					persistFailedPageIndex({ scanId, pageUrl, error }),
 				);
 			}
 		};

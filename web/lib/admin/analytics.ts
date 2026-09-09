@@ -61,6 +61,8 @@ type ScanRow = {
 	created_at: string;
 	followup_sent_at: string | null;
 	followup_email: string | null;
+	error_message: string | null;
+	error_detail: string | null;
 };
 
 type FunnelRow = {
@@ -95,7 +97,7 @@ export async function loadAdminAnalytics(range: RangeKey) {
 	let scanQuery = supabase
 		.from('scans')
 		.select(
-			'id, url, package, status, payment_status, user_email, website_type, created_at, followup_sent_at, followup_email',
+			'id, url, package, status, payment_status, user_email, website_type, created_at, followup_sent_at, followup_email, error_message, error_detail',
 		)
 		.order('created_at', { ascending: false })
 		.limit(ROW_LIMIT);
@@ -269,6 +271,32 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		createdAt: s.created_at,
 	}));
 
+	// ── Failed scans ───────────────────────────────────────────────────────
+	// error_message is the sanitised sentence shown to visitors; error_detail is
+	// the raw cause. Both are surfaced so a failure can actually be diagnosed.
+	const failedScans = scans
+		.filter((s) => s.status === 'failed')
+		.slice(0, 40)
+		.map((s) => ({
+			id: s.id,
+			host: hostOf(s.url),
+			url: s.url ?? '',
+			pkg: s.package ?? 'unknown',
+			createdAt: s.created_at,
+			reason: s.error_message,
+			detail: s.error_detail,
+		}));
+
+	// Grouped by user-facing reason so the most common cause is obvious.
+	const failureReasonMap = new Map<string, number>();
+	for (const f of failedScans) {
+		const key = f.reason ?? 'No reason recorded (scan predates failure logging)';
+		failureReasonMap.set(key, (failureReasonMap.get(key) ?? 0) + 1);
+	}
+	const failureReasons = [...failureReasonMap.entries()]
+		.map(([reason, count]) => ({ reason, count }))
+		.sort((a, b) => b.count - a.count);
+
 	// ── Free scans worth a follow-up ───────────────────────────────────────
 	// Completed free scans that have not been emailed yet, richest findings
 	// first — the strongest pitch is the one with the most unseen issues.
@@ -375,5 +403,7 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		abandonedCheckouts,
 		followUps,
 		followUpsSent,
+		failedScans,
+		failureReasons,
 	};
 }

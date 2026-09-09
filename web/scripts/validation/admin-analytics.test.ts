@@ -64,6 +64,8 @@ function scan(over: Partial<Row> = {}): Row {
 		created_at: now,
 		followup_sent_at: null,
 		followup_email: null,
+		error_message: null,
+		error_detail: null,
 		...over,
 	};
 }
@@ -285,4 +287,43 @@ test('queue ranks the most persuasive email first', async () => {
 
 	const d = await loadAdminAnalytics('30d');
 	expect(d.followUps[0].id).toBe('strong');
+});
+
+test('failed scans surface both the visitor reason and the technical cause', async () => {
+	scanRows = [
+		scan({
+			id: 'f1', status: 'failed', url: 'https://dead.com',
+			error_message: 'We could not load this website.',
+			error_detail: 'reachability: target did not respond to the pre-scan fetch',
+		}),
+		scan({ id: 'ok1', status: 'done' }),
+	];
+
+	const d = await loadAdminAnalytics('30d');
+
+	expect(d.failedScans).toHaveLength(1);
+	expect(d.failedScans[0].host).toBe('dead.com');
+	expect(d.failedScans[0].reason).toBe('We could not load this website.');
+	expect(d.failedScans[0].detail).toContain('did not respond');
+});
+
+test('failure reasons are grouped and ranked by frequency', async () => {
+	scanRows = [
+		scan({ id: '1', status: 'failed', error_message: 'Timed out.' }),
+		scan({ id: '2', status: 'failed', error_message: 'Timed out.' }),
+		scan({ id: '3', status: 'failed', error_message: 'Browser session ended.' }),
+	];
+
+	const d = await loadAdminAnalytics('30d');
+
+	expect(d.failureReasons[0]).toEqual({ reason: 'Timed out.', count: 2 });
+	expect(d.failureReasons[1]).toEqual({ reason: 'Browser session ended.', count: 1 });
+});
+
+test('older failures with no recorded reason are labelled, not dropped', async () => {
+	scanRows = [scan({ id: 'old', status: 'failed', error_message: null })];
+	const d = await loadAdminAnalytics('30d');
+
+	expect(d.failedScans).toHaveLength(1);
+	expect(d.failureReasons[0].reason).toMatch(/No reason recorded/);
 });
