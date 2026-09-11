@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import { Epilogue, Figtree, JetBrains_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 
+import { GoogleAnalytics } from "@/components/analytics/google-analytics"
 import { PageTransition } from "@/components/motion/page-transition"
 import "./globals.css"
 
@@ -110,6 +111,7 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <PageTransition>{children}</PageTransition>
         {process.env.NODE_ENV === "production" && <Analytics />}
+        <GoogleAnalytics />
       </body>
     </html>
   )

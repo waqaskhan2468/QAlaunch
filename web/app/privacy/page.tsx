@@ -97,6 +97,13 @@ export default function PrivacyPage() {
 									<strong className='font-semibold text-ink'>Vercel</strong> —
 									website hosting.
 								</li>
+								<li>
+									<strong className='font-semibold text-ink'>
+										Google Analytics
+									</strong>{' '}
+									— anonymous website traffic statistics (pages viewed, country,
+									device type). No scan data or email addresses are sent to it.
+								</li>
 							</ul>
 						</LegalSection>
 
@@ -118,8 +125,13 @@ export default function PrivacyPage() {
 
 						<LegalSection title='6. Cookies'>
 							<ul className='flex list-disc flex-col gap-2 pl-5 marker:text-muted-ink'>
-								<li>We use minimal cookies for session management only.</li>
-								<li>We do not use advertising or tracking cookies.</li>
+								<li>We use minimal cookies for session management.</li>
+								<li>
+									Google Analytics sets cookies that count visits and show us
+									which pages people use. These are analytics cookies — we do
+									not use advertising cookies, and we do not sell or share this
+									data with advertisers.
+								</li>
 							</ul>
 						</LegalSection>
 
@@ -139,7 +151,7 @@ export default function PrivacyPage() {
 								Questions about this policy or your data? Email us at{' '}
 								<ContactEmail />. QAlaunch is operated from Islamabad, Pakistan.
 							</p>
-							<p className='text-sm text-muted-ink'>Last updated: June 2026</p>
+							<p className='text-sm text-muted-ink'>Last updated: September 2026</p>
 						</LegalSection>
 					</div>
 				</section>
@@ -163,7 +175,7 @@ function LegalHeader({ title }: { title: string }) {
 				<h1 className='mt-5 font-heading text-[clamp(2rem,4.5vw,2.75rem)] font-black leading-[1.05] tracking-[-0.025em] text-white'>
 					{title}
 				</h1>
-				<p className='mt-2 text-[14px] text-white/55'>Last updated: June 2026</p>
+				<p className='mt-2 text-[14px] text-white/55'>Last updated: September 2026</p>
 			</div>
 		</section>
 	);
