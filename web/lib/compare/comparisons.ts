@@ -49,7 +49,7 @@ export type CompareConfig = {
 export const LIGHTHOUSE: CompareConfig = {
 	slug: 'google-lighthouse',
 	name: 'Google Lighthouse',
-	title: 'QAlaunch vs Google Lighthouse — What It Misses',
+	title: 'What Google Lighthouse Misses on Your Site',
 	description:
 		'Lighthouse scores how your page loads. It never looks at it. What a 100/100 score still misses, and when you need a real browser instead.',
 	ogTitle: 'QAlaunch vs Google Lighthouse: What a 100/100 Score Still Misses',
@@ -120,7 +120,7 @@ export const LIGHTHOUSE: CompareConfig = {
 export const FREELANCER: CompareConfig = {
 	slug: 'hiring-a-qa-tester',
 	name: 'Hiring a QA Tester',
-	title: 'QAlaunch vs Hiring a QA Tester — Cost Compared',
+	title: 'Hiring a QA Tester: Cost vs Automated Scan',
 	description:
 		'A freelance QA tester costs hundreds and takes days. A scan costs $9 and takes minutes. An honest look at which one your site actually needs.',
 	ogTitle: 'QAlaunch vs Hiring a QA Tester: Which Does Your Site Need?',
@@ -191,7 +191,7 @@ export const FREELANCER: CompareConfig = {
 export const BROWSERSTACK: CompareConfig = {
 	slug: 'browserstack',
 	name: 'BrowserStack',
-	title: 'QAlaunch vs BrowserStack — Which Do You Need?',
+	title: 'BrowserStack Alternative for Small Sites',
 	description:
 		'BrowserStack gives you browsers to test in. QAlaunch tells you what is wrong. Different jobs — here is which one fits how you work.',
 	ogTitle: 'QAlaunch vs BrowserStack: Access to Browsers, or Answers?',

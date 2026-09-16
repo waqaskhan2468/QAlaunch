@@ -6,7 +6,7 @@ import { SiteFooter } from '@/components/site/site-footer'
 import { COMPARISONS } from '@/lib/compare/comparisons'
 
 export const metadata: Metadata = {
-	title: 'How QAlaunch Compares to the Alternatives',
+	title: 'Website Testing Tools Compared',
 	description:
 		'Honest comparisons against Google Lighthouse, hiring a QA tester, and BrowserStack — including where each of them is the better choice.',
 	alternates: { canonical: '/compare' },

@@ -12,7 +12,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
       url: baseUrl,
-      lastModified: new Date('2026-04-18'),
+      lastModified: new Date('2026-09-16'),
       changeFrequency: 'weekly',
       priority: 1,
     },
@@ -60,25 +60,25 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${baseUrl}/compare`,
-      lastModified: new Date('2026-09-09'),
+      lastModified: new Date('2026-09-16'),
       changeFrequency: 'monthly',
       priority: 0.7,
     },
     {
       url: `${baseUrl}/compare/google-lighthouse`,
-      lastModified: new Date('2026-09-09'),
+      lastModified: new Date('2026-09-16'),
       changeFrequency: 'monthly',
       priority: 0.7,
     },
     {
       url: `${baseUrl}/compare/hiring-a-qa-tester`,
-      lastModified: new Date('2026-09-09'),
+      lastModified: new Date('2026-09-16'),
       changeFrequency: 'monthly',
       priority: 0.7,
     },
     {
       url: `${baseUrl}/compare/browserstack`,
-      lastModified: new Date('2026-09-09'),
+      lastModified: new Date('2026-09-16'),
       changeFrequency: 'monthly',
       priority: 0.7,
     },
