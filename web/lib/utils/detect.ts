@@ -277,6 +277,14 @@ export type WebAppGateSignal = {
 	appShell: boolean;
 };
 
+/**
+ * A page below BOTH thresholds has essentially no content of its own, which is
+ * what an auth screen or an unrendered app shell looks like. Public homepages
+ * measured in the same test sat an order of magnitude above both.
+ */
+const THIN_PAGE_CHARS = 6000;
+const THIN_PAGE_LINKS = 30;
+
 const APP_SUBDOMAIN_PREFIXES = [
 	'app.',
 	'accounts.',
@@ -302,18 +310,35 @@ export function detectWebAppGate(
 	$?: cheerio.CheerioAPI,
 ): WebAppGateSignal {
 	const doc = $ ?? cheerio.load(homepageHtml);
-	const { html, nav } = normalisePage(doc);
+	const { nav } = normalisePage(doc);
 	const url = new URL(baseUrl);
 	const host = url.hostname.toLowerCase();
 	const path = url.pathname.toLowerCase();
 
-	// ── Auth form: a password field on the page is a near-certain login/signup
-	//    screen (public marketing homepages do not embed password inputs).
-	const hasPasswordField =
-		doc('input[type="password" i]').length > 0 ||
-		html.includes('type="password"') ||
-		html.includes("type='password'") ||
-		html.includes('type=password');
+	// ── Auth form.
+	//
+	// Only a real parsed <input type="password"> counts. The raw-HTML string
+	// checks that used to back this up matched `type="password"` wherever it
+	// appeared — inside <script> blocks, JSON payloads and inline templates —
+	// which is exactly what WooCommerce, Elementor and similar page builders
+	// ship on ordinary public pages. Measured against the homepages this gate
+	// actually rejected, four of six had NO password input in the DOM at all
+	// and were blocked purely by that string match: a perfume shop, a pharmacy,
+	// a company site and a game site, every one of them fully public.
+	const hasPasswordInput = doc('input[type="password" i]').length > 0;
+
+	// A password input alone still is not a login page — plenty of public sites
+	// keep a customer login in a footer or a modal. What separates a genuine
+	// auth screen is that there is nothing else on the page.
+	//
+	// Measured separation on real pages (body text / links):
+	//   genuine gates      github/login 804/11 · a Lovable app 3379/21 ·
+	//                      app.asana.com 558/6 · wordpress.com/log-in 0/0
+	//   public homepages   25184/61 · 41033/137 · 41417/79 · 79940/54 · 94549/126
+	// The thresholds sit in the empty band between those two groups.
+	const bodyText = doc('body').text().replace(/\s+/g, ' ').trim();
+	const linkCount = doc('a[href]').length;
+	const isThinPage = bodyText.length < THIN_PAGE_CHARS && linkCount < THIN_PAGE_LINKS;
 
 	const isAuthPath =
 		path === '/app' ||
@@ -322,24 +347,24 @@ export function detectWebAppGate(
 			path,
 		);
 
-	const authForm = hasPasswordField || isAuthPath;
+	const authForm = isAuthPath || (hasPasswordInput && isThinPage);
 
-	// ── App shell: dedicated app subdomain, or nav that only an authenticated
-	//    product surface would carry (logout / my account, or a Dashboard link).
+	// ── App shell: a dedicated app subdomain, an explicit logged-in nav, or
+	//    account-style nav on a page with no other content.
 	const isAppSubdomain = APP_SUBDOMAIN_PREFIXES.some((prefix) =>
 		host.startsWith(prefix),
 	);
 
-	const hasLoggedInNav = includesAny(nav, [
-		'log out',
-		'logout',
-		'sign out',
-		'my account',
-	]);
+	// Only present once a session exists — a reliable signal on its own.
+	const hasLoggedOutLink = includesAny(nav, ['log out', 'logout', 'sign out']);
 
-	const hasDashboardNav = includesAny(nav, ['dashboard']);
+	// Present on plenty of anonymous storefronts (WooCommerce and Shopify both
+	// render "My Account" to logged-out visitors) and on marketing sites that
+	// link through to a product dashboard. Real only when nothing else is there.
+	const hasAccountishNav = includesAny(nav, ['my account', 'dashboard']);
 
-	const appShell = isAppSubdomain || hasLoggedInNav || hasDashboardNav;
+	const appShell =
+		isAppSubdomain || hasLoggedOutLink || (hasAccountishNav && isThinPage);
 
 	return { authForm, appShell };
 }
