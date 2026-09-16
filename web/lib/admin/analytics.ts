@@ -56,6 +56,7 @@ type ScanRow = {
 	package: string | null;
 	status: string | null;
 	payment_status: string | null;
+	recovery_sent_at?: string | null;
 	user_email: string | null;
 	website_type: string | null;
 	created_at: string;
@@ -97,7 +98,7 @@ export async function loadAdminAnalytics(range: RangeKey) {
 	let scanQuery = supabase
 		.from('scans')
 		.select(
-			'id, url, package, status, payment_status, user_email, website_type, created_at, followup_sent_at, followup_email, error_message, error_detail',
+			'id, url, package, status, payment_status, user_email, website_type, created_at, followup_sent_at, followup_email, error_message, error_detail, recovery_sent_at',
 		)
 		.order('created_at', { ascending: false })
 		.limit(ROW_LIMIT);
@@ -371,7 +372,11 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		email: s.user_email,
 		createdAt: s.created_at,
 		potentialRevenue: PACKAGE_PRICE[s.package ?? ''] ?? 0,
+		recoverySentAt: s.recovery_sent_at ?? null,
 	}));
+
+	// How much of the abandoned pile the recovery cron has actually reached.
+	const recoveryEmailsSent = abandoned.filter((s) => s.recovery_sent_at).length;
 
 	return {
 		range,
@@ -383,6 +388,7 @@ export async function loadAdminAnalytics(range: RangeKey) {
 			paidScans: paidCompleted.length,
 			paidAttempts: paidAttempts.length,
 			abandonedCheckouts: abandoned.length,
+			recoveryEmailsSent,
 			abandonedRevenue: abandoned.reduce(
 				(sum, s) => sum + (PACKAGE_PRICE[s.package ?? ''] ?? 0),
 				0,

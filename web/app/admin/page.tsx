@@ -406,7 +406,9 @@ export default async function AdminDashboardPage({
 				{/* Abandoned checkouts */}
 				<Section
 					title="Abandoned checkouts"
-					note="Paid packages selected but never paid for — the follow-up list.">
+					note={`Paid packages selected but never paid for. One recovery email is sent automatically 1–168h after checkout. ${fmt(
+						s.recoveryEmailsSent,
+					)} of ${fmt(s.abandonedCheckouts)} contacted so far.`}>
 					{data.abandonedCheckouts.length === 0 ?
 						<Empty>No abandoned checkouts in this range.</Empty>
 					:	<table className="w-full">
@@ -416,6 +418,7 @@ export default async function AdminDashboardPage({
 									<th className={TH}>Website</th>
 									<th className={TH}>Package</th>
 									<th className={TH}>Email</th>
+									<th className={TH}>Recovery</th>
 									<th className={TH}>Value</th>
 								</tr>
 							</thead>
@@ -426,6 +429,15 @@ export default async function AdminDashboardPage({
 										<td className={`${TD} font-semibold`}>{row.host}</td>
 										<td className={TD}>{row.pkg}</td>
 										<td className={TD}>{row.email ?? '—'}</td>
+										<td className={TD}>
+											{row.recoverySentAt ?
+												<span className="font-semibold text-accent-emerald">
+													sent {shortDate(row.recoverySentAt)}
+												</span>
+											: row.email ?
+												<span className="text-muted-ink">queued</span>
+											:	<span className="text-muted-ink">no email given</span>}
+										</td>
 										<td className={TD}>{money(row.potentialRevenue)}</td>
 									</tr>
 								))}
