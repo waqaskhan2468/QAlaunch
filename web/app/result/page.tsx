@@ -6,7 +6,7 @@ import { SiteFooter } from "@/components/site/site-footer"
 import { AuditExperience } from "@/components/audit/audit-experience"
 
 export const metadata: Metadata = {
-  title: "Your Free Website Audit — QAlaunch",
+  title: "Your Free Website Audit",
   description:
     "Live website audit results — usability, UI, functionality and mobile responsiveness issues found on your site.",
   robots: { index: false, follow: true },

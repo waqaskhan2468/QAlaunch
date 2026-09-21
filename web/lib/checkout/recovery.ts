@@ -49,6 +49,8 @@ export type RecoveryCandidate = {
 	host: string;
 	pkg: string;
 	email: string;
+	/** Full scanned url, so the resume link lands on the results directly. */
+	targetUrl: string | null;
 };
 
 /** Bare hostname for display; falls back to the raw string when unparseable. */
@@ -90,6 +92,7 @@ export function selectRecoverable(
 			host: hostOf(row.url),
 			pkg: row.package,
 			email,
+			targetUrl: row.url,
 		});
 
 		if (picked.length >= MAX_PER_RUN) break;
@@ -160,6 +163,7 @@ export async function runRecoverySweep(
 			host: candidate.host,
 			pkg: candidate.pkg,
 			scanId: candidate.scanId,
+			targetUrl: candidate.targetUrl,
 		});
 
 		// Claim the row BEFORE sending. If the send then fails we lose one

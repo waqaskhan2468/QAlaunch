@@ -89,6 +89,7 @@ const CATEGORY_NOUN: Record<string, { one: string; many: string }> = {
 	responsiveness: { one: 'mobile issue', many: 'mobile issues' },
 	performance: { one: 'performance issue', many: 'performance issues' },
 	seo: { one: 'SEO issue', many: 'SEO issues' },
+	security: { one: 'security issue', many: 'security issues' },
 };
 
 function categoryNoun(cat: string, count: number): string {
@@ -149,6 +150,21 @@ function derivedGrade(score: number): string {
 	return 'F';
 }
 
+/**
+ * Headline verdict, scaled to the score the page is already showing.
+ *
+ * "failing" used to be hardcoded, so a 62/100 site whose own category panel
+ * reported no UI, mobile or performance problems was still told it was failing.
+ * Owners look at their working site, conclude the tool exaggerates, and then
+ * discount the true findings too. Understating slightly and being believed
+ * converts better than overstating and being dismissed.
+ */
+function headlineVerdict(score: number): { word: string; color: string } {
+	if (score >= 80) return { word: 'mostly healthy.', color: '#86EFAC' };
+	if (score >= 60) return { word: 'needs attention.', color: '#FCD34D' };
+	return { word: 'failing.', color: '#FCA5A5' };
+}
+
 function derivedGradeLabel(score: number): string {
 	if (score >= 80) return 'GOOD';
 	if (score >= 60) return 'NEEDS ATTENTION';
@@ -164,17 +180,6 @@ function countBySeverity(
 		counts[k] = (counts[k] ?? 0) + 1;
 	}
 	return counts;
-}
-
-// Free scans only test the homepage. The hero shows a site-wide *estimate* (a
-// multiplier band) as a "typical across an entire site" figure — distinct from
-// the real homepage issue count. Returns the bare number; the UI appends "+".
-// N (real homepage issue count) → displayed band.
-function siteWideIssueCount(homepageIssueCount: number): number {
-	if (homepageIssueCount >= 11) return 18;
-	if (homepageIssueCount >= 8) return 15;
-	if (homepageIssueCount >= 5) return 12;
-	return 10; // 1–4
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -233,6 +238,8 @@ type ScanStatusResponse = {
 		status: 'pending' | 'crawling' | 'analyzing' | 'done' | 'failed';
 		error_message?: string | null;
 		package?: string;
+		/** The scanned target. Lets a bare /result?scanId=… restore its own url. */
+		url?: string | null;
 	};
 	pages?: ScanPageStatus[];
 	issues: ScanIssue[];
@@ -533,6 +540,21 @@ function AuditExperienceInner({
 					if (pkg && pkg !== 'free') {
 						router.replace(
 							`/checkout/success?scanId=${encodeURIComponent(initialScanId)}`,
+						);
+						return;
+					}
+
+					// A bare /result?scanId=… used to fall through to the redirect
+					// below and dump the visitor on the homepage, because the page
+					// needs `url` for the host label and the checkout prefill. The
+					// scan itself knows its url, so restore it and let the component
+					// remount with a complete query instead of losing the results.
+					// This is the link shape used in emails and in bookmarks.
+					if (!inputUrl && data.scan?.url) {
+						router.replace(
+							`/result?scanId=${encodeURIComponent(initialScanId)}&url=${encodeURIComponent(
+								data.scan.url,
+							)}`,
 						);
 						return;
 					}
@@ -911,7 +933,15 @@ function ResultsView({
 	// Number of preview issues shown free below.
 	const criticalShownCount = findings.length;
 	// Inflated site-wide estimate (bare number; rendered with a trailing "+").
-	const inflatedCount = siteWideIssueCount(totalIssueCount);
+	const verdict = headlineVerdict(healthScore);
+
+	// Direct route to the $9 tier. Previously every CTA only scrolled to the
+	// pricing grid, so a convinced buyer had to compare four plans and click
+	// again; checkout completion is 100% once reached, so that stretch was
+	// where the drop-off lived. Plan comparison stays available below.
+	const basicCheckoutHref = `/checkout?package=basic${
+		inputUrl ? `&url=${encodeURIComponent(inputUrl)}` : ''
+	}`;
 
 	// Score ring animation
 	const CIRCUMFERENCE = 477;
@@ -1044,7 +1074,7 @@ function ResultsView({
 							className='font-heading font-black leading-[1.05] tracking-tight text-white'
 							style={{ fontSize: 'clamp(30px, 4vw, 48px)', letterSpacing: '-1.2px' }}>
 							Your homepage is{' '}
-							<span style={{ color: '#FCA5A5' }}>failing.</span>
+							<span style={{ color: verdict.color }}>{verdict.word}</span>
 							<br />
 							<span style={{ color: '#FCA5A5', fontFeatureSettings: '"tnum"' }}>
 								{realIssueCount}
@@ -1056,12 +1086,12 @@ function ResultsView({
 							<strong className='text-white'>{realIssueCount} issues on your homepage</strong>{' '}
 							actively affecting how real visitors experience it.{' '}
 							<strong className='text-white'>
-								{criticalShownCount} critical issues are shown free below.
+								The {criticalShownCount} most serious are shown free below.
 							</strong>
 						</p>
 						<p className='mt-3 max-w-xl text-[12.5px] leading-relaxed text-white/45'>
-							This is a homepage-only preview — {inflatedCount}+ issues are typical
-							across an entire site. Run a full scan to check your other pages too.
+							This is a homepage-only preview. Your other pages — pricing, contact,
+							product, checkout — have not been tested yet.
 						</p>
 
 						{/* Severity chips */}
@@ -1272,7 +1302,7 @@ function ResultsView({
 			{/* Section label */}
 			<div className='mb-5 flex items-center gap-3'>
 				<span className='whitespace-nowrap font-mono text-[10.5px] font-bold uppercase tracking-[2px] text-muted-ink'>
-					Free preview · 3 most critical issues
+					Free preview · your {criticalShownCount} most serious issues
 				</span>
 				<div className='h-px flex-1 bg-border-soft' />
 			</div>
@@ -1348,25 +1378,22 @@ function ResultsView({
 					</div>
 				) : null}
 
-				{/* Redacted preview — real titles are paywalled. These rows are
-				    intentionally fake + blurred so the full list stays locked. */}
-				<div className='relative px-6 pb-2 pt-5'>
-					{LOCKED_PLACEHOLDERS.map((placeholder, i) => (
-						<BlurredIssueRow
-							key={i}
-							severity={placeholder.severity}
-							text={placeholder.text}
-						/>
-					))}
-					{/* Gradient overlay reinforces the locked-behind-paywall feel */}
-					<div
-						className='pointer-events-none absolute inset-x-0 bottom-0 h-28'
-						style={{
-							background:
-								'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(248,250,252,0.92) 100%)',
-						}}
-					/>
-				</div>
+				{/* The visitor's real locked findings — title only. Description,
+				    evidence and fix steps remain paid-only. */}
+				{lockedIssues.length > 0 ? (
+					<div className='px-6 pb-2 pt-5'>
+						<div className='mb-3 font-mono text-[10.5px] font-bold uppercase tracking-[1.5px] text-muted-ink'>
+							The {lockedIssues.length} issues still locked
+						</div>
+						{lockedIssues.map((issue) => (
+							<LockedIssueRow key={issue.id} issue={issue} />
+						))}
+						<p className='mb-3 mt-3 text-[12.5px] leading-snug text-muted-ink'>
+							You can see what each one is. The full report adds where it happens, a
+							screenshot showing it, and how to fix it.
+						</p>
+					</div>
+				) : null}
 
 				{/* Unlock CTA */}
 				<div
@@ -1382,21 +1409,32 @@ function ResultsView({
 						Get every issue with screenshot evidence and step-by-step fix instructions
 					</p>
 					<div className='mt-5 flex flex-col items-center gap-3'>
-						<button
-							type='button'
-							onClick={scrollToPricing}
+						<Link
+							href={basicCheckoutHref}
 							className='inline-flex items-center justify-center rounded-xl bg-brand px-6 py-3 text-sm font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-brand-mid hover:shadow-lg hover:shadow-brand/30'>
-							Get Full Report →
-						</button>
+							Get My Full Report — $9 →
+						</Link>
 						<span className='font-mono text-[13px] font-semibold text-body'>
-							From <strong className='text-ink'>$9</strong> · One-time payment · Instant PDF delivery
+							One-time payment · Instant PDF delivery
 						</span>
+						<div className='flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-muted-ink'>
+							<button
+								type='button'
+								onClick={scrollToPricing}
+								className='font-semibold text-brand hover:underline'>
+								Need more pages? See all plans
+							</button>
+							<span aria-hidden='true'>·</span>
+							<Link href='/#sample-report' className='font-semibold text-brand hover:underline'>
+								See a sample report
+							</Link>
+						</div>
 						<span className='text-[12px] text-muted-ink'>
-							Not satisfied?{' '}
+							If we can&apos;t deliver your report, you get a{' '}
 							<Link href='/refund' className='font-semibold text-brand hover:underline'>
-								Full refund
-							</Link>{' '}
-							if we can&apos;t generate your report.
+								full refund
+							</Link>
+							.
 						</span>
 					</div>
 				</div>
@@ -1406,7 +1444,7 @@ function ResultsView({
 			<div className='mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4'>
 				{[
 					{ ico: '⚡', t: 'Instant Delivery', s: 'PDF in your inbox in 120 seconds' },
-					{ ico: '🛡️', t: '100% Refund', s: "If you don't find it useful" },
+					{ ico: '🛡️', t: 'Delivery Guaranteed', s: "Full refund if we can't deliver it" },
 					{ ico: '👤', t: 'Built by Experts', s: '9 years of senior QA experience' },
 					{ ico: '🔁', t: 'No Subscription', s: 'Pay once — own the report forever' },
 				].map((item) => (
@@ -1498,10 +1536,15 @@ function ResultsView({
 					</div>
 					<div>
 						<div className='font-heading text-[15px] font-extrabold text-ink'>
-							100% Money-Back Guarantee
+							Delivery Guaranteed
 						</div>
 						<div className='mt-0.5 text-[13px] text-body'>
-							If the report doesn&apos;t help you find at least 3 actionable issues, we&apos;ll refund you in full — no questions asked.
+							Your report arrives by email within minutes. If we can&apos;t deliver it,
+							you get a full refund — see our{' '}
+							<Link href='/refund' className='font-semibold text-brand hover:underline'>
+								refund policy
+							</Link>
+							.
 						</div>
 					</div>
 				</div>
@@ -1540,12 +1583,11 @@ function ResultsView({
 							className='rounded-xl border border-white/15 bg-transparent px-4 py-2.5 text-[13px] font-semibold text-white/70 transition hover:bg-white/5 hover:text-white'>
 							View Pricing
 						</button>
-						<button
-							type='button'
-							onClick={scrollToPricing}
+						<Link
+							href={basicCheckoutHref}
 							className='rounded-xl bg-accent-bright px-5 py-2.5 text-[13.5px] font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-accent-bright/90 hover:shadow-lg'>
-							Unlock Full Report →
-						</button>
+							Unlock Full Report — $9 →
+						</Link>
 					</div>
 				</div>
 			</div>
@@ -1785,34 +1827,31 @@ function FindingCard({ finding }: { finding: ScanIssue }) {
 	);
 }
 
-// ─── BlurredIssueRow (paywalled placeholder) ──────────────────────────────────
-// Real locked-issue titles are intentionally NOT rendered here. These decorative
-// rows look like genuine findings but are fake + blurred so the remaining issues
-// stay behind the paywall.
+// ─── LockedIssueRow (real, paywalled finding) ─────────────────────────────────
+// Shows the visitor's OWN locked findings: real severity, real category, real
+// title. Everything that makes a finding actionable — the description, the
+// screenshot evidence, the location and the fix steps — stays behind the
+// paywall, so the free preview still gives strictly less than the paid report.
+//
+// This replaces a set of hardcoded fake rows ("Checkout submit button fails…")
+// that were blurred with CSS. They were invented, they were readable in the DOM
+// and to screen readers, and they contradicted the real category breakdown
+// rendered directly above them — a scan with no critical issues still displayed
+// a CRITICAL row. Real findings persuade harder than invented ones anyway.
 
-const LOCKED_PLACEHOLDERS: Array<{
-	severity: 'critical' | 'high' | 'medium';
-	text: string;
-}> = [
-	{ severity: 'critical', text: 'Checkout submit button fails on common mobile viewport widths' },
-	{ severity: 'high', text: 'Primary navigation links return broken 404 responses' },
-	{ severity: 'high', text: 'Key images missing alt text, hurting accessibility and SEO' },
-	{ severity: 'medium', text: 'Meta descriptions exceed the recommended length on landing pages' },
-	{ severity: 'medium', text: 'Interactive tap targets are too small for comfortable mobile use' },
-];
+const LOCKED_BADGE_TONE: Record<string, string> = {
+	critical: 'bg-danger-pale text-danger',
+	high: 'bg-warn-pale text-warn',
+	medium: 'bg-brand-pale text-brand',
+	low: 'bg-surface-soft text-muted-ink',
+};
 
-function BlurredIssueRow({
-	severity,
-	text,
-}: {
-	severity: 'critical' | 'high' | 'medium';
-	text: string;
-}) {
-	const badgeTone = {
-		critical: 'bg-danger-pale text-danger',
-		high:     'bg-warn-pale text-warn',
-		medium:   'bg-brand-pale text-brand',
-	}[severity];
+function LockedIssueRow({ issue }: { issue: LockedIssue }) {
+	const severity = issue.severity.toLowerCase();
+	const badgeTone = LOCKED_BADGE_TONE[severity] ?? LOCKED_BADGE_TONE.low;
+	// Title is normally present; fall back to the category so a row never renders
+	// empty if an older scan is missing it.
+	const label = issue.title?.trim() || `${categoryNoun(issue.category.toLowerCase(), 1)} found`;
 
 	return (
 		<div className='mb-2 flex items-center gap-3 rounded-xl border border-border-soft bg-surface-soft px-4 py-3.5'>
@@ -1823,12 +1862,8 @@ function BlurredIssueRow({
 				)}>
 				{severity}
 			</span>
-			{/* Blurred, non-selectable placeholder where the real title would be */}
-			<span
-				aria-hidden='true'
-				className='min-w-0 flex-1 select-none truncate text-[13.5px] font-semibold text-ink'
-				style={{ filter: 'blur(5px)', userSelect: 'none' }}>
-				{text}
+			<span className='min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink'>
+				{label}
 			</span>
 			<Lock className='size-3.5 shrink-0 text-muted-ink opacity-60' />
 		</div>

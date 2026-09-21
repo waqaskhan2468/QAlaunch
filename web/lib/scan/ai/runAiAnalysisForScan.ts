@@ -702,7 +702,7 @@ const FREE_PREVIEW_CATEGORY_PRIORITY = [
 	'ui_bugs',
 ] as const;
 
-function selectBalancedPreview(
+export function selectBalancedPreview(
 	issues: IssueInsert[],
 	count: number,
 ): IssueInsert[] {
@@ -749,6 +749,21 @@ function selectBalancedPreview(
 		const picked = pickFirstMatching(
 			remaining,
 			(issue) => issue.category === category && isCriticalOrHigh(issue),
+		);
+		if (picked) selected.push(picked);
+	}
+
+	// 3b. Converter categories again, now at MEDIUM. A medium functionality bug
+	//     ("one image fails to load") sells far harder to a shop owner than a
+	//     high-severity screen-reader label, so commercial relevance outranks
+	//     raw severity here. Without this step the preview skipped straight to
+	//     accessibility and SEO on any site without a severe functional bug —
+	//     which is most sites.
+	for (const category of FREE_PREVIEW_CATEGORY_PRIORITY) {
+		if (selected.length >= count) break;
+		const picked = pickFirstMatching(
+			remaining,
+			(issue) => issue.category === category && issue.severity === 'medium',
 		);
 		if (picked) selected.push(picked);
 	}

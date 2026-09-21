@@ -18,6 +18,8 @@ export type RecoveryScan = {
 	pkg: string;
 	/** Scan id — used to rebuild the resume link. */
 	scanId: string;
+	/** Full scanned url. /result needs it alongside scanId to render directly. */
+	targetUrl?: string | null;
 };
 
 export type RecoveryDraft = {
@@ -43,12 +45,13 @@ function packageLine(pkg: string): string {
  * homepage: the scan is already run, so re-entering the URL would waste their
  * free preview and make them repeat work they already did.
  */
-export function resumeUrl(scanId: string): string {
-	return `${SITE}/result?scanId=${encodeURIComponent(scanId)}`;
+export function resumeUrl(scanId: string, targetUrl?: string | null): string {
+	const base = `${SITE}/result?scanId=${encodeURIComponent(scanId)}`;
+	return targetUrl ? `${base}&url=${encodeURIComponent(targetUrl)}` : base;
 }
 
 export function buildRecoveryDraft(scan: RecoveryScan): RecoveryDraft {
-	const { host, pkg, scanId } = scan;
+	const { host, pkg, scanId, targetUrl } = scan;
 
 	const body = [
 		'Hi,',
@@ -57,7 +60,7 @@ export function buildRecoveryDraft(scan: RecoveryScan): RecoveryDraft {
 		'',
 		`Your scan is still saved. You can pick it up here without re-running anything:`,
 		'',
-		resumeUrl(scanId),
+		resumeUrl(scanId, targetUrl),
 		'',
 		`That's ${packageLine(pkg)}: every issue the scan found, each with a screenshot showing exactly where it happens, so you or your developer can fix it without hunting around for it.`,
 		'',

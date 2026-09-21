@@ -118,6 +118,17 @@ describe('buildRecoveryDraft', () => {
 		expect(draft.body).toContain('scanId=abc-123');
 	});
 
+	it('carries the url too — /result needs it alongside scanId', () => {
+		const draft = buildRecoveryDraft({
+			host: 'shop.com',
+			pkg: 'basic',
+			scanId: 'abc-123',
+			targetUrl: 'https://shop.com/',
+		});
+		expect(draft.body).toContain('scanId=abc-123');
+		expect(draft.body).toContain('url=https%3A%2F%2Fshop.com%2F');
+	});
+
 	it('quotes the price of the package they actually chose', () => {
 		expect(buildRecoveryDraft({ host: 'a.com', pkg: 'basic', scanId: 'x' }).body).toContain('$9');
 		expect(buildRecoveryDraft({ host: 'a.com', pkg: 'standard', scanId: 'x' }).body).toContain(
