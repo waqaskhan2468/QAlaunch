@@ -159,10 +159,20 @@ function derivedGrade(score: number): string {
  * discount the true findings too. Understating slightly and being believed
  * converts better than overstating and being dismissed.
  */
-function headlineVerdict(score: number): { word: string; color: string } {
-	if (score >= 80) return { word: 'mostly healthy.', color: '#86EFAC' };
-	if (score >= 60) return { word: 'needs attention.', color: '#FCD34D' };
-	return { word: 'failing.', color: '#FCA5A5' };
+export function headlineVerdict(score: number): {
+	lead: string;
+	word: string;
+	color: string;
+} {
+	// The lead clause travels with the verdict so every band is grammatical —
+	// "Your homepage is needs attention" is what happens when it doesn't.
+	if (score >= 80) {
+		return { lead: 'Your homepage looks', word: 'mostly healthy.', color: '#86EFAC' };
+	}
+	if (score >= 60) {
+		return { lead: 'Your homepage', word: 'needs attention.', color: '#FCD34D' };
+	}
+	return { lead: 'Your homepage is', word: 'failing.', color: '#FCA5A5' };
 }
 
 function derivedGradeLabel(score: number): string {
@@ -1073,7 +1083,7 @@ function ResultsView({
 						<h1
 							className='font-heading font-black leading-[1.05] tracking-tight text-white'
 							style={{ fontSize: 'clamp(30px, 4vw, 48px)', letterSpacing: '-1.2px' }}>
-							Your homepage is{' '}
+							{verdict.lead}{' '}
 							<span style={{ color: verdict.color }}>{verdict.word}</span>
 							<br />
 							<span style={{ color: '#FCA5A5', fontFeatureSettings: '"tnum"' }}>
