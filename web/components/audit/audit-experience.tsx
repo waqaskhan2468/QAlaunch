@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { trackFunnelEvent } from '@/lib/analytics/funnel-client';
 import { plans } from '@/components/pricing/pricing-plans';
+import { AuditEnquiry } from '@/components/audit/audit-enquiry';
 import { computeHealthScore, labelFromScore } from '@/lib/scoring/health';
 import {
 	allPagesAnalyzed,
@@ -1558,6 +1559,9 @@ function ResultsView({
 						</div>
 					</div>
 				</div>
+
+				{/* Done-for-you manual audit — the step up from the automated report. */}
+				<AuditEnquiry websiteUrl={inputUrl} scanId={scanId || null} host={host} />
 			</div>
 		</main>
 

@@ -100,8 +100,32 @@ export const contactFormSchema = z.object({
 	message: z.string().trim().max(4000).optional(),
 });
 
+/**
+ * Enquiry for the done-for-you manual audit offered on the result page.
+ *
+ * The website is not collected from the visitor — it comes from the scan they
+ * are already looking at, so the form only asks for what we cannot infer.
+ * WhatsApp is optional: many small-business owners prefer it to email.
+ */
+export const auditEnquirySchema = z.object({
+	name: z.string().trim().min(1, 'Name is required.').max(120),
+	email: z
+		.string()
+		.trim()
+		.min(1, 'Email is required.')
+		.email('Enter a valid email address.')
+		.max(160),
+	whatsapp: z.string().trim().max(40).optional(),
+	/** Filled in by the page from the scan being viewed. */
+	websiteUrl: z.string().trim().max(300).optional(),
+	scanId: z.string().trim().max(64).optional(),
+	/** Free-text: what they are most worried about. */
+	concern: z.string().trim().max(2000).optional(),
+});
+
 export type ScanPackage = z.infer<typeof scanPackageSchema>;
 export type WebsiteType = z.infer<typeof websiteTypeSchema>;
 export type ScanStatus = z.infer<typeof scanStatusSchema>;
 export type ContactFormData = z.infer<typeof contactFormSchema>;
+export type AuditEnquiryData = z.infer<typeof auditEnquirySchema>;
 

@@ -49,10 +49,22 @@ test('every draft identifies the sender and offers an opt-out', () => {
 	}
 });
 
-test('both variants offer the manual QA review as well as the report', () => {
+test('both variants lead with the manual audit, and quote its price', () => {
+	// The manual audit used to be a closing afterthought with no price attached,
+	// which is the same as not offering it: no price means no decision. It is
+	// now the primary offer in both variants, and the $9 report is the fallback.
 	for (const d of [buildFollowUpDraft(base), buildFollowUpDraft({ ...base, lockedTitles: [] })]) {
-		expect(d.body).toContain('manual QA review');
+		expect(d.body).toContain('$299');
+		expect(d.body).toContain('3 business days');
+		expect(d.body).toMatch(/I'll test it myself|test it myself/);
 	}
+});
+
+test('the locked variant still offers the $9 report, but after the audit', () => {
+	const body = buildFollowUpDraft(base).body;
+	expect(body).toContain('$9');
+	// Price order is the pitch order: the audit has to come first.
+	expect(body.indexOf('$299')).toBeLessThan(body.indexOf('$9'));
 });
 
 test('html rendering escapes user-derived content', () => {
