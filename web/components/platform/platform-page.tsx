@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { faqPageSchema, jsonLd } from '@/lib/seo/structured-data'
 
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
@@ -57,8 +58,15 @@ export function PlatformPage({ config: cfg }: { config: PlatformConfig }) {
 		<>
 			<script
 				type="application/ld+json"
-				dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData(cfg)) }}
+				dangerouslySetInnerHTML={{ __html: jsonLd(structuredData(cfg)) }}
 			/>
+			{/* Generated from cfg.faqs — the same array rendered further down. */}
+			{cfg.faqs.length > 0 ? (
+				<script
+					type="application/ld+json"
+					dangerouslySetInnerHTML={{ __html: jsonLd(faqPageSchema(cfg.faqs)) }}
+				/>
+			) : null}
 			<SiteNav />
 			<main className="bg-white min-h-screen pt-16">
 				{/* Hero */}

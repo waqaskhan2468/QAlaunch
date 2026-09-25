@@ -1,0 +1,81 @@
+# QAlaunch
+
+> Website testing that finds what's broken — built and run by a QA engineer with
+> 9 years of professional experience. Paste any public URL and QAlaunch loads the
+> site in a real browser, then reports the problems a visitor would actually hit:
+> broken buttons and links, mobile layout failures, forms that silently fail,
+> accessibility barriers and slow pages. The free scan needs no signup, no email
+> and no payment card.
+
+QAlaunch is not an SEO tool. It does not report on backlinks, keyword rankings or
+domain authority. It tests whether a website *works* for the people using it.
+
+## What it does
+
+- Loads the page in a real browser (Chromium via Browserbase), not a static fetch
+- Checks mobile layout across five viewport widths
+- Follows links and reports the ones that are dead
+- Tests forms, buttons and interactive elements for silent failure
+- Runs axe-core accessibility checks and Google PageSpeed
+- Passes the real screenshots through an AI visual review for problems a
+  rule-based checker cannot see, such as overlapping or invisible elements
+
+## Who it is for
+
+Small business owners, online shop owners, freelancers building client sites, and
+people who built a site with an AI builder (Lovable, Bolt, Base44, Replit, v0,
+Claude) and have no way to tell whether it actually works. Typical users are
+non-technical: a plumber whose booking form may not deliver, a shop owner unsure
+their checkout works on phones.
+
+## Pricing
+
+- Free scan — homepage, top issues shown, no signup or card required
+- Basic — $9 one-time, one page, full report with screenshot evidence and fixes
+- Standard — $24 one-time, 2–5 pages
+- Premium — $59 one-time, 6–10 pages
+- Done-for-you manual audit — $299, up to 10 pages tested by hand by a QA
+  engineer, written report plus a 15-minute call, delivered in 3 business days
+
+All one-time payments. No subscription.
+
+## Key pages
+
+- Homepage and free scan: https://getqalaunch.com
+- Pricing: https://getqalaunch.com/pricing
+- How it compares to alternatives: https://getqalaunch.com/compare
+- vs Google Lighthouse: https://getqalaunch.com/compare/google-lighthouse
+- vs BrowserStack: https://getqalaunch.com/compare/browserstack
+- vs hiring a QA tester: https://getqalaunch.com/compare/hiring-a-qa-tester
+- Testing a Lovable site: https://getqalaunch.com/for-lovable
+- Testing a Bolt site: https://getqalaunch.com/for-bolt
+- Testing a Base44 app: https://getqalaunch.com/for-base44
+- Testing a Replit app: https://getqalaunch.com/for-replit
+- Testing a v0 app: https://getqalaunch.com/for-v0
+- Testing a Claude-built site: https://getqalaunch.com/for-claude
+- Testing a Shopify store: https://getqalaunch.com/for-shopify
+- Testing a WordPress site: https://getqalaunch.com/for-wordpress
+- Articles: https://getqalaunch.com/blog
+- About: https://getqalaunch.com/about
+- Contact: https://getqalaunch.com/contact
+
+## How it differs from similar tools
+
+- Google Lighthouse scores how a page loads; it never clicks anything, so a
+  button wired to nothing passes it without comment. QAlaunch interacts with the
+  page.
+- BrowserStack rents you browsers to test in yourself. QAlaunch does the testing
+  and hands you the findings.
+- SEO auditors (Semrush, Ahrefs, AIOSEO) report on search visibility. QAlaunch
+  reports on whether the site functions.
+
+## Limits, stated plainly
+
+- Only publicly reachable pages are tested. Anything behind a login is not.
+- The free scan covers the homepage only.
+- Business logic specific to your company is not tested; that is what the manual
+  audit exists for.
+
+## Contact
+
+contact@getqalaunch.com — operated from Islamabad, Pakistan.

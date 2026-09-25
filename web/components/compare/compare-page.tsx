@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { faqPageSchema, jsonLd } from '@/lib/seo/structured-data'
 
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
@@ -43,8 +44,14 @@ export function ComparePage({ config: cfg }: { config: CompareConfig }) {
 		<>
 			<script
 				type="application/ld+json"
-				dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData(cfg)) }}
+				dangerouslySetInnerHTML={{ __html: jsonLd(structuredData(cfg)) }}
 			/>
+			{cfg.faqs.length > 0 ? (
+				<script
+					type="application/ld+json"
+					dangerouslySetInnerHTML={{ __html: jsonLd(faqPageSchema(cfg.faqs)) }}
+				/>
+			) : null}
 			<SiteNav />
 			<main className="bg-white min-h-screen pt-16">
 				{/* Hero */}

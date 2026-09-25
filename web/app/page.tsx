@@ -10,6 +10,8 @@ import { PricingPreview } from "@/components/home/pricing-preview"
 import { Comparison } from "@/components/home/comparison"
 import { BuiltWith } from "@/components/home/built-with"
 import { FAQ } from "@/components/home/faq"
+import { homeFaqs } from "@/lib/content/home-faqs"
+import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 import { CtaBand } from "@/components/home/cta-band"
 
 /**
@@ -53,7 +55,12 @@ export default function HomePage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(structuredData) }}
+      />
+      {/* Built from homeFaqs — the same array <FAQ /> renders below. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLd(faqPageSchema(homeFaqs)) }}
       />
       <SiteNav />
       <main className="pt-16">

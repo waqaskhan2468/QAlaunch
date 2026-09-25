@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
   title: 'Shopify Store Bug Check — Free 2-Minute Audit',
@@ -100,7 +101,12 @@ export default function ForShopifyPage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+        dangerouslySetInnerHTML={{ __html: jsonLd(structuredData) }}
+      />
+      {/* Built from FAQS — the same array rendered in the FAQ section below. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLd(faqPageSchema(FAQS)) }}
       />
     <SiteNav />
       <main className="bg-white min-h-screen pt-16">
