@@ -5,7 +5,8 @@ import { SiteNav } from '@/components/site/site-nav';
 import { SiteFooter } from '@/components/site/site-footer';
 
 export const metadata: Metadata = {
-	title: 'Privacy Policy',
+	alternates: { canonical: '/privacy' },
+title: 'Privacy Policy',
 	description:
 		'QAlaunch privacy policy. Learn how we collect, use, and protect your data.',
 };

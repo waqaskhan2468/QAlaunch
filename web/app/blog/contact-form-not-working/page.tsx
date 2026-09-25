@@ -5,7 +5,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Contact Form Not Working? Test It in 5 Minutes',
+  alternates: { canonical: '/blog/contact-form-not-working' },
+title: 'Contact Form Not Working? Test It in 5 Minutes',
   description:
     'Most broken forms show “message sent” while the submission vanishes. The 5 ways forms fail silently, and the 5-minute test that proves yours works.',
   openGraph: {

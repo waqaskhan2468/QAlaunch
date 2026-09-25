@@ -7,7 +7,8 @@ import { SiteFooter } from '@/components/site/site-footer'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
-  title: 'Bolt.new App Testing — Find Bugs in 2 Minutes',
+  alternates: { canonical: '/for-bolt' },
+title: 'Bolt.new App Testing — Find Bugs in 2 Minutes',
   description: 'Free QA audit for Bolt.new sites. A real browser finds mobile layout breaks, broken buttons, invisible CTAs, and Safari bugs — in 2 minutes, no signup.',
   openGraph: {
     title: 'Test Your Bolt.new Website — Find Bugs Before Launch',

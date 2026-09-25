@@ -5,7 +5,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Shopify Mobile Checkout Bugs Costing You Sales',
+  alternates: { canonical: '/blog/shopify-mobile-checkout-bugs' },
+title: 'Shopify Mobile Checkout Bugs Costing You Sales',
   description:
     'Your store looks fine on your laptop. On the phone most customers use, hidden theme bugs quietly kill checkout. Where they hide and how to find them.',
   openGraph: {

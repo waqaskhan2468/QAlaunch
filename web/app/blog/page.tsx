@@ -5,7 +5,8 @@ import { SiteFooter } from '@/components/site/site-footer'
 import { Flag } from '@/components/home/flag'
 
 export const metadata: Metadata = {
-  title: 'QAlaunch Blog — Real Website Bugs, Found by Testing',
+  alternates: { canonical: '/blog' },
+title: 'QAlaunch Blog — Real Website Bugs, Found by Testing',
   description:
     'Notes from auditing real websites built with AI tools, Shopify, WordPress, and everything else — the bugs we find most often, and how to check for them yourself.',
   openGraph: {

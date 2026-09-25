@@ -8,7 +8,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: '9 Bugs Every AI-Built Website Ships With',
+  alternates: { canonical: '/blog/vibe-coding-website-bugs' },
+title: '9 Bugs Every AI-Built Website Ships With',
   description: 'Built with Lovable, Bolt, Base44, Replit, or v0? The 9 frontend bugs almost every AI-built site ships with — and how to check each one yourself in a minute.',
   openGraph: {
     title: 'Vibe Coding Website Bugs: The 9 Problems Every AI-Built Site Ships With',

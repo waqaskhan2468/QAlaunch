@@ -1,3 +1,5 @@
+import type { Metadata } from "next"
+
 import { SiteNav } from "@/components/site/site-nav"
 import { SiteFooter } from "@/components/site/site-footer"
 import { Hero } from "@/components/home/hero"
@@ -13,6 +15,15 @@ import { FAQ } from "@/components/home/faq"
 import { homeFaqs } from "@/lib/content/home-faqs"
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 import { CtaBand } from "@/components/home/cta-band"
+
+// The homepage previously had no metadata of its own and relied entirely on the
+// root layout. That was fine until the layout's site-wide `canonical: "/"` was
+// removed — which it had to be, because every other page was inheriting it and
+// declaring itself a duplicate of this one. Title and description still come
+// from the layout defaults; only the canonical is stated here.
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+}
 
 /**
  * Schema.org SoftwareApplication structured data for the homepage. Helps

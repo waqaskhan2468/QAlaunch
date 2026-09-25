@@ -5,7 +5,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'How to Test a Base44 App Before Launch (6 Steps)',
+  alternates: { canonical: '/blog/test-base44-app-before-launch' },
+title: 'How to Test a Base44 App Before Launch (6 Steps)',
   description:
     'Your Base44 app works in the editor and breaks for real users. The 6-step pre-launch test: what fails most often, and how to check it in 25 minutes.',
   openGraph: {

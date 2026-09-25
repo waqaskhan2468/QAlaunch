@@ -7,7 +7,8 @@ import { ContactForm } from "@/components/contact/contact-form"
 import { ContactHero } from "@/components/contact/contact-hero"
 
 export const metadata: Metadata = {
-  title: "Contact — QAlaunch | Enterprise & Custom Website Audits",
+  alternates: { canonical: "/contact" },
+title: "Contact — QAlaunch | Enterprise & Custom Website Audits",
   description:
     "Get in touch with QAlaunch for custom enterprise website audits, large multi-page projects, or questions about your report. We respond within 24 hours.",
 }

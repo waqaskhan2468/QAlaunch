@@ -5,7 +5,8 @@ import { SiteNav } from '@/components/site/site-nav';
 import { SiteFooter } from '@/components/site/site-footer';
 
 export const metadata: Metadata = {
-	title: 'Refund Policy',
+	alternates: { canonical: '/refund' },
+title: 'Refund Policy',
 	description:
 		'QAlaunch refund policy. We stand behind every report — full refunds available if your report fails to generate or is not delivered.',
 };

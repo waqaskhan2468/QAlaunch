@@ -5,7 +5,8 @@ import { SiteNav } from '@/components/site/site-nav';
 import { SiteFooter } from '@/components/site/site-footer';
 
 export const metadata: Metadata = {
-	title: 'Terms of Service',
+	alternates: { canonical: '/terms' },
+title: 'Terms of Service',
 	description:
 		'QAlaunch terms of service. Rules and conditions for using our website auditing tool.',
 };

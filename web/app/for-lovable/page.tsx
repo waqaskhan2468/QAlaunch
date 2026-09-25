@@ -10,7 +10,8 @@ import { SiteFooter } from '@/components/site/site-footer'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
-  title: 'Lovable App Testing — Find Bugs in 2 Minutes',
+  alternates: { canonical: '/for-lovable' },
+title: 'Lovable App Testing — Find Bugs in 2 Minutes',
   description: 'Free QA audit for Lovable sites. A real browser finds broken links, mobile layout bugs, invisible buttons, and forms that fail — in 2 minutes, no signup.',
   openGraph: {
     title: 'Test Your Lovable Website — Find Frontend Bugs Before Launch',

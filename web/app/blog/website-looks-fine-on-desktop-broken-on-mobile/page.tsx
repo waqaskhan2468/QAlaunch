@@ -5,7 +5,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'Site Looks Fine on Desktop but Broken on Mobile?',
+  alternates: { canonical: '/blog/website-looks-fine-on-desktop-broken-on-mobile' },
+title: 'Site Looks Fine on Desktop but Broken on Mobile?',
   description:
     'Perfect on your monitor, broken on your visitors’ phones. The 6 most common causes, why owners never notice, and the 15-minute check that finds them all.',
   openGraph: {

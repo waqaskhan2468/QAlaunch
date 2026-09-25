@@ -7,7 +7,8 @@ import { SiteFooter } from '@/components/site/site-footer'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
-  title: 'Shopify Store Bug Check — Free 2-Minute Audit',
+  alternates: { canonical: '/for-shopify' },
+title: 'Shopify Store Bug Check — Free 2-Minute Audit',
   description: 'Free Shopify store audit. A real browser finds broken links, mobile checkout problems, and invisible buttons costing you sales — in 2 minutes, no app needed.',
   openGraph: {
     title: 'Check Your Shopify Store for Bugs Before Launch',

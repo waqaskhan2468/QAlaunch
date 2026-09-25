@@ -55,9 +55,12 @@ export const metadata: Metadata = {
   creator: "QAlaunch",
   publisher: "QAlaunch",
   metadataBase: new URL("https://getqalaunch.com"),
-  alternates: {
-    canonical: "/",
-  },
+  // NO site-wide `alternates.canonical` here. Next inherits metadata down the
+  // tree, so a canonical of "/" set at the root made every page that did not
+  // override it declare itself a duplicate of the homepage — an explicit
+  // instruction to Google not to index it. Seventeen pages carried it,
+  // including every blog post and four platform pages. Each page now sets its
+  // own canonical; see the pages themselves.
   openGraph: {
     type: "website",
     locale: "en_US",

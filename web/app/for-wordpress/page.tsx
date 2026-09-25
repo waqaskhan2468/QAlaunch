@@ -7,7 +7,8 @@ import { SiteFooter } from '@/components/site/site-footer'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
-  title: 'WordPress Site Checker — Find Bugs in 2 Minutes',
+  alternates: { canonical: '/for-wordpress' },
+title: 'WordPress Site Checker — Find Bugs in 2 Minutes',
   description: 'Free WordPress site checker. A real browser finds broken links, mobile layout problems, and plugin conflicts visitors can see — in 2 minutes, no plugin needed.',
   openGraph: {
     title: 'Check Your WordPress Site for Bugs & Issues',

@@ -5,7 +5,8 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 
 export const metadata: Metadata = {
-  title: 'WordPress Broken After Update? 4 Things to Check',
+  alternates: { canonical: '/blog/wordpress-broken-after-update' },
+title: 'WordPress Broken After Update? 4 Things to Check',
   description:
     'Updates rarely crash a site — they quietly shift layouts, break forms, and kill the mobile menu while the page still loads. The 4 regressions to check.',
   openGraph: {

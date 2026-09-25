@@ -5,7 +5,8 @@ import { SiteFooter } from '@/components/site/site-footer'
 import { Flag } from '@/components/home/flag'
 
 export const metadata: Metadata = {
-  title: 'About QAlaunch — Built by a QA Engineer with 9+ Years Experience',
+  alternates: { canonical: '/about' },
+title: 'About QAlaunch — Built by a QA Engineer with 9+ Years Experience',
   description:
     "QAlaunch is built by a non-technical QA engineer with 9+ years of professional testing experience, using AI-assisted development to help website owners find what visitors see that they can't.",
   openGraph: {

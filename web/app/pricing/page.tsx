@@ -6,7 +6,8 @@ import { PricingGrid } from '@/components/pricing/pricing-grid';
 import { FAQ, type FAQItem } from '@/components/home/faq';
 
 export const metadata: Metadata = {
-	title: 'Pricing — Website Audit Reports from $9',
+	alternates: { canonical: '/pricing' },
+title: 'Pricing — Website Audit Reports from $9',
 	description:
 		'Simple one-time pricing. Basic $9 (1 page), Standard $24 (2-5 pages), Premium $59 (6-10 pages). No subscriptions. PDF report delivered instantly.',
 };
