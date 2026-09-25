@@ -3,6 +3,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { articleSchema } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
   alternates: { canonical: '/blog/website-looks-fine-on-desktop-broken-on-mobile' },
@@ -18,21 +19,13 @@ title: 'Site Looks Fine on Desktop but Broken on Mobile?',
   },
 }
 
-const structuredData = {
-  '@context': 'https://schema.org',
-  '@type': 'Article',
+const structuredData = articleSchema({
   headline: 'Why Your Website Looks Fine on Desktop but Broken on Mobile',
-  description:
-    'The six most common reasons websites break at phone widths, why owners never notice, and how to check your own site the way a QA engineer would.',
+  description: 'The six most common reasons websites break at phone widths, why owners never notice, and how to check your own site the way a QA engineer would.',
+  url: 'https://getqalaunch.com/blog/website-looks-fine-on-desktop-broken-on-mobile',
   datePublished: '2026-07-07',
   dateModified: '2026-09-09',
-  author: {
-    '@type': 'Organization',
-    name: 'QAlaunch',
-    url: 'https://getqalaunch.com',
-  },
-  url: 'https://getqalaunch.com/blog/website-looks-fine-on-desktop-broken-on-mobile',
-}
+})
 
 const FAQS = [
   {

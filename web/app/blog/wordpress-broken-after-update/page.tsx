@@ -3,6 +3,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { articleSchema } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
   alternates: { canonical: '/blog/wordpress-broken-after-update' },
@@ -18,21 +19,13 @@ title: 'WordPress Broken After Update? 4 Things to Check',
   },
 }
 
-const structuredData = {
-  '@context': 'https://schema.org',
-  '@type': 'Article',
+const structuredData = articleSchema({
   headline: 'Why Your WordPress Site Looks Broken After Every Update',
-  description:
-    'The silent regressions WordPress updates cause — the site stays up but something breaks — and the 10-minute check that catches them before a visitor does.',
+  description: 'The silent regressions WordPress updates cause — the site stays up but something breaks — and the 10-minute check that catches them before a visitor does.',
+  url: 'https://getqalaunch.com/blog/wordpress-broken-after-update',
   datePublished: '2026-08-05',
   dateModified: '2026-09-09',
-  author: {
-    '@type': 'Organization',
-    name: 'QAlaunch',
-    url: 'https://getqalaunch.com',
-  },
-  url: 'https://getqalaunch.com/blog/wordpress-broken-after-update',
-}
+})
 
 const FAQS = [
   {

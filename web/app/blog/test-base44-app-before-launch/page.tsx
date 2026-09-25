@@ -3,6 +3,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { articleSchema } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
   alternates: { canonical: '/blog/test-base44-app-before-launch' },
@@ -18,21 +19,13 @@ title: 'How to Test a Base44 App Before Launch (6 Steps)',
   },
 }
 
-const structuredData = {
-  '@context': 'https://schema.org',
-  '@type': 'Article',
+const structuredData = articleSchema({
   headline: 'How to Test a Base44 App Before Launch — a QA Engineer’s Checklist',
-  description:
-    'The bugs we find most often in Base44 apps, why the editor preview hides them, and the 25-minute pre-launch test that catches them before your users do.',
+  description: 'The bugs we find most often in Base44 apps, why the editor preview hides them, and the 25-minute pre-launch test that catches them before your users do.',
+  url: 'https://getqalaunch.com/blog/test-base44-app-before-launch',
   datePublished: '2026-07-09',
   dateModified: '2026-09-09',
-  author: {
-    '@type': 'Organization',
-    name: 'QAlaunch',
-    url: 'https://getqalaunch.com',
-  },
-  url: 'https://getqalaunch.com/blog/test-base44-app-before-launch',
-}
+})
 
 const FAQS = [
   {

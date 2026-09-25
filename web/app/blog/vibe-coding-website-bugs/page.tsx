@@ -6,6 +6,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { articleSchema } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
   alternates: { canonical: '/blog/vibe-coding-website-bugs' },
@@ -19,21 +20,13 @@ title: '9 Bugs Every AI-Built Website Ships With',
   },
 }
 
-const structuredData = {
-  '@context': 'https://schema.org',
-  '@type': 'Article',
+const structuredData = articleSchema({
   headline: 'Vibe Coding Website Bugs: The 9 Problems Every AI-Built Site Ships With',
-  description:
-    'The frontend bugs almost every vibe-coded website ships with, and how to check for each one before your users find them.',
+  description: 'The frontend bugs almost every vibe-coded website ships with, and how to check for each one before your users find them.',
+  url: 'https://getqalaunch.com/blog/vibe-coding-website-bugs',
   datePublished: '2026-07-07',
   dateModified: '2026-09-09',
-  author: {
-    '@type': 'Organization',
-    name: 'QAlaunch',
-    url: 'https://getqalaunch.com',
-  },
-  url: 'https://getqalaunch.com/blog/vibe-coding-website-bugs',
-}
+})
 
 const BUGS = [
   {

@@ -3,6 +3,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { articleSchema } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
   alternates: { canonical: '/blog/contact-form-not-working' },
@@ -18,21 +19,13 @@ title: 'Contact Form Not Working? Test It in 5 Minutes',
   },
 }
 
-const structuredData = {
-  '@context': 'https://schema.org',
-  '@type': 'Article',
+const structuredData = articleSchema({
   headline: 'Contact Form Not Working? Why Forms Fail Silently and How to Test Yours',
-  description:
-    'The five ways contact forms fail without showing an error, why they pass the owner’s test and fail for real visitors, and how to test yours properly in five minutes.',
+  description: 'The five ways contact forms fail without showing an error, why they pass the owner’s test and fail for real visitors, and how to test yours properly in five minutes.',
+  url: 'https://getqalaunch.com/blog/contact-form-not-working',
   datePublished: '2026-07-07',
   dateModified: '2026-09-09',
-  author: {
-    '@type': 'Organization',
-    name: 'QAlaunch',
-    url: 'https://getqalaunch.com',
-  },
-  url: 'https://getqalaunch.com/blog/contact-form-not-working',
-}
+})
 
 const FAQS = [
   {

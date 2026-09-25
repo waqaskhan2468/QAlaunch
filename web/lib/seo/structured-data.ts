@@ -47,6 +47,57 @@ export function faqPageSchema(faqs: readonly FaqItem[]) {
 	};
 }
 
+/**
+ * Article schema for blog posts and comparison pages.
+ *
+ * `image` is REQUIRED by Google for an Article rich result and was missing on
+ * all nine article pages, which is what Ahrefs reported as a structured-data
+ * validation error. `publisher` is required too. Both now come from here so no
+ * page can ship an Article without them.
+ *
+ * The image is the site's generated Open Graph card — a real 1200x630 PNG at a
+ * stable URL, not a placeholder.
+ */
+export function articleSchema(input: {
+	headline: string;
+	description: string;
+	url: string;
+	datePublished: string;
+	dateModified?: string;
+}) {
+	return {
+		'@context': 'https://schema.org',
+		'@type': 'Article',
+		headline: input.headline,
+		description: input.description,
+		url: input.url,
+		datePublished: input.datePublished,
+		dateModified: input.dateModified ?? input.datePublished,
+		image: {
+			'@type': 'ImageObject',
+			url: `${SITE_URL}/opengraph-image`,
+			width: 1200,
+			height: 630,
+		},
+		author: {
+			'@type': 'Person',
+			name: 'Waqas Ahmad',
+			jobTitle: 'QA Engineer',
+			description: 'QA engineer with 9+ years of professional software testing experience.',
+			url: `${SITE_URL}/about`,
+		},
+		publisher: {
+			'@type': 'Organization',
+			name: 'QAlaunch',
+			url: SITE_URL,
+			logo: {
+				'@type': 'ImageObject',
+				url: `${SITE_URL}/brand/qalaunch-logo-dark-bg@2x.png`,
+			},
+		},
+	};
+}
+
 /** Serialise for dangerouslySetInnerHTML, escaping the one sequence that can
  *  break out of a <script> block if an answer ever contains it. */
 export function jsonLd(data: unknown): string {

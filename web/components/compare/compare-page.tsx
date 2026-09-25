@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { faqPageSchema, jsonLd } from '@/lib/seo/structured-data'
+import { articleSchema, faqPageSchema, jsonLd } from '@/lib/seo/structured-data'
 
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
@@ -23,16 +23,13 @@ export function compareMetadata(cfg: CompareConfig): Metadata {
 }
 
 function structuredData(cfg: CompareConfig) {
-	return {
-		'@context': 'https://schema.org',
-		'@type': 'Article',
+	return articleSchema({
 		headline: cfg.ogTitle,
 		description: cfg.description,
-		datePublished: '2026-09-09',
-		dateModified: '2026-09-09',
-		author: { '@type': 'Organization', name: 'QAlaunch', url: SITE },
 		url: `${SITE}/compare/${cfg.slug}`,
-	}
+		datePublished: '2026-09-09',
+		dateModified: '2026-09-25',
+	})
 }
 
 function Check() {

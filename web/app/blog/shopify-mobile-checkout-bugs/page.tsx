@@ -3,6 +3,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { articleSchema } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
   alternates: { canonical: '/blog/shopify-mobile-checkout-bugs' },
@@ -18,21 +19,13 @@ title: 'Shopify Mobile Checkout Bugs Costing You Sales',
   },
 }
 
-const structuredData = {
-  '@context': 'https://schema.org',
-  '@type': 'Article',
+const structuredData = articleSchema({
   headline: 'Why Your Shopify Store Loses Mobile Customers at Checkout',
-  description:
-    'The mobile checkout bugs that cost Shopify stores real sales, why they’re invisible on desktop, and how to check your own store in 15 minutes.',
+  description: 'The mobile checkout bugs that cost Shopify stores real sales, why they’re invisible on desktop, and how to check your own store in 15 minutes.',
+  url: 'https://getqalaunch.com/blog/shopify-mobile-checkout-bugs',
   datePublished: '2026-08-05',
   dateModified: '2026-09-09',
-  author: {
-    '@type': 'Organization',
-    name: 'QAlaunch',
-    url: 'https://getqalaunch.com',
-  },
-  url: 'https://getqalaunch.com/blog/shopify-mobile-checkout-bugs',
-}
+})
 
 const FAQS = [
   {
