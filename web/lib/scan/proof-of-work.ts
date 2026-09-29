@@ -91,10 +91,13 @@ export function buildProofOfWork(input: {
 
 	// ── Screen widths ──────────────────────────────────────────────────────
 	if (viewportWidths.length > 0) {
+		const min = Math.min(...viewportWidths);
+		const max = Math.max(...viewportWidths);
 		stats.push({
 			value: fmt(viewportWidths.length),
 			label: viewportWidths.length === 1 ? 'screen width' : 'screen widths',
-			detail: `${Math.min(...viewportWidths)}–${Math.max(...viewportWidths)}px`,
+			// A single viewport must not render as "390-390px".
+			detail: min === max ? `${min}px` : `${min}–${max}px`,
 		});
 	}
 

@@ -13,7 +13,7 @@ domain authority. It tests whether a website *works* for the people using it.
 ## What it does
 
 - Loads the page in a real browser (Chromium via Browserbase), not a static fetch
-- Checks mobile layout across five viewport widths
+- Renders the page at a real phone viewport (390px, iPhone 14) as well as desktop
 - Follows links and reports the ones that are dead
 - Tests forms, buttons and interactive elements for silent failure
 - Runs axe-core accessibility checks and Google PageSpeed

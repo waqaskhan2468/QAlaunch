@@ -36,7 +36,7 @@ const SCAN_PIPELINE_STEPS = [
 	{ icon: '📸', name: 'Screenshots', detail: 'Desktop + mobile' },
 	{ icon: '♿', name: 'Accessibility', detail: 'axe-core' },
 	{ icon: '🔗', name: 'Link Check', detail: 'All links' },
-	{ icon: '📱', name: 'Mobile', detail: '5 viewports' },
+	{ icon: '📱', name: 'Mobile', detail: 'Real phone viewport' },
 	{ icon: '⚡', name: 'Performance', detail: 'PageSpeed' },
 	{ icon: '🔍', name: 'SEO', detail: 'Meta + OG' },
 	{ icon: '🖱️', name: 'Interactions', detail: 'Forms + CTAs' },

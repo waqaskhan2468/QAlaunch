@@ -58,6 +58,13 @@ describe('buildProofOfWork', () => {
 		expect(p.stats.find((s) => s.label === 'screen widths')?.detail).toBe('390–1280px');
 	});
 
+	it('shows a single width plainly, not as "390-390px"', () => {
+		// The scanner currently renders one responsive viewport, so this is the
+		// case production actually hits.
+		const p = build({ responsive: [{ width: 390 }] });
+		expect(p.stats.find((s) => s.label === 'screen width')?.detail).toBe('390px');
+	});
+
 	it('uses singular wording for a count of one', () => {
 		const p = build({
 			links: { checkedLinks: 1, brokenLinks: [] },
