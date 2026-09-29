@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 import { trackFunnelEvent } from '@/lib/analytics/funnel-client';
 import { plans } from '@/components/pricing/pricing-plans';
 import { AuditEnquiry } from '@/components/audit/audit-enquiry';
+import { ProofOfWorkPanel } from '@/components/audit/proof-of-work-panel';
+import { buildProofOfWork, type ProofOfWork } from '@/lib/scan/proof-of-work';
 import { computeHealthScore, labelFromScore } from '@/lib/scoring/health';
 import {
 	allPagesAnalyzed,
@@ -232,6 +234,9 @@ type LockedIssue = {
 };
 
 type ScanPageStatus = {
+	/** Raw scanner output. Already returned by /api/scan/status (select *), and
+	 *  the source for the "how we tested this" panel. */
+	playwright_data?: unknown;
 	ai_analysis?: {
 		status?: string;
 		error?: string;
@@ -836,6 +841,19 @@ function AuditExperienceInner({
 	const healthLabel =
 		statusForCurrentScan?.healthLabel ?? labelFromScore(healthScore) ?? '';
 
+	// What the scanner actually did, read from data the browser already has.
+	// A visitor told us the preview "shows 3 issues like every other tool" —
+	// the findings cannot carry the difference, the work has to be visible.
+	const primaryPage = (statusForCurrentScan?.pages ?? [])[0];
+	const proofOfWork: ProofOfWork | null =
+		primaryPage ?
+			buildProofOfWork({
+				playwrightData: primaryPage.playwright_data,
+				hasDesktopScreenshot: Boolean(primaryPage.screenshot_desktop_url),
+				hasMobileScreenshot: Boolean(primaryPage.screenshot_mobile_url),
+			})
+		:	null;
+
 	const incompleteVisualScan = (statusForCurrentScan?.pages ?? []).some(
 		(page) => {
 			const ai = page.ai_analysis;
@@ -861,6 +879,9 @@ function AuditExperienceInner({
 			healthScore={healthScore}
 			healthLabel={healthLabel}
 			incompleteVisualScan={incompleteVisualScan}
+			proofOfWork={proofOfWork}
+			desktopScreenshotUrl={primaryPage?.screenshot_desktop_url ?? null}
+			mobileScreenshotUrl={primaryPage?.screenshot_mobile_url ?? null}
 		/>
 	);
 }
@@ -878,6 +899,9 @@ type ResultsViewProps = {
 	healthScore: number;
 	healthLabel: string;
 	incompleteVisualScan: boolean;
+	proofOfWork: ProofOfWork | null;
+	desktopScreenshotUrl: string | null;
+	mobileScreenshotUrl: string | null;
 };
 
 function ResultsView({
@@ -891,6 +915,9 @@ function ResultsView({
 	healthScore,
 	healthLabel,
 	incompleteVisualScan,
+	proofOfWork,
+	desktopScreenshotUrl,
+	mobileScreenshotUrl,
 }: ResultsViewProps) {
 	const [ringAnimated, setRingAnimated] = useState(false);
 	const [displayScore, setDisplayScore] = useState(0);
@@ -1286,6 +1313,17 @@ function ResultsView({
 
 		{/* ── MAIN CONTENT ──────────────────────────────────────────────── */}
 		<main className='mx-auto max-w-5xl px-5 pb-28 pt-12 md:px-10'>
+			{/* What the scanner actually did — shown BEFORE the findings, because the
+			    findings are what every other tool also shows. */}
+			{proofOfWork ? (
+				<ProofOfWorkPanel
+					proof={proofOfWork}
+					host={host}
+					desktopUrl={desktopScreenshotUrl}
+					mobileUrl={mobileScreenshotUrl}
+				/>
+			) : null}
+
 			{/* Tease banner */}
 			<div
 				className='mb-8 flex items-start gap-3.5 rounded-xl border p-5'
