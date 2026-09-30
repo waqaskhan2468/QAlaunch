@@ -135,16 +135,20 @@ export function Hero() {
             <Flag>9 Years of QA Expertise — Now Automated</Flag>
           </motion.div>
 
+          {/* leading-[1.18], not 1.05: the underline below sits inside this
+              heading's line box, and at 1.05 a 64px line leaves ~3px of leading,
+              so the bar rendered straight through the next line. Three separate
+              people reported it as a bug on a QA product's own homepage. */}
           <motion.h1
             variants={fadeUp}
-            className="font-heading text-[clamp(2.25rem,5.2vw,4rem)] font-black leading-[1.05] tracking-[-0.03em] text-balance text-white"
+            className="font-heading text-[clamp(2.25rem,5.2vw,4rem)] font-black leading-[1.18] tracking-[-0.03em] text-balance text-white"
           >
             Is your website{" "}
             <span className="relative inline-block text-accent-bright">
               actually working
               <motion.span
                 aria-hidden="true"
-                className="absolute inset-x-0 -bottom-1 h-[3px] origin-left rounded-none bg-accent-bright/80"
+                className="absolute inset-x-0 bottom-[0.08em] h-[3px] origin-left rounded-none bg-accent-bright/80"
                 initial={{ scaleX: 0 }}
                 animate={{ scaleX: 1 }}
                 transition={{
