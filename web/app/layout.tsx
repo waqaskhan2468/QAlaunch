@@ -3,6 +3,7 @@ import { Epilogue, Figtree, JetBrains_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 
 import { GoogleAnalytics } from "@/components/analytics/google-analytics"
+import { RedditPixel } from "@/components/analytics/reddit-pixel"
 import { PageTransition } from "@/components/motion/page-transition"
 import "./globals.css"
 
@@ -115,6 +116,7 @@ export default function RootLayout({
         <PageTransition>{children}</PageTransition>
         {process.env.NODE_ENV === "production" && <Analytics />}
         <GoogleAnalytics />
+        <RedditPixel />
       </body>
     </html>
   )
