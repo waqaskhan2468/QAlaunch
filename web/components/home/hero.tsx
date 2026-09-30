@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { fadeUp, stagger } from "@/components/motion/primitives"
 import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
 import { Flag } from "@/components/home/flag"
+import { trackRedditEvent } from "@/lib/analytics/reddit"
 
 /**
  * Hero split — marketing copy + URL capture on the left over navy, an audit
@@ -94,6 +95,10 @@ export function Hero() {
         setIsStarting(false)
         return
       }
+
+      // A paid click that gets this far has done the one thing we want it to
+      // do. Reported before the redirect so it fires while this page is alive.
+      trackRedditEvent("Lead")
 
       const target = `/result?url=${encodeURIComponent(value)}&scanId=${encodeURIComponent(payload.scanId)}`
       router.push(target)
