@@ -229,11 +229,19 @@ export async function collectLinks(
 		const context = page.context();
 		const toVerify = suspicious.slice(0, MAX_BROWSER_REVERIFY);
 		if (suspicious.length > toVerify.length) {
+			// Past the cap we simply do not know. Everything beyond it is flagged
+			// unverified and dropped from brokenLinks below, rather than reported
+			// as broken on a guess — a site behind Cloudflare or on a slow host can
+			// easily return a dozen 403s, and calling those "dead links" on
+			// someone's working site is the fastest way to lose their trust.
+			for (const link of suspicious.slice(MAX_BROWSER_REVERIFY)) {
+				link.unverified = true;
+			}
 			console.warn('[links] browser re-verification cap hit', {
 				pageUrl,
 				suspicious: suspicious.length,
 				verified: toVerify.length,
-				note: 'Remaining suspicious links are reported as broken without browser re-check.',
+				note: 'Unverified links are excluded from brokenLinks, not reported as broken.',
 			});
 		}
 		const verifyLimit = createConcurrencyLimit(BROWSER_VERIFY_CONCURRENCY);
@@ -255,7 +263,10 @@ export async function collectLinks(
 	const result = {
 		totalLinks: uniqueLinks.length,
 		checkedLinks: validatedLinks.length,
-		brokenLinks: validatedLinks.filter((link) => !link.ok),
+		// Confirmed broken only. A 404 is broken; a 403 or a timeout we could not
+		// re-check in the browser is "could not confirm", and reporting those as
+		// dead links is a false positive a real user publicly called us out for.
+		brokenLinks: validatedLinks.filter((link) => !link.ok && !link.unverified),
 		links: validatedLinks,
 	};
 

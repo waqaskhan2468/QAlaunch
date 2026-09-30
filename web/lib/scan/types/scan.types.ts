@@ -33,6 +33,12 @@ export type ValidatedLink = LinkRecord & {
 	status: number;
 	ok: boolean;
 	error?: string;
+	/**
+	 * True when the link answered 403 or timed out AND the browser re-check was
+	 * skipped because the per-page cap was already spent. "Could not confirm" —
+	 * deliberately NOT the same thing as broken, and excluded from brokenLinks.
+	 */
+	unverified?: boolean;
 };
 
 export type LinksResult = {
