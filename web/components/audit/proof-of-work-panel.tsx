@@ -114,6 +114,15 @@ export function ProofOfWorkPanel({
 					why it can tell you a button does nothing, or that a form fails on a phone —
 					things that are invisible until the page is actually running.
 				</p>
+				{/* Asked for by a paying customer, who found a CTA reported as a dead
+				    link that worked fine for a human. Saying so up front costs one
+				    sentence and keeps the other findings credible. */}
+				<p className='mt-2.5 text-[12.5px] leading-relaxed text-muted-ink'>
+					<strong className='text-ink'>A note on accuracy:</strong> this is automated
+					testing with an AI review on top. It is thorough, but not infallible — a small
+					number of findings may turn out not to be real once you check them by hand.
+					Treat the report as a prioritised list to check, not a verdict.
+				</p>
 			</div>
 		</section>
 	);

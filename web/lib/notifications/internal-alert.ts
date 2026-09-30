@@ -117,6 +117,12 @@ async function sendAlert(input: {
 }
 
 /** Someone started a free scan. */
+/**
+ * NOT CURRENTLY CALLED. Free-scan alerts were removed from /api/scan/start
+ * because 176 scans in a week exhausted Resend's 100/day limit, which is shared
+ * with paid report delivery. Free scans are reviewed in /admin instead. Kept
+ * here so it can be switched back on if the sending limit is ever raised.
+ */
 export async function sendFreeScanAlert(input: {
 	scanId: string;
 	targetUrl: string;

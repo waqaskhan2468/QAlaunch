@@ -1,6 +1,5 @@
-import { NextResponse, after } from 'next/server';
+import { NextResponse } from 'next/server';
 import { normalizeUrl, urlHash, isPrivateUrl } from '@/lib/utils/url';
-import { sendFreeScanAlert } from '@/lib/notifications/internal-alert';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { scanStartSchema } from '@/types/zod';
 import { AppError, asyncHandler } from '@/lib/api/error';
@@ -180,16 +179,15 @@ export const POST = asyncHandler(async (req: Request) => {
 		email: email ?? null,
 	});
 
-	// Internal alert. Runs after the response is sent (`after` keeps the
-	// serverless invocation alive via waitUntil), so it adds no latency to the
-	// submit — which is deliberately kept instant for free scans.
-	after(async () => {
-		await sendFreeScanAlert({
-			scanId: scan.id,
-			targetUrl: normalized,
-			userEmail: email ?? null,
-		});
-	});
+	// NO internal alert for free scans.
+	//
+	// One Facebook post produced 176 scans in a week and blew through Resend's
+	// 100/day limit in a single day. That limit is shared with the emails that
+	// actually matter — paid report delivery, the contact form, the manual-audit
+	// enquiry — so a busy day of free traffic was starving the paid path.
+	//
+	// Free scans are reviewed in /admin instead, which is where the follow-up
+	// happens anyway. Paid scans and enquiries still alert immediately.
 
 	await queueScanJob({
 		scanId: scan.id,

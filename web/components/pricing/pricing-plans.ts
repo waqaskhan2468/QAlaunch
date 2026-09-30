@@ -25,13 +25,26 @@ export type Plan = {
 /**
  * Canonical pricing plans. Reused by the homepage preview, the full
  * pricing page, and the audit results page.
+ *
+ * NAMING RULE: a tier is named for the SITE it covers, never for a page count.
+ *
+ * The tiers used to read "Basic / 1 page full audit", and three separate people
+ * in one Facebook thread objected to "charging per page" — including one who
+ * asked what it would cost for a site with thousands of pages. None of them were
+ * objecting to $9. They were objecting to the unit: "1 page" invites you to
+ * multiply by your own page count and arrive at a frightening number, even
+ * though every tier here is a flat one-time price.
+ *
+ * "Homepage" cannot be multiplied. It also sets the right expectation up front —
+ * the one customer who did pay wrote afterwards that he "was expecting a full
+ * website report" and had not noticed the other plans.
  */
 export const plans: Plan[] = [
   {
-    tier: "Basic",
+    tier: "Homepage",
     price: "9",
     priceSymbol: "$",
-    pages: "1 page full audit",
+    pages: "Your homepage, tested in full",
     delivery: { icon: "bolt", label: "Instant PDF delivery" },
     features: [
       "Full 35-point audit",
@@ -43,21 +56,21 @@ export const plans: Plan[] = [
     ],
     checkoutPackage: "basic",
     cta: {
-      label: "Get Basic",
+      label: "Test my homepage",
       href: "/checkout?package=basic",
       variant: "soft",
     },
   },
   {
-    tier: "Standard",
+    tier: "Small site",
     price: "24",
     priceSymbol: "$",
-    pages: "2–5 pages full audit",
+    pages: "Up to 5 pages",
     delivery: { icon: "bolt", label: "Instant PDF delivery" },
     popular: true,
     features: [
-      "Everything in Basic",
-      "Up to 5 pages tested",
+      "Everything in Homepage",
+      "Every page checked the same way",
       "Cross-page consistency check",
       "Navigation flow analysis",
       "Priority fix ranking",
@@ -65,20 +78,20 @@ export const plans: Plan[] = [
     ],
     checkoutPackage: "standard",
     cta: {
-      label: "Get Standard",
+      label: "Test up to 5 pages",
       href: "/checkout?package=standard",
       variant: "primary",
     },
   },
   {
-    tier: "Premium",
+    tier: "Whole site",
     price: "59",
     priceSymbol: "$",
-    pages: "6–10 pages full audit",
+    pages: "Up to 10 pages",
     delivery: { icon: "bolt", label: "Instant PDF delivery" },
     features: [
-      "Everything in Standard",
-      "Up to 10 pages tested",
+      "Everything in Small site",
+      "Twice the coverage",
       "Full eCommerce audit",
       "Checkout flow analysis",
       "Conversion rate insights",
@@ -86,19 +99,19 @@ export const plans: Plan[] = [
     ],
     checkoutPackage: "premium",
     cta: {
-      label: "Get Premium",
+      label: "Test up to 10 pages",
       href: "/checkout?package=premium",
       variant: "soft",
     },
   },
   {
-    tier: "Enterprise",
+    tier: "Larger site",
     price: "Custom",
-    pages: "11+ pages",
+    pages: "More than 10 pages",
     delivery: { icon: "clipboard", label: "Quote in 24h" },
     features: [
-      "Everything in Premium",
-      "Full website audit",
+      "Everything in Whole site",
+      "Every page on the site",
       "Custom QA checklist",
       "Video walkthrough",
       "Dedicated QA engineer",

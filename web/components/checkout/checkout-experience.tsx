@@ -25,6 +25,7 @@ import {
   paddlePriceIdForPackage,
 } from "@/lib/checkout/paddle-client"
 import { trackFunnelEvent } from "@/lib/analytics/funnel-client"
+import { PlanSwitcher } from "@/components/checkout/plan-switcher"
 
 const SELF_SERVE: CheckoutPackageSlug[] = ["basic", "standard", "premium"]
 
@@ -243,8 +244,13 @@ export function CheckoutExperience() {
               Most popular
             </span>
           )}
+          {/* Visible and changeable. The one paying customer bought the
+              homepage tier expecting a whole-site report, because checkout
+              showed a single plan and he never saw the others existed. */}
+          <PlanSwitcher current={plan.checkoutPackage} prefillUrl={url} />
+
           <div className="text-[11px] font-bold uppercase tracking-wider text-muted-ink">
-            Your plan
+            You are buying
           </div>
           <div className="mt-2 flex flex-wrap items-baseline gap-1">
             <span className="font-heading text-2xl font-black text-ink">
@@ -387,6 +393,14 @@ export function CheckoutExperience() {
 
           <p className="mt-5 text-center text-xs leading-relaxed text-body sm:text-left">
             Paddle handles payment securely. One-time charge — no subscription.
+          </p>
+          {/* Set the expectation before the card, not after. A paying customer
+              found a working CTA reported as a dead link and asked us to say
+              this up front. */}
+          <p className="mt-2 text-center text-xs leading-relaxed text-muted-ink sm:text-left">
+            Your report comes from automated testing with an AI review on top. It is
+            thorough, but not infallible — a small number of findings may turn out not
+            to be real once you check them by hand.
           </p>
         </div>
       </div>
