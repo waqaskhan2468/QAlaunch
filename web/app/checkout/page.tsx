@@ -6,7 +6,7 @@ import { SiteFooter } from "@/components/site/site-footer"
 import { CheckoutExperience } from "@/components/checkout/checkout-experience"
 
 export const metadata: Metadata = {
-  title: "Checkout — QAlaunch",
+  title: "Checkout",
   description:
     "Complete your website audit purchase securely with Paddle. One-time pricing; PDF report emailed when ready.",
   robots: { index: false, follow: true },

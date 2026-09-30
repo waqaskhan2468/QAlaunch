@@ -6,7 +6,7 @@ import { SiteFooter } from "@/components/site/site-footer"
 import { CheckoutSuccessExperience } from "@/components/checkout/checkout-success"
 
 export const metadata: Metadata = {
-  title: "Order confirmed — QAlaunch",
+  title: "Order confirmed",
   description:
     "Your website audit is queued. You will receive your PDF report by email shortly.",
   robots: { index: false, follow: true },
