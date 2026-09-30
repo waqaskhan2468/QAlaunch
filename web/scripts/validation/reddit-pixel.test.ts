@@ -3,19 +3,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { trackRedditEvent } from "@/lib/analytics/reddit"
 
 /**
- * The Reddit Pixel is production-only and renders nothing without an ID.
+ * The Reddit Pixel is production-only and carries a real advertiser ID.
  *
- * Both guards matter for real reasons. Firing outside production would put our
- * own local clicking into the ad account's retargeting audience and teach the
- * optimiser the wrong thing. Rendering with an empty ID would emit an
- * `rdt('init','')` call that throws inside Reddit's own script.
+ * The production guard matters: firing outside production would put our own
+ * local clicking into the ad account's retargeting audience and teach the
+ * optimiser the wrong thing.
  *
  * A previous analytics change looked correct in tests and rendered as literal
  * `null` in the built HTML, so these assert on the actual emitted script text
  * rather than on the component merely returning something truthy.
  */
 
-const PIXEL_ID = "a2_test123abc"
+const PIXEL_ID = "a2_jrsdroe4sjfn"
 
 async function renderPixel() {
   vi.resetModules()
@@ -33,27 +32,18 @@ describe("RedditPixel", () => {
     process.env = env
   })
 
-  it("renders nothing outside production", async () => {
+  it("renders nothing on a preview deploy", async () => {
     process.env.VERCEL_ENV = "preview"
-    process.env.NEXT_PUBLIC_REDDIT_PIXEL_ID = PIXEL_ID
     expect(await renderPixel()).toBeNull()
   })
 
-  it("renders nothing in production when the ID is unset", async () => {
-    process.env.VERCEL_ENV = "production"
-    delete process.env.NEXT_PUBLIC_REDDIT_PIXEL_ID
-    expect(await renderPixel()).toBeNull()
-  })
-
-  it("renders nothing in production when the ID is an empty string", async () => {
-    process.env.VERCEL_ENV = "production"
-    process.env.NEXT_PUBLIC_REDDIT_PIXEL_ID = ""
+  it("renders nothing in local development", async () => {
+    delete process.env.VERCEL_ENV
     expect(await renderPixel()).toBeNull()
   })
 
   it("emits init and PageVisit with the real ID in production", async () => {
     process.env.VERCEL_ENV = "production"
-    process.env.NEXT_PUBLIC_REDDIT_PIXEL_ID = PIXEL_ID
 
     const script = await renderPixel()
     const body = script?.props?.children ?? ""
@@ -63,6 +53,15 @@ describe("RedditPixel", () => {
     expect(body).toContain("redditstatic.com/ads/pixel.js")
     // The ID must be interpolated, never left as a template placeholder.
     expect(body).not.toContain("${")
+  })
+
+  it("loads the pixel exactly once, so visits are not double counted", async () => {
+    process.env.VERCEL_ENV = "production"
+
+    const body = (await renderPixel())?.props?.children ?? ""
+
+    expect(body.match(/rdt\('init'/g)).toHaveLength(1)
+    expect(body.match(/rdt\('track', 'PageVisit'\)/g)).toHaveLength(1)
   })
 })
 

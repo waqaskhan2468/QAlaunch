@@ -1,16 +1,10 @@
 import Script from "next/script"
 
-/**
- * Reddit advertiser ID, of the form `a2_abc123def45`.
- *
- * Read from the environment rather than hardcoded (unlike the GA4 ID) so the
- * pixel can be switched on from Vercel without a deploy of its own. Absent or
- * empty, nothing renders at all — a missing ID is a no-op, never a broken tag.
- *
- * NEXT_PUBLIC_* values are inlined at build time, so adding the variable in
- * Vercel requires a redeploy before the pixel appears in the HTML.
- */
-const REDDIT_PIXEL_ID = process.env.NEXT_PUBLIC_REDDIT_PIXEL_ID
+// Reddit pixel ID for the QA Launch ad account. Hardcoded like the GA4 ID:
+// it is served to every visitor in the page source, so it is not a secret, and
+// keeping it here means the tag cannot silently go missing because an
+// environment variable was never set on a new deploy target.
+const REDDIT_PIXEL_ID = "a2_jrsdroe4sjfn"
 
 /**
  * Reddit Pixel (rdt.js).
@@ -31,7 +25,6 @@ const REDDIT_PIXEL_ID = process.env.NEXT_PUBLIC_REDDIT_PIXEL_ID
  */
 export function RedditPixel() {
   if (process.env.VERCEL_ENV !== "production") return null
-  if (!REDDIT_PIXEL_ID) return null
 
   return (
     <Script id="reddit-pixel" strategy="afterInteractive">
