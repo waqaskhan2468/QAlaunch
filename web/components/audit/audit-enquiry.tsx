@@ -45,6 +45,8 @@ export function AuditEnquiry({
 			email: String(form.get('email') ?? '').trim(),
 			whatsapp: String(form.get('whatsapp') ?? '').trim() || undefined,
 			concern: String(form.get('concern') ?? '').trim() || undefined,
+			// Honeypot: empty for a person, filled by a bot.
+			company: String(form.get('company') ?? ''),
 			websiteUrl: websiteUrl ?? undefined,
 			scanId: scanId ?? undefined,
 		};
@@ -161,7 +163,23 @@ export function AuditEnquiry({
 								No payment now. I&apos;ll confirm scope and price first.
 							</p>
 						</div>
-					:	<form onSubmit={handleSubmit} className='flex flex-col gap-3'>
+					:	<form onSubmit={handleSubmit} className='relative flex flex-col gap-3'>
+						{/* Honeypot. Off-screen rather than display:none, hidden from
+						    assistive tech and out of tab order. Filled means a bot. */}
+						<div
+							aria-hidden='true'
+							className='absolute left-[-9999px] top-0 h-0 w-0 overflow-hidden'>
+							<label htmlFor='enquiry-company'>Company (leave this empty)</label>
+							<input
+								id='enquiry-company'
+								name='company'
+								type='text'
+								tabIndex={-1}
+								autoComplete='off'
+								defaultValue=''
+							/>
+						</div>
+
 							<div>
 								<label
 									htmlFor='enq-name'

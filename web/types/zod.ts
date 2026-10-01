@@ -78,14 +78,46 @@ export const scanStartSchema = z
 
 
 
+// ─── Form field building blocks ───────────────────────────────────────────────
+/**
+ * A value that will end up on one line of an email — and in some cases inside
+ * the Subject header. Headers are newline-delimited, so a CR or LF in one of
+ * these can terminate the header early and start another: the classic way a
+ * contact form becomes an open relay for someone else's Bcc.
+ *
+ * Rejected at the boundary here, and scrubbed again by headerSafe() where the
+ * value is actually used, so a future field that forgets this rule still
+ * cannot break a header.
+ *
+ * Note what this deliberately does NOT do: it does not reject angle brackets,
+ * quotes, braces or SQL-looking text. Those are neutralised by escaping at the
+ * point of output, and blocking them here would reject real messages. This
+ * product sells website bug reports — "the nav shows a raw <div> on mobile" is
+ * a customer describing their actual problem, and a pattern blocklist would
+ * throw that away while stopping nothing that escaping does not already stop.
+ */
+const SINGLE_LINE = /^[^\u0000-\u001F\u007F]*$/;
+const singleLine = (max: number, label: string) =>
+	z.string().trim().max(max).regex(SINGLE_LINE, `${label} cannot contain line breaks.`);
+
+/**
+ * Honeypot. Hidden from people, irresistible to the form-filling bots that
+ * arrive after a post does numbers. A real submission always leaves it empty;
+ * anything else is discarded without telling the sender why, since a precise
+ * error is just feedback for tuning the next attempt.
+ */
+const honeypot = z.string().max(200).optional();
+
 // ─── Contact form ─────────────────────────────────────────────────────────────
 // Shared by the contact form (client-side validation) and the
 // POST /api/contact route handler (server-side validation), so the rules can
 // never drift between the two. Required fields mirror the form's "*" markers:
 // first name, last name, and a valid email. Everything else is optional.
 export const contactFormSchema = z.object({
-	firstName: z.string().trim().min(1, 'First name is required.').max(80),
-	lastName: z.string().trim().min(1, 'Last name is required.').max(80),
+	// firstName and lastName are joined into the Subject line, so both are
+	// single-line.
+	firstName: singleLine(80, 'First name').min(1, 'First name is required.'),
+	lastName: singleLine(80, 'Last name').min(1, 'Last name is required.'),
 	email: z
 		.string()
 		.trim()
@@ -94,10 +126,11 @@ export const contactFormSchema = z.object({
 		.max(160),
 	// Optional context fields. Empty strings are allowed (treated as "not
 	// provided"); only a max length is enforced to guard against abuse.
-	websiteUrl: z.string().trim().max(300).optional(),
-	pageCount: z.string().trim().max(80).optional(),
-	websiteType: z.string().trim().max(80).optional(),
+	websiteUrl: singleLine(300, 'Website').optional(),
+	pageCount: singleLine(80, 'Page count').optional(),
+	websiteType: singleLine(80, 'Website type').optional(),
 	message: z.string().trim().max(4000).optional(),
+	company: honeypot,
 });
 
 /**
@@ -108,19 +141,20 @@ export const contactFormSchema = z.object({
  * WhatsApp is optional: many small-business owners prefer it to email.
  */
 export const auditEnquirySchema = z.object({
-	name: z.string().trim().min(1, 'Name is required.').max(120),
+	name: singleLine(120, 'Name').min(1, 'Name is required.'),
 	email: z
 		.string()
 		.trim()
 		.min(1, 'Email is required.')
 		.email('Enter a valid email address.')
 		.max(160),
-	whatsapp: z.string().trim().max(40).optional(),
-	/** Filled in by the page from the scan being viewed. */
-	websiteUrl: z.string().trim().max(300).optional(),
-	scanId: z.string().trim().max(64).optional(),
+	whatsapp: singleLine(40, 'WhatsApp number').optional(),
+	/** Filled in by the page from the scan being viewed. Reaches the Subject. */
+	websiteUrl: singleLine(300, 'Website').optional(),
+	scanId: singleLine(64, 'Scan ID').optional(),
 	/** Free-text: what they are most worried about. */
 	concern: z.string().trim().max(2000).optional(),
+	company: honeypot,
 });
 
 export type ScanPackage = z.infer<typeof scanPackageSchema>;
