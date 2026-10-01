@@ -42,11 +42,24 @@ const PER_IP_PER_HOUR = 3;
 /** Per source, per rolling 24h. */
 const PER_IP_PER_DAY = 10;
 /**
- * All form mail per rolling hour, whatever the source.
- * Well under the 100/day Resend quota, so even a distributed flood leaves
- * room for the scan and report email that shares it.
+ * All form mail per rolling hour, whatever the source. Absorbs a burst.
  */
 const GLOBAL_PER_HOUR = 40;
+/**
+ * All form mail per rolling 24h, whatever the source. This is the cap that
+ * actually protects the Resend quota, and the hourly one above does not
+ * substitute for it: 40/hour sustained is 960 a day against a quota of 100.
+ *
+ * Per-source limits cannot do this job either. Anyone with a pool of addresses
+ * gets the per-IP allowance multiplied by the size of the pool — demonstrated
+ * by accident while testing this, when a rotating egress IP sailed past a
+ * limit that was working correctly.
+ *
+ * 50 leaves the other half of the quota for the scan and report email that
+ * shares it, and no real day comes close: these forms see a handful of
+ * submissions, not fifty.
+ */
+const GLOBAL_PER_DAY = 50;
 
 type Bucket = { count: number; resetAt: number };
 const perIpHour = new Map<string, Bucket>();
@@ -136,16 +149,18 @@ export async function assertFormSubmitAllowed(
 	const ipHash = hashIp(ip);
 	const now = Date.now();
 
-	const [hourForIp, dayForIp, hourGlobal] = await Promise.all([
+	const [hourForIp, dayForIp, hourGlobal, dayGlobal] = await Promise.all([
 		countSince(supabase, now - HOUR_MS, ipHash),
 		countSince(supabase, now - DAY_MS, ipHash),
 		countSince(supabase, now - HOUR_MS),
+		countSince(supabase, now - DAY_MS),
 	]);
 
 	if (
 		(hourForIp !== null && hourForIp >= PER_IP_PER_HOUR) ||
 		(dayForIp !== null && dayForIp >= PER_IP_PER_DAY) ||
-		(hourGlobal !== null && hourGlobal >= GLOBAL_PER_HOUR)
+		(hourGlobal !== null && hourGlobal >= GLOBAL_PER_HOUR) ||
+		(dayGlobal !== null && dayGlobal >= GLOBAL_PER_DAY)
 	) {
 		tooMany();
 	}
@@ -164,4 +179,9 @@ export function __resetFormRateLimits(): void {
 	perIpHour.clear();
 }
 
-export const __limits = { PER_IP_PER_HOUR, PER_IP_PER_DAY, GLOBAL_PER_HOUR };
+export const __limits = {
+	PER_IP_PER_HOUR,
+	PER_IP_PER_DAY,
+	GLOBAL_PER_HOUR,
+	GLOBAL_PER_DAY,
+};
