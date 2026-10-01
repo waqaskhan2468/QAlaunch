@@ -14,7 +14,7 @@ import { trackRedditEvent } from "@/lib/analytics/reddit"
  * rather than on the component merely returning something truthy.
  */
 
-const PIXEL_ID = "a2_jrsdroe4sjfn"
+const PIXEL_ID = "a2_jrxtlfnz8kas"
 
 async function renderPixel() {
   vi.resetModules()
