@@ -4,6 +4,7 @@ import { Resend } from 'resend';
 import { escapeHtml, headerSafe } from '@/lib/api/email-safety';
 import { AppError, asyncHandler } from '@/lib/api/error';
 import { assertFormSubmitAllowed } from '@/lib/api/form-rate-limit';
+import { getServiceSupabase } from '@/lib/db/supabase';
 import { getClientIp } from '@/lib/api/scan-start-rate-limit';
 import { auditEnquirySchema } from '@/types/zod';
 
@@ -32,7 +33,7 @@ function row(label: string, value: string | undefined): string {
  */
 export const POST = asyncHandler(async (req: Request) => {
 	// Before reading the body: a flood should cost us as little as possible.
-	assertFormSubmitAllowed(req);
+	await assertFormSubmitAllowed(getServiceSupabase(), req, 'audit-enquiry');
 
 	let body: unknown;
 	try {

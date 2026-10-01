@@ -1,125 +1,167 @@
+import { createHash } from 'node:crypto';
+
 import { AppError } from '@/lib/api/error';
 import { getClientIp } from '@/lib/api/scan-start-rate-limit';
+import type { ServiceSupabase } from '@/lib/db/supabase';
 
 /**
  * Rate limits for the two form endpoints that send mail: /api/contact and
  * /api/audit-enquiry.
  *
- * The real exposure is not the content of a submission — every value is
- * HTML-escaped before it reaches the email, so injection payloads arrive as
- * inert text. It is the send itself. Both routes called Resend once per POST
- * with nothing standing in the way, and the Resend plan allows 100 emails a
- * day across every message the product sends. Anyone could loop a POST and
- * exhaust that quota in a couple of minutes, after which real enquiries stop
- * arriving and nobody finds out, because a quota rejection looks like silence.
- * That is a denial of service on the sales inbox, which matters more here than
- * any of the payloads in those test submissions did.
+ * The exposure is not the content of a submission. Every value is HTML-escaped
+ * before it reaches the email, so the injection payloads these forms received
+ * arrived as inert text. It is the send itself: one email per POST, against a
+ * Resend plan allowing 100 a day across everything the product sends, scan and
+ * report mail included. A loop drains that in minutes, and afterwards real
+ * enquiries fail silently, because a quota rejection looks exactly like nobody
+ * getting in touch.
  *
- * Limits are deliberately tight. These forms produce a handful of submissions
- * a day; a genuine person sends one, occasionally two if they mistype an
- * address. Shared office or carrier-NAT addresses could in principle collide,
- * and at this volume that trade is worth making.
+ * Two layers, and the second is the one that matters:
  *
- * Per-instance, in-memory, matching assertScanStartAllowed. On serverless this
- * is approximate: each warm instance keeps its own counters, so a determined
- * attacker spread across instances gets a higher effective ceiling than the
- * numbers below suggest. It still turns a trivial one-line flood into
- * something that has to be worked at, and the global cap bounds the damage per
- * instance. A durable version would need a DB round trip per submission, which
- * is not worth it until these forms carry real volume.
+ * 1. In-memory, per instance. Free, and catches a naive burst that happens to
+ *    land on one lambda.
+ * 2. Database-backed, shared. This is the real limit.
+ *
+ * Layer 1 alone was the first version of this file, and it did almost nothing
+ * in production: Vercel spreads consecutive requests across warm instances, so
+ * four submissions in a row were handled by four lambdas that each saw their
+ * own first request. Four consecutive posts to production, zero rejections.
+ * Counters that are not shared are not a rate limit.
+ *
+ * Fails open. If the database is unreachable the submission is allowed, with
+ * layer 1 still applying. A customer who cannot reach the contact form is a
+ * worse outcome than a flood that gets through, and the blast radius of
+ * failing open is bounded by the Resend quota rather than being unbounded.
  */
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Per IP, per rolling hour. */
+/** Per source, per rolling hour. A person sends one, or two after a typo. */
 const PER_IP_PER_HOUR = 3;
-/** Per IP, per rolling 24h. */
+/** Per source, per rolling 24h. */
 const PER_IP_PER_DAY = 10;
 /**
- * All form mail per instance per hour, whatever the source address.
- * Sized well under the 100/day Resend quota so a distributed flood still
- * cannot starve the scan and report emails that share it.
+ * All form mail per rolling hour, whatever the source.
+ * Well under the 100/day Resend quota, so even a distributed flood leaves
+ * room for the scan and report email that shares it.
  */
 const GLOBAL_PER_HOUR = 40;
 
 type Bucket = { count: number; resetAt: number };
-
 const perIpHour = new Map<string, Bucket>();
-const perIpDay = new Map<string, Bucket>();
-const globalHour: Bucket = { count: 0, resetAt: Date.now() + HOUR_MS };
 
 /**
- * Counts one hit against a bucket.
- * @returns true when the caller is within the limit, false when it is over.
+ * Salt for the stored address hash.
+ *
+ * A fixed fallback is fine: the goal is to avoid keeping a plain list of
+ * visitor IP addresses, not to resist an attacker who already has the
+ * database. Set FORM_IP_HASH_SALT to make the hashes unguessable too.
  */
-function hit(store: Map<string, Bucket>, key: string, limit: number, windowMs: number): boolean {
-	const now = Date.now();
-	const bucket = store.get(key);
+const SALT = process.env.FORM_IP_HASH_SALT ?? 'qalaunch-form-rate-limit';
 
-	if (!bucket || bucket.resetAt <= now) {
-		store.set(key, { count: 1, resetAt: now + windowMs });
-		return true;
+function hashIp(ip: string): string {
+	return createHash('sha256').update(`${SALT}:${ip}`).digest('hex').slice(0, 32);
+}
+
+/** Cheap same-instance burst check. Not a substitute for the shared limit. */
+function withinMemoryLimit(ip: string): boolean {
+	const now = Date.now();
+
+	for (const [key, bucket] of perIpHour) {
+		if (bucket.resetAt <= now) perIpHour.delete(key);
 	}
 
-	if (bucket.count >= limit) return false;
+	const bucket = perIpHour.get(ip);
+	if (!bucket || bucket.resetAt <= now) {
+		perIpHour.set(ip, { count: 1, resetAt: now + HOUR_MS });
+		return true;
+	}
+	if (bucket.count >= PER_IP_PER_HOUR) return false;
 
 	bucket.count += 1;
 	return true;
 }
 
-/**
- * Drops buckets that expired a while ago.
- *
- * Without this the maps grow once per distinct address for the lifetime of the
- * instance, which is exactly what a flood produces. Called on each request;
- * cheap at this volume.
- */
-function sweep(store: Map<string, Bucket>): void {
-	const now = Date.now();
-	for (const [key, bucket] of store) {
-		if (bucket.resetAt <= now) store.delete(key);
+function tooMany(): never {
+	// Deliberately vague about which limit was hit; a precise message tells
+	// someone probing exactly how to pace themselves.
+	throw new AppError(
+		429,
+		'rate_limit_exceeded',
+		'Too many messages from your network. Please try again later, or email contact@getqalaunch.com directly.',
+	);
+}
+
+async function countSince(
+	supabase: ServiceSupabase,
+	since: number,
+	ipHash?: string,
+): Promise<number | null> {
+	let query = supabase
+		.from('form_submissions')
+		.select('*', { count: 'exact', head: true })
+		.gte('created_at', new Date(since).toISOString());
+
+	if (ipHash) query = query.eq('ip_hash', ipHash);
+
+	const { count, error } = await query;
+
+	if (error) {
+		// Most likely cause the first time: form_submissions.sql has not been
+		// applied yet. Fail open rather than take the forms down.
+		console.error('[form-rate-limit] count failed, allowing submission', error.message);
+		return null;
 	}
+	return count ?? 0;
 }
 
 /**
- * Throws 429 when this submission should not be sent.
+ * Throws 429 when this submission should not be sent, and records it when it
+ * should. Call before doing any other work, so a flood costs as little as
+ * possible.
  *
- * The message is deliberately vague about which limit was reached — a precise
- * one tells someone probing exactly how to pace themselves.
+ * @param form which form, for after-the-fact analysis only — limits are shared
+ *   across both, because the quota they can exhaust is shared.
  */
-export function assertFormSubmitAllowed(req: Request): void {
+export async function assertFormSubmitAllowed(
+	supabase: ServiceSupabase,
+	req: Request,
+	form: 'contact' | 'audit-enquiry',
+): Promise<void> {
 	const ip = getClientIp(req);
+
+	if (!withinMemoryLimit(ip)) tooMany();
+
+	const ipHash = hashIp(ip);
 	const now = Date.now();
 
-	sweep(perIpHour);
-	sweep(perIpDay);
+	const [hourForIp, dayForIp, hourGlobal] = await Promise.all([
+		countSince(supabase, now - HOUR_MS, ipHash),
+		countSince(supabase, now - DAY_MS, ipHash),
+		countSince(supabase, now - HOUR_MS),
+	]);
 
-	if (globalHour.resetAt <= now) {
-		globalHour.count = 0;
-		globalHour.resetAt = now + HOUR_MS;
+	if (
+		(hourForIp !== null && hourForIp >= PER_IP_PER_HOUR) ||
+		(dayForIp !== null && dayForIp >= PER_IP_PER_DAY) ||
+		(hourGlobal !== null && hourGlobal >= GLOBAL_PER_HOUR)
+	) {
+		tooMany();
 	}
 
-	const tooMany =
-		!hit(perIpHour, ip, PER_IP_PER_HOUR, HOUR_MS) ||
-		!hit(perIpDay, ip, PER_IP_PER_DAY, DAY_MS) ||
-		globalHour.count >= GLOBAL_PER_HOUR;
-
-	if (tooMany) {
-		throw new AppError(
-			429,
-			'rate_limit_exceeded',
-			'Too many messages from your network. Please try again later, or email contact@getqalaunch.com directly.',
-		);
+	// Recorded on acceptance rather than after a successful send, so that
+	// submissions which fail downstream still count. Otherwise anyone able to
+	// trigger a send failure gets unlimited attempts.
+	const { error } = await supabase.from('form_submissions').insert({ form, ip_hash: ipHash });
+	if (error) {
+		console.error('[form-rate-limit] insert failed', error.message);
 	}
-
-	globalHour.count += 1;
 }
 
-/** Test-only reset, so one test's counters cannot leak into the next. */
+/** Test-only reset for the in-memory layer. */
 export function __resetFormRateLimits(): void {
 	perIpHour.clear();
-	perIpDay.clear();
-	globalHour.count = 0;
-	globalHour.resetAt = Date.now() + HOUR_MS;
 }
+
+export const __limits = { PER_IP_PER_HOUR, PER_IP_PER_DAY, GLOBAL_PER_HOUR };
