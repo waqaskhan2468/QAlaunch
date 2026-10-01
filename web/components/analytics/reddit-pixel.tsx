@@ -1,10 +1,13 @@
 import Script from "next/script"
 
 // Reddit pixel ID for the QA Launch ad account. Hardcoded like the GA4 ID:
+// (This is the second ad account. The first one's Reddit profile was suspended,
+// which locked every campaign under it, so the account was rebuilt from
+// scratch under a different profile and issued a new pixel.)
 // it is served to every visitor in the page source, so it is not a secret, and
 // keeping it here means the tag cannot silently go missing because an
 // environment variable was never set on a new deploy target.
-const REDDIT_PIXEL_ID = "a2_jrsdroe4sjfn"
+const REDDIT_PIXEL_ID = "a2_jrxtlfnz8kas"
 
 /**
  * Reddit Pixel (rdt.js).
