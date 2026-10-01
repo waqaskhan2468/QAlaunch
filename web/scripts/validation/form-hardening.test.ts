@@ -253,10 +253,34 @@ describe('rate limiting — the gap that actually mattered', () => {
 		).rejects.toThrow(/Too many messages/);
 	});
 
-	it('caps total sends so a distributed flood cannot drain the daily quota', async () => {
+	it('caps total sends per hour, whatever the source', async () => {
 		const { db } = fakeDb({}, __limits.GLOBAL_PER_HOUR);
 		await expect(
 			assertFormSubmitAllowed(db, req('5.5.5.5'), 'contact'),
+		).rejects.toThrow(/Too many messages/);
+	});
+
+	it('caps total sends per DAY, which is what protects the Resend quota', async () => {
+		// The hourly cap does not do this on its own: 40/hour sustained is 960
+		// a day against a quota of 100.
+		const { db } = fakeDb({}, __limits.GLOBAL_PER_DAY);
+		await expect(
+			assertFormSubmitAllowed(db, req('5.5.5.5'), 'contact'),
+		).rejects.toThrow(/Too many messages/);
+	});
+
+	it('keeps the daily cap below the Resend quota it exists to protect', () => {
+		// Leaves headroom for the scan and report email that shares the quota.
+		expect(__limits.GLOBAL_PER_DAY).toBeLessThan(100);
+	});
+
+	it('stops a rotating-IP flood that per-source limits cannot', async () => {
+		// Exactly the shape that slipped past during testing: every request from
+		// a fresh address, so no per-IP count ever builds up. Only the global
+		// cap catches this.
+		const { db } = fakeDb({}, __limits.GLOBAL_PER_DAY);
+		await expect(
+			assertFormSubmitAllowed(db, req('198.51.100.77'), 'audit-enquiry'),
 		).rejects.toThrow(/Too many messages/);
 	});
 
