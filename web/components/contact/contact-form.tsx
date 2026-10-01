@@ -60,12 +60,19 @@ export function ContactForm() {
       return
     }
 
+    // Read straight off the form rather than from `values`: the honeypot is
+    // not a real field and should not join the controlled state or the
+    // FieldName union.
+    const company = String(
+      new FormData(event.currentTarget).get("company") ?? "",
+    )
+
     setStatus("submitting")
     try {
       const res = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed.data),
+        body: JSON.stringify({ ...parsed.data, company }),
       })
 
       if (!res.ok) {
@@ -134,11 +141,27 @@ export function ContactForm() {
     <form
       onSubmit={handleSubmit}
       noValidate
-      className="rounded-3xl border border-border-soft bg-white p-8 shadow-sm md:p-10"
+      className="relative rounded-3xl border border-border-soft bg-white p-8 shadow-sm md:p-10"
     >
       <h3 className="mb-6 font-heading text-2xl font-black tracking-tight text-ink">
         Send us a message
       </h3>
+
+      {/* Honeypot. Positioned off-screen rather than display:none, which some
+          bots check for; hidden from assistive tech and skipped by tab order,
+          so nobody using the site can reach it. A filled value means a bot. */}
+      <div aria-hidden="true" className="absolute left-[-9999px] top-0 h-0 w-0 overflow-hidden">
+        <label htmlFor="contact-company">Company (leave this empty)</label>
+        <input
+          id="contact-company"
+          name="company"
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+          defaultValue=""
+        />
+      </div>
+
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="First Name" required error={errors.firstName}>

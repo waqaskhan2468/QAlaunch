@@ -1,22 +1,16 @@
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
+import { escapeHtml, headerSafe } from '@/lib/api/email-safety';
 import { AppError, asyncHandler } from '@/lib/api/error';
+import { assertFormSubmitAllowed } from '@/lib/api/form-rate-limit';
+import { getClientIp } from '@/lib/api/scan-start-rate-limit';
 import { contactFormSchema } from '@/types/zod';
 
 export const runtime = 'nodejs';
 
 /** Inbox that should receive contact-form submissions. */
 const CONTACT_RECIPIENT = 'contact@getqalaunch.com';
-
-function escapeHtml(value: string): string {
-	return value
-		.replaceAll('&', '&amp;')
-		.replaceAll('<', '&lt;')
-		.replaceAll('>', '&gt;')
-		.replaceAll('"', '&quot;')
-		.replaceAll("'", '&#39;');
-}
 
 function row(label: string, value: string | undefined): string {
 	const display = value && value.trim() ? escapeHtml(value) : '—';
@@ -34,6 +28,9 @@ function row(label: string, value: string | undefined): string {
  * Body: { firstName, lastName, email, websiteUrl?, pageCount?, websiteType?, message? }
  */
 export const POST = asyncHandler(async (req: Request) => {
+	// Before reading the body: a flood should cost us as little as possible.
+	assertFormSubmitAllowed(req);
+
 	let body: unknown;
 	try {
 		body = await req.json();
@@ -49,6 +46,21 @@ export const POST = asyncHandler(async (req: Request) => {
 			'Please check the form and try again.',
 			parsed.error.flatten(),
 		);
+	}
+
+
+	// Honeypot tripped: a bot filled a field no person can see. Answer 200 so the
+	// sender cannot tell a discard from a delivery and tune around it. Nothing is
+	// sent and nothing is stored.
+	if (parsed.data.company && parsed.data.company.trim()) {
+		console.log(
+			JSON.stringify({
+				ts: new Date().toISOString(),
+				event: 'contact_honeypot',
+				ip: getClientIp(req),
+			}),
+		);
+		return NextResponse.json({ ok: true });
 	}
 
 	const { firstName, lastName, email, websiteUrl, pageCount, websiteType, message } =
@@ -101,7 +113,7 @@ export const POST = asyncHandler(async (req: Request) => {
 		from: `QAlaunch Contact <${process.env.FROM_EMAIL}>`,
 		to: CONTACT_RECIPIENT,
 		replyTo: email,
-		subject: `New contact form submission — ${fullName}`,
+		subject: headerSafe(`New contact form submission — ${fullName}`),
 		html,
 		text,
 	});
