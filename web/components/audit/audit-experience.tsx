@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { trackFunnelEvent } from '@/lib/analytics/funnel-client';
 import { plans } from '@/components/pricing/pricing-plans';
 import { AuditEnquiry } from '@/components/audit/audit-enquiry';
+import { ResultEmailCapture } from '@/components/audit/result-email-capture';
 import { ProofOfWorkPanel } from '@/components/audit/proof-of-work-panel';
 import { buildProofOfWork, type ProofOfWork } from '@/lib/scan/proof-of-work';
 import { computeHealthScore, labelFromScore } from '@/lib/scoring/health';
@@ -757,6 +758,15 @@ function AuditExperienceInner({
 							);
 						})}
 					</div>
+
+					{/* The scan takes about two minutes and people switch tabs. Offering
+					    to send the link is useful to them, and it is the only chance to
+					    reach someone who never comes back. Never a gate. */}
+					<ResultEmailCapture
+						scanId={statusForCurrentScan?.scan.id ?? initialScanId ?? null}
+						variant='waiting'
+						className='mt-6'
+					/>
 				</div>
 			</section>
 		);
@@ -1546,6 +1556,16 @@ function ResultsView({
 					))}
 				</div>
 			</div>
+
+			{/* Asked after the results are on screen, not before: they have seen the
+			    thing work, so the ask converts far better than a gate would — and
+			    "no signup" stays true, which the live ad creatives promise. Sits
+			    above the pricing so it is still read by someone who will not buy. */}
+			<ResultEmailCapture
+				scanId={scanId || null}
+				variant='done'
+				className='mx-auto mt-12 max-w-lg'
+			/>
 
 			{/* ── PRICING ───────────────────────────────────────────────── */}
 			<div ref={pricingRef} className='mt-14' id='pricing'>

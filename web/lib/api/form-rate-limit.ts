@@ -106,6 +106,36 @@ function tooMany(): never {
 	);
 }
 
+/**
+ * Caps how long a database call may take before we give up on it.
+ *
+ * Fail-open only works if the query FAILS. A Supabase client pointed at an
+ * unreachable host does not reject — it hangs, and the visitor's submit button
+ * spins until something upstream times out. Found by running the forms against
+ * a local server with no Supabase credentials: the request never came back.
+ *
+ * 1.5s is far longer than a counting query against two indexes needs, and far
+ * shorter than anyone will sit and wait.
+ */
+function withTimeout<T>(promise: PromiseLike<T>, ms: number, fallback: T): Promise<T> {
+	return new Promise<T>((resolve) => {
+		const timer = setTimeout(() => resolve(fallback), ms);
+		Promise.resolve(promise).then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			() => {
+				clearTimeout(timer);
+				resolve(fallback);
+			},
+		);
+	});
+}
+
+/** Budget for each rate-limit query. */
+const DB_TIMEOUT_MS = 1_500;
+
 async function countSince(
 	supabase: ServiceSupabase,
 	since: number,
@@ -140,7 +170,7 @@ async function countSince(
 export async function assertFormSubmitAllowed(
 	supabase: ServiceSupabase,
 	req: Request,
-	form: 'contact' | 'audit-enquiry',
+	form: 'contact' | 'audit-enquiry' | 'scan-notify',
 ): Promise<void> {
 	const ip = getClientIp(req);
 
@@ -149,12 +179,17 @@ export async function assertFormSubmitAllowed(
 	const ipHash = hashIp(ip);
 	const now = Date.now();
 
-	const [hourForIp, dayForIp, hourGlobal, dayGlobal] = await Promise.all([
-		countSince(supabase, now - HOUR_MS, ipHash),
-		countSince(supabase, now - DAY_MS, ipHash),
-		countSince(supabase, now - HOUR_MS),
-		countSince(supabase, now - DAY_MS),
-	]);
+	const [hourForIp, dayForIp, hourGlobal, dayGlobal] = await withTimeout(
+		Promise.all([
+			countSince(supabase, now - HOUR_MS, ipHash),
+			countSince(supabase, now - DAY_MS, ipHash),
+			countSince(supabase, now - HOUR_MS),
+			countSince(supabase, now - DAY_MS),
+		]),
+		DB_TIMEOUT_MS,
+		// All null: fail open, exactly as a query error does.
+		[null, null, null, null],
+	);
 
 	if (
 		(hourForIp !== null && hourForIp >= PER_IP_PER_HOUR) ||
@@ -168,9 +203,15 @@ export async function assertFormSubmitAllowed(
 	// Recorded on acceptance rather than after a successful send, so that
 	// submissions which fail downstream still count. Otherwise anyone able to
 	// trigger a send failure gets unlimited attempts.
-	const { error } = await supabase.from('form_submissions').insert({ form, ip_hash: ipHash });
-	if (error) {
-		console.error('[form-rate-limit] insert failed', error.message);
+	const insertError = await withTimeout<string | null>(
+		Promise.resolve(
+			supabase.from('form_submissions').insert({ form, ip_hash: ipHash }),
+		).then(({ error }) => error?.message ?? null),
+		DB_TIMEOUT_MS,
+		'insert timed out',
+	);
+	if (insertError) {
+		console.error('[form-rate-limit] insert failed', insertError);
 	}
 }
 
