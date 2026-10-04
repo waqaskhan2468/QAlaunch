@@ -17,6 +17,7 @@ import { reloadScanStep } from '@/lib/scan/steps/reloadScan';
 import { scanBrowserOnlyStep } from '@/lib/scan/steps/scanBrowserOnly';
 import { discoverAdditionalPagesStep } from '@/lib/scan/steps/discoverAdditionalPages';
 import { persistFailedPageIndex } from '@/lib/scan/runner';
+import { sendFreeResultEmailStep } from '@/lib/scan/steps/sendFreeResultEmail';
 import { sendReportEmailStep } from '@/lib/scan/steps/sendReportEmail';
 import type { ProcessPayload } from '@/lib/inngest/process.types';
 import type { DetectAndSelectResult } from '@/lib/scan/steps/types';
@@ -47,6 +48,7 @@ function getScanConcurrencyLimit(): number {
  *   11. generate-pdf             — paid only
  *   12. send-email               — paid only
  *   13. mark-done                — status → done
+ *   14. send-free-result-email   — free only, and only if they asked for it
  */
 export const runScan = inngest.createFunction(
 	{
@@ -290,5 +292,19 @@ export const runScan = inngest.createFunction(
 		await step.run('mark-done', () =>
 			markScanDoneStep({ scanId, pkg, targetUrl, userEmail }),
 		);
+
+		// Free scans only, and only for someone who asked to be told. A free scan
+		// takes about two minutes: people paste a URL, switch tabs, and never come
+		// back, so a result nobody sees cannot do anything. Paid packages already
+		// get their own report email above.
+		//
+		// Last, and deliberately after mark-done: the results exist either way, so
+		// an email problem must never be what stops a finished scan being marked
+		// finished. The step swallows its own failures for the same reason.
+		if (pkg === 'free') {
+			await step.run('send-free-result-email', () =>
+				sendFreeResultEmailStep({ scanId, targetUrl }),
+			);
+		}
 	},
 );
