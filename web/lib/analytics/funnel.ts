@@ -1,11 +1,22 @@
 import type { ServiceSupabase } from '@/lib/db/supabase';
 
-/** Steps in the free-scan → payment funnel. See supabase/funnel_events.sql. */
+/**
+ * Steps in the free-scan → payment funnel. See supabase/funnel_events.sql.
+ *
+ * plan_clicked sits between paywall_viewed and checkout_started because
+ * without it those two are not adjacent. checkout_started only fires on the
+ * checkout page, after someone has picked a plan, arrived, typed an email and
+ * pressed Pay. For a week the funnel read "28 saw the upgrade section, 0
+ * opened checkout" with no way to tell whether nobody clicked a price or
+ * everybody who did bounced off the checkout page — two problems needing
+ * opposite fixes.
+ */
 export type FunnelEventType =
 	| 'scan_started'
 	| 'scan_completed'
 	| 'results_viewed'
 	| 'paywall_viewed'
+	| 'plan_clicked'
 	| 'checkout_started'
 	| 'payment_completed';
 
@@ -13,6 +24,7 @@ export type FunnelEventType =
 export const CLIENT_FUNNEL_EVENTS = [
 	'results_viewed',
 	'paywall_viewed',
+	'plan_clicked',
 	'checkout_started',
 ] as const;
 

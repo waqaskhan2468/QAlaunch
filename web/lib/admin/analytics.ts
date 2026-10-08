@@ -201,6 +201,7 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		{ key: 'scan_completed', label: 'Scan finished' },
 		{ key: 'results_viewed', label: 'Results viewed' },
 		{ key: 'paywall_viewed', label: 'Saw upgrade section' },
+		{ key: 'plan_clicked', label: 'Clicked a plan' },
 		{ key: 'checkout_started', label: 'Opened checkout' },
 		{ key: 'payment_completed', label: 'Paid' },
 	];
