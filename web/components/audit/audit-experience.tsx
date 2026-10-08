@@ -991,6 +991,23 @@ function ResultsView({
 		inputUrl ? `&url=${encodeURIComponent(inputUrl)}` : ''
 	}`;
 
+	/**
+	 * Fired on every route from this page to /checkout.
+	 *
+	 * checkout_started only fires on the checkout page itself, after a plan is
+	 * chosen, the page loads, an email is typed and Pay is pressed. Without this
+	 * step the funnel jumps straight from "saw the upgrade section" to that, and
+	 * a week of data could not distinguish "nobody clicked a price" from
+	 * "everybody who did bounced off the checkout page".
+	 *
+	 * Not awaited: navigation must not wait on analytics, and trackFunnelEvent
+	 * already swallows its own failures.
+	 */
+	const trackPlanClick = () => {
+		if (!scanId) return;
+		trackFunnelEvent({ scanId, eventType: 'plan_clicked', url: funnelUrl });
+	};
+
 	// Score ring animation
 	const CIRCUMFERENCE = 477;
 	const ringOffset = ringAnimated ?
@@ -1470,6 +1487,7 @@ function ResultsView({
 					<div className='mt-5 flex flex-col items-center gap-3'>
 						<Link
 							href={basicCheckoutHref}
+							onClick={trackPlanClick}
 							className='inline-flex items-center justify-center rounded-xl bg-brand px-6 py-3 text-sm font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-brand-mid hover:shadow-lg hover:shadow-brand/30'>
 							Get My Full Report — $9 →
 						</Link>
@@ -1595,7 +1613,12 @@ function ResultsView({
 
 				<div className='grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4'>
 					{plans.map((plan) => (
-						<MiniPlanCard key={plan.tier} plan={plan} prefillUrl={inputUrl} />
+						<MiniPlanCard
+							key={plan.tier}
+							plan={plan}
+							prefillUrl={inputUrl}
+							onSelect={trackPlanClick}
+						/>
 					))}
 				</div>
 
@@ -1657,6 +1680,7 @@ function ResultsView({
 						</button>
 						<Link
 							href={basicCheckoutHref}
+							onClick={trackPlanClick}
 							className='rounded-xl bg-accent-bright px-5 py-2.5 text-[13.5px] font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-accent-bright/90 hover:shadow-lg'>
 							Unlock Full Report — $9 →
 						</Link>
@@ -1947,9 +1971,12 @@ function LockedIssueRow({ issue }: { issue: LockedIssue }) {
 function MiniPlanCard({
 	plan,
 	prefillUrl,
+	onSelect,
 }: {
 	plan: (typeof plans)[number];
 	prefillUrl: string | null;
+	/** Records the funnel step before navigating away. */
+	onSelect: () => void;
 }) {
 	const checkoutHref =
 		plan.checkoutPackage != null ?
@@ -1991,6 +2018,7 @@ function MiniPlanCard({
 			</ul>
 			<Link
 				href={checkoutHref}
+				onClick={onSelect}
 				className={cn(
 					'mt-auto inline-flex w-full items-center justify-center rounded-xl px-3 py-2.5 text-[13px] font-extrabold transition-all',
 					plan.popular ?
