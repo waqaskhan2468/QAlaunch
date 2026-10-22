@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { fadeUp, stagger } from "@/components/motion/primitives"
 import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
 import { Flag } from "@/components/home/flag"
+import { trackOpenAiEvent } from "@/lib/analytics/openai"
 import { trackRedditEvent } from "@/lib/analytics/reddit"
 
 /**
@@ -99,6 +100,7 @@ export function Hero() {
       // A paid click that gets this far has done the one thing we want it to
       // do. Reported before the redirect so it fires while this page is alive.
       trackRedditEvent("Lead")
+      trackOpenAiEvent("lead_created")
 
       const target = `/result?url=${encodeURIComponent(value)}&scanId=${encodeURIComponent(payload.scanId)}`
       router.push(target)

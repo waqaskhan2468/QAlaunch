@@ -14,6 +14,7 @@ import { initializePaddle } from "@paddle/paddle-js"
 import { Check, ClipboardList, Lock, Zap } from "lucide-react"
 import { z } from "zod"
 
+import { trackOpenAiEvent } from "@/lib/analytics/openai"
 import { cn } from "@/lib/utils"
 import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
 import {
@@ -182,6 +183,7 @@ export function CheckoutExperience() {
         url: startPayload.targetUrl,
         email: emailTrim,
       })
+      trackOpenAiEvent("checkout_started")
 
       paddle.Checkout.open({
         items: [{ priceId, quantity: 1 }],

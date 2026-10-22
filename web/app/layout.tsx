@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import { Epilogue, Figtree, JetBrains_Mono } from "next/font/google"
 
 import { GoogleAnalytics } from "@/components/analytics/google-analytics"
+import { OpenAiPixel } from "@/components/analytics/openai-pixel"
 import { RedditPixel } from "@/components/analytics/reddit-pixel"
 import { PageTransition } from "@/components/motion/page-transition"
 import "./globals.css"
@@ -115,6 +116,7 @@ export default function RootLayout({
         <PageTransition>{children}</PageTransition>
         <GoogleAnalytics />
         <RedditPixel />
+        <OpenAiPixel />
       </body>
     </html>
   )
