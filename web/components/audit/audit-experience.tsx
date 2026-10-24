@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Lock, X, Zap, ZoomIn } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
+import { captureAttribution } from '@/lib/analytics/attribution';
 import { cn } from '@/lib/utils';
 import { trackFunnelEvent } from '@/lib/analytics/funnel-client';
 import { plans } from '@/components/pricing/pricing-plans';
@@ -646,7 +647,11 @@ function AuditExperienceInner({
 			const res = await fetch('/api/scan/start', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ url: value, package: 'free' }),
+				body: JSON.stringify({
+					url: value,
+					package: 'free',
+					attribution: captureAttribution(),
+				}),
 			});
 
 			const payload = (await res.json()) as

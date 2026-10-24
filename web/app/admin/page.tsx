@@ -446,6 +446,69 @@ export default async function AdminDashboardPage({
 					}
 				</Section>
 
+				{/* Where the money came from. The question that could not be
+				    answered at all before these columns existed. */}
+				<Section title="Where paying customers came from">
+					{data.bySource.length === 0 ?
+						<Empty>No scans in this range.</Empty>
+					:	<table className="w-full">
+							<thead>
+								<tr>
+									<th className={TH}>Source</th>
+									<th className={TH}>Scans</th>
+									<th className={TH}>Paid</th>
+									<th className={TH}>Rate</th>
+									<th className={TH}>Revenue</th>
+								</tr>
+							</thead>
+							<tbody>
+								{data.bySource.map((row) => (
+									<tr key={row.source}>
+										<td className={TD}>{row.source}</td>
+										<td className={TD}>{row.scans}</td>
+										<td className={TD}>{row.paid}</td>
+										<td className={TD}>
+											{row.conversionRate == null ?
+												<span className="text-muted-ink">—</span>
+											:	`${row.conversionRate.toFixed(1)}%`}
+										</td>
+										<td className={TD}>{money(row.revenue)}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					}
+				</Section>
+
+				{/* Which page they first landed on. "Organic" is too coarse to act
+				    on once a few hundred programmatic pages are live. */}
+				<Section title="Landing page they arrived on">
+					{data.byLandingPage.length === 0 ?
+						<Empty>
+							No landing pages recorded yet — this fills in as scans arrive after the
+							attribution columns were added.
+						</Empty>
+					:	<table className="w-full">
+							<thead>
+								<tr>
+									<th className={TH}>Page</th>
+									<th className={TH}>Scans</th>
+									<th className={TH}>Paid</th>
+								</tr>
+							</thead>
+							<tbody>
+								{data.byLandingPage.map((row) => (
+									<tr key={row.path}>
+										<td className={TD}>{row.path}</td>
+										<td className={TD}>{row.scans}</td>
+										<td className={TD}>{row.paid}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					}
+				</Section>
+
 				{/* Daily breakdown */}
 				<Section title="By day">
 					{data.byDay.length === 0 ?

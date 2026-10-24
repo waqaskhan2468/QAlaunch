@@ -56,6 +56,11 @@ type ScanRow = {
 	package: string | null;
 	status: string | null;
 	payment_status: string | null;
+	utm_source: string | null;
+	utm_medium: string | null;
+	utm_campaign: string | null;
+	referrer_host: string | null;
+	landing_path: string | null;
 	recovery_sent_at?: string | null;
 	user_email: string | null;
 	website_type: string | null;
@@ -98,7 +103,7 @@ export async function loadAdminAnalytics(range: RangeKey) {
 	let scanQuery = supabase
 		.from('scans')
 		.select(
-			'id, url, package, status, payment_status, user_email, website_type, created_at, followup_sent_at, followup_email, error_message, error_detail, recovery_sent_at',
+			'id, url, package, status, payment_status, user_email, website_type, created_at, followup_sent_at, followup_email, error_message, error_detail, recovery_sent_at, utm_source, utm_medium, utm_campaign, referrer_host, landing_path',
 		)
 		.order('created_at', { ascending: false })
 		.limit(ROW_LIMIT);
@@ -379,6 +384,53 @@ export async function loadAdminAnalytics(range: RangeKey) {
 	// How much of the abandoned pile the recovery cron has actually reached.
 	const recoveryEmailsSent = abandoned.filter((s) => s.recovery_sent_at).length;
 
+	// ── Where the money came from ──────────────────────────────────────────
+	//
+	// The question nobody could answer before these columns existed: which
+	// channel produced a sale. A scan with no utm and no referrer is genuinely
+	// direct, and is labelled that way rather than being dropped.
+	const sourceMap = new Map<
+		string,
+		{ source: string; scans: number; paid: number; revenue: number }
+	>();
+	for (const scan of scans) {
+		const source =
+			scan.utm_source?.trim() ||
+			scan.referrer_host?.trim() ||
+			'direct / unknown';
+		const entry =
+			sourceMap.get(source) ?? { source, scans: 0, paid: 0, revenue: 0 };
+		entry.scans += 1;
+		if (scan.payment_status === 'paid') {
+			entry.paid += 1;
+			entry.revenue += PACKAGE_PRICE[scan.package ?? ''] ?? 0;
+		}
+		sourceMap.set(source, entry);
+	}
+	const bySource = [...sourceMap.values()]
+		.map((s) => ({
+			...s,
+			conversionRate: s.scans > 0 ? (s.paid / s.scans) * 100 : null,
+		}))
+		// Revenue first, because that is the decision this table informs.
+		.sort((a, b) => b.revenue - a.revenue || b.scans - a.scans)
+		.slice(0, 25);
+
+	// Which landing page a paying customer first arrived on. With a few hundred
+	// programmatic pages live, "organic" is too coarse to act on.
+	const landingMap = new Map<string, { path: string; scans: number; paid: number }>();
+	for (const scan of scans) {
+		const path = scan.landing_path?.trim();
+		if (!path) continue;
+		const entry = landingMap.get(path) ?? { path, scans: 0, paid: 0 };
+		entry.scans += 1;
+		if (scan.payment_status === 'paid') entry.paid += 1;
+		landingMap.set(path, entry);
+	}
+	const byLandingPage = [...landingMap.values()]
+		.sort((a, b) => b.paid - a.paid || b.scans - a.scans)
+		.slice(0, 25);
+
 	return {
 		range,
 		rangeLabel: RANGES[range].label,
@@ -401,6 +453,8 @@ export async function loadAdminAnalytics(range: RangeKey) {
 			totalPaidAllTime: totalPaidRes.count ?? 0,
 		},
 		byDay,
+		bySource,
+		byLandingPage,
 		byPackage,
 		funnelSteps,
 		health,
