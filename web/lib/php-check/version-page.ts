@@ -104,7 +104,7 @@ export function versionAnswer(f: VersionFacts): string {
 				`Yes. PHP ${f.version}, released on ${on}, is the ${f.branch} release that patched ${PHP2SHELL.cves[0]} and ${PHP2SHELL.cves[1]} (CVSS ${PHP2SHELL.cvss}, Critical).`
 			:	`Yes, PHP ${f.version} includes the fix. It was released on ${on}, after ${f.fixedIn} — the ${f.branch} release that patched ${PHP2SHELL.cves[0]} and ${PHP2SHELL.cves[1]} (CVSS ${PHP2SHELL.cvss}, Critical).`
 	}
-	return `PHP ${f.version} was released on ${on}, before the fix for ${PHP2SHELL.cves[0]} and ${PHP2SHELL.cves[1]} shipped in PHP ${f.fixedIn}. The upstream release itself therefore predates the patch — though a server running ${f.version} may still have the fix applied, because Linux distributions backport security patches without changing the version number.`
+	return `PHP ${f.version} was released on ${on}, before the fix for ${PHP2SHELL.cves[0]} and ${PHP2SHELL.cves[1]} shipped in PHP ${f.fixedIn}. The upstream release itself therefore predates the patch — though a server running ${f.version} may still have the fix applied, because CloudLinux and the Linux distributions backport security patches without changing the version number.`
 }
 
 /** Page title, matching how the query is actually typed. */
