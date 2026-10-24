@@ -24,7 +24,7 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
-	const { url, package: pkg, email, acknowledgePublicOnly } = parsed.data;
+	const { url, package: pkg, email, acknowledgePublicOnly, attribution } = parsed.data;
 	const normalized = normalizeUrl(url);
 
 	if (isPrivateUrl(normalized)) {
@@ -131,6 +131,13 @@ export const POST = asyncHandler(async (req: Request) => {
 			user_email: email ?? null,
 			payment_status: pkg === 'free' ? 'free' : 'pending',
 			free_preview_used: false,
+			// Where this visitor came from. Null throughout for direct traffic,
+			// which is the truthful record rather than a gap to fill in.
+			utm_source: attribution?.utmSource ?? null,
+			utm_medium: attribution?.utmMedium ?? null,
+			utm_campaign: attribution?.utmCampaign ?? null,
+			referrer_host: attribution?.referrerHost ?? null,
+			landing_path: attribution?.landingPath ?? null,
 		})
 		.select('*')
 		.single();

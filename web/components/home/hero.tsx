@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { ArrowRight, Check, Link2, Mail, Star } from "lucide-react"
 import { motion, useMotionValue, useSpring } from "motion/react"
 
+import { captureAttribution } from "@/lib/analytics/attribution"
 import { cn } from "@/lib/utils"
 import { fadeUp, stagger } from "@/components/motion/primitives"
 import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
@@ -69,6 +70,9 @@ export function Hero() {
           url: value,
           package: "free",
           ...(trimmedEmail ? { email: trimmedEmail } : {}),
+          // Where this visitor first arrived from, so a sale can be traced
+          // back to the channel that produced it.
+          attribution: captureAttribution(),
         }),
       })
 

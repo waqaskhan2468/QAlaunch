@@ -14,6 +14,7 @@ import { initializePaddle } from "@paddle/paddle-js"
 import { Check, ClipboardList, Lock, Zap } from "lucide-react"
 import { z } from "zod"
 
+import { captureAttribution } from "@/lib/analytics/attribution"
 import { trackOpenAiEvent } from "@/lib/analytics/openai"
 import { cn } from "@/lib/utils"
 import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
@@ -116,6 +117,7 @@ export function CheckoutExperience() {
           package: plan.checkoutPackage,
           email: emailTrim,
           ...(acknowledgePublicOnly ? { acknowledgePublicOnly: true } : {}),
+          attribution: captureAttribution(),
         }),
       })
 

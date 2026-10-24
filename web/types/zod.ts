@@ -31,6 +31,36 @@ export const scanStatusSchema = z.enum([
 	'failed',
 ]);
 
+// ─── Form field building blocks ───────────────────────────────────────────────
+/**
+ * A value that will end up on one line of an email — and in some cases inside
+ * the Subject header. Headers are newline-delimited, so a CR or LF in one of
+ * these can terminate the header early and start another: the classic way a
+ * contact form becomes an open relay for someone else's Bcc.
+ *
+ * Rejected at the boundary here, and scrubbed again by headerSafe() where the
+ * value is actually used, so a future field that forgets this rule still
+ * cannot break a header.
+ *
+ * Note what this deliberately does NOT do: it does not reject angle brackets,
+ * quotes, braces or SQL-looking text. Those are neutralised by escaping at the
+ * point of output, and blocking them here would reject real messages. This
+ * product sells website bug reports — "the nav shows a raw <div> on mobile" is
+ * a customer describing their actual problem, and a pattern blocklist would
+ * throw that away while stopping nothing that escaping does not already stop.
+ */
+const SINGLE_LINE = /^[^\u0000-\u001F\u007F]*$/;
+const singleLine = (max: number, label: string) =>
+	z.string().trim().max(max).regex(SINGLE_LINE, `${label} cannot contain line breaks.`);
+
+/**
+ * Honeypot. Hidden from people, irresistible to the form-filling bots that
+ * arrive after a post does numbers. A real submission always leaves it empty;
+ * anything else is discarded without telling the sender why, since a precise
+ * error is just feedback for tuning the next attempt.
+ */
+const honeypot = z.string().max(200).optional();
+
 export const scanStartSchema = z
 	.object({
 		url: z.string().min(1),
@@ -42,6 +72,20 @@ export const scanStartSchema = z
 		 * confirmation prompt on the second submit. Paid packages only.
 		 */
 		acknowledgePublicOnly: z.boolean().optional(),
+		/**
+		 * First-touch attribution captured in the browser. Optional throughout:
+		 * direct traffic genuinely has none, and a scan must never fail because
+		 * analytics could not be read.
+		 */
+		attribution: z
+			.object({
+				utmSource: singleLine(120, 'utm_source').optional(),
+				utmMedium: singleLine(120, 'utm_medium').optional(),
+				utmCampaign: singleLine(120, 'utm_campaign').optional(),
+				referrerHost: singleLine(120, 'Referrer').optional(),
+				landingPath: singleLine(120, 'Landing page').optional(),
+			})
+			.optional(),
 	})
 	.superRefine((data, ctx) => {
 		const emailTrim =
@@ -77,36 +121,6 @@ export const scanStartSchema = z
 
 
 
-
-// ─── Form field building blocks ───────────────────────────────────────────────
-/**
- * A value that will end up on one line of an email — and in some cases inside
- * the Subject header. Headers are newline-delimited, so a CR or LF in one of
- * these can terminate the header early and start another: the classic way a
- * contact form becomes an open relay for someone else's Bcc.
- *
- * Rejected at the boundary here, and scrubbed again by headerSafe() where the
- * value is actually used, so a future field that forgets this rule still
- * cannot break a header.
- *
- * Note what this deliberately does NOT do: it does not reject angle brackets,
- * quotes, braces or SQL-looking text. Those are neutralised by escaping at the
- * point of output, and blocking them here would reject real messages. This
- * product sells website bug reports — "the nav shows a raw <div> on mobile" is
- * a customer describing their actual problem, and a pattern blocklist would
- * throw that away while stopping nothing that escaping does not already stop.
- */
-const SINGLE_LINE = /^[^\u0000-\u001F\u007F]*$/;
-const singleLine = (max: number, label: string) =>
-	z.string().trim().max(max).regex(SINGLE_LINE, `${label} cannot contain line breaks.`);
-
-/**
- * Honeypot. Hidden from people, irresistible to the form-filling bots that
- * arrive after a post does numbers. A real submission always leaves it empty;
- * anything else is discarded without telling the sender why, since a precise
- * error is just feedback for tuning the next attempt.
- */
-const honeypot = z.string().max(200).optional();
 
 // ─── Contact form ─────────────────────────────────────────────────────────────
 // Shared by the contact form (client-side validation) and the
