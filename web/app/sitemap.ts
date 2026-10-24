@@ -130,6 +130,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'monthly',
       priority: 0.7,
     },
+		{
+			url: `${baseUrl}/php-version-checker`,
+			lastModified: new Date('2026-10-24'),
+			changeFrequency: 'weekly',
+			priority: 0.9,
+		},
     {
       url: `${baseUrl}/blog/vibe-coding-website-bugs`,
       lastModified: new Date('2026-07-07'),
