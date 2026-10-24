@@ -39,6 +39,15 @@ const BUILDER_PAGES = [
 	'app/compare/hiring-a-qa-tester/page.tsx',
 ];
 
+/**
+ * Routes generated from a dynamic segment. Their canonical is built from the
+ * segment rather than written as a literal, so they cannot be checked the same
+ * way — the assertions for them are separate, below.
+ */
+const DYNAMIC_PAGES = [
+	{ file: 'app/php/[version]/page.tsx', sitemapRoute: '/php/${version}' },
+];
+
 const INDEXABLE_PAGES = [
 	'app/page.tsx',
 	'app/about/page.tsx',
@@ -103,12 +112,21 @@ describe('canonical URLs', () => {
 		}
 	});
 
+	it.each(DYNAMIC_PAGES)('$file builds a canonical from its own segment', ({ file }) => {
+		const src = read(file);
+		// It must interpolate the segment, not hardcode one version's path —
+		// a literal here would point all 205 pages at the same canonical and
+		// collapse them into one indexable URL.
+		expect(src).toMatch(/canonical:\s*`\/php\/\$\{version\}`/);
+	});
+
 	it('every URL in the sitemap has a page that sets a canonical', () => {
 		const sitemap = read('app/sitemap.ts');
 		const routes = [...sitemap.matchAll(/\$\{baseUrl\}([^`]*)`/g)].map((m) => m[1] || '/');
 		const covered = new Set([
 			...INDEXABLE_PAGES.map(routeFor),
 			...BUILDER_PAGES.map(routeFor),
+			...DYNAMIC_PAGES.map((d) => d.sitemapRoute),
 		]);
 		const missing = routes.filter((r) => !covered.has(r));
 		expect(missing).toEqual([]);

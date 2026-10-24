@@ -1,4 +1,5 @@
 import { MetadataRoute } from 'next'
+import { PHP_RELEASE_ORDER } from '@/lib/php-check/php-releases';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = 'https://getqalaunch.com'
@@ -136,6 +137,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
 			changeFrequency: 'weekly',
 			priority: 0.9,
 		},
+		// One page per PHP release. People search exact patch levels, and no
+		// incumbent holds any individual version page.
+		...PHP_RELEASE_ORDER.map((version) => ({
+			url: `${baseUrl}/php/${version}`,
+			lastModified: new Date('2026-10-24'),
+			changeFrequency: 'monthly' as const,
+			priority: 0.6,
+		})),
     {
       url: `${baseUrl}/blog/vibe-coding-website-bugs`,
       lastModified: new Date('2026-07-07'),
