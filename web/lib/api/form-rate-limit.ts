@@ -170,7 +170,7 @@ async function countSince(
 export async function assertFormSubmitAllowed(
 	supabase: ServiceSupabase,
 	req: Request,
-	form: 'contact' | 'audit-enquiry' | 'scan-notify',
+	form: 'contact' | 'audit-enquiry' | 'scan-notify' | 'expert-enquiry',
 ): Promise<void> {
 	const ip = getClientIp(req);
 
