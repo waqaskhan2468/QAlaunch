@@ -55,6 +55,7 @@ const INDEXABLE_PAGES = [
 	'app/for-lovable/page.tsx',
 	'app/for-shopify/page.tsx',
 	'app/for-wordpress/page.tsx',
+	'app/php-version-checker/page.tsx',
 	'app/pricing/page.tsx',
 	'app/privacy/page.tsx',
 	'app/refund/page.tsx',
