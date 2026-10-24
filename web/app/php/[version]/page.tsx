@@ -166,7 +166,7 @@ export default async function Page({
 							Why this does not automatically mean your site is exposed
 						</h2>
 						<p className="mt-3 text-[16px] leading-relaxed text-body">
-							Debian, Ubuntu and Red Hat apply security fixes to older releases without
+							CloudLinux, CloudLinux, Debian, Ubuntu and Red Hat apply security fixes to older releases without
 							changing the version number. A server can report PHP {facts.version} and
 							already have the patch for {PHP2SHELL.cves[0]} applied, because the
 							distribution backported it. Tenable stopped relying on version numbers
@@ -302,7 +302,7 @@ function buildFaqs(f: VersionFacts) {
 	if (!f.hasFix && f.branchSupported) {
 		faqs.push({
 			q: `My server reports PHP ${f.version}. Does that mean I am definitely vulnerable?`,
-			a: `No. Debian, Ubuntu and Red Hat all backport security fixes into older releases without changing the version number, so a server reporting ${f.version} may already have the patch applied. The version string records what was printed, not what was patched. Ask your host, or check your control panel, for the definitive answer.`,
+			a: `No. CloudLinux, Debian, Ubuntu and Red Hat all backport security fixes into older releases without changing the version number, so a server reporting ${f.version} may already have the patch applied. The version string records what was printed, not what was patched. Ask your host, or check your control panel, for the definitive answer.`,
 		})
 	}
 

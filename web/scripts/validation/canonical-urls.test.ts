@@ -46,6 +46,7 @@ const BUILDER_PAGES = [
  */
 const DYNAMIC_PAGES = [
 	{ file: 'app/php/[version]/page.tsx', sitemapRoute: '/php/${version}' },
+	{ file: 'app/php/host/[host]/page.tsx', sitemapRoute: '/php/host/${host.slug}' },
 ];
 
 const INDEXABLE_PAGES = [
@@ -65,6 +66,7 @@ const INDEXABLE_PAGES = [
 	'app/for-shopify/page.tsx',
 	'app/for-wordpress/page.tsx',
 	'app/php-version-checker/page.tsx',
+	'app/php/host/page.tsx',
 	'app/pricing/page.tsx',
 	'app/privacy/page.tsx',
 	'app/refund/page.tsx',
@@ -114,10 +116,10 @@ describe('canonical URLs', () => {
 
 	it.each(DYNAMIC_PAGES)('$file builds a canonical from its own segment', ({ file }) => {
 		const src = read(file);
-		// It must interpolate the segment, not hardcode one version's path —
-		// a literal here would point all 205 pages at the same canonical and
-		// collapse them into one indexable URL.
-		expect(src).toMatch(/canonical:\s*`\/php\/\$\{version\}`/);
+		// It must interpolate the segment, not hardcode one path — a literal
+		// here would point every generated page at the same canonical and
+		// collapse them into a single indexable URL.
+		expect(src).toMatch(/canonical:\s*`[^`]*\$\{[^}]+\}`/);
 	});
 
 	it('every URL in the sitemap has a page that sets a canonical', () => {

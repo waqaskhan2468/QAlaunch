@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { AlertTriangle, Check, Info, Search, X } from 'lucide-react'
 
 import type { DetectResult } from '@/lib/php-check/detect'
+import { hostForPlatform } from '@/lib/php-check/hosts'
 import { PHP2SHELL, verdictHeadline } from '@/lib/php-check/php-versions'
 import { cn } from '@/lib/utils'
 
@@ -159,9 +160,23 @@ function Result({ result }: { result: DetectResult }) {
 					</p>
 					{platform ?
 						<p className='mt-2.5 text-body'>
-							Your site is served by <strong className='text-ink'>{platform}</strong>. For
-							the October 2026 PHP release, managed hosts generally patched their own
-							fleets — check {platform}&rsquo;s status page or support to confirm the date.
+							Your site is served by <strong className='text-ink'>{platform}</strong>.{' '}
+							{hostForPlatform(platform) ?
+								<>
+									We track what they have publicly said about the October 2026 PHP
+									release —{' '}
+									<Link
+										href={`/php/host/${hostForPlatform(platform)!.slug}`}
+										className='font-semibold text-brand hover:underline'>
+										see {hostForPlatform(platform)!.name}&rsquo;s status
+									</Link>
+									.
+								</>
+							:	<>
+									Managed hosts generally patched their own fleets for the October 2026
+									PHP release — check {platform}&rsquo;s status page or support to
+									confirm the date.
+								</>}
 						</p>
 					:	null}
 					<p className='mt-2.5 text-body'>

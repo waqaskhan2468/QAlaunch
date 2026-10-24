@@ -67,7 +67,7 @@ const FAQS = [
 	},
 	{
 		q: 'My site reports an old PHP version. Is my site vulnerable?',
-		a: 'Not necessarily, and anyone who tells you otherwise from outside your server is guessing. Debian, Ubuntu and Red Hat all apply security fixes to older releases without changing the version number, so a server can report PHP 8.3.8 and already have the fix applied. The version string tells you what was printed, not what was patched. Ask your host, or check your control panel.',
+		a: 'Not necessarily, and anyone who tells you otherwise from outside your server is guessing. CloudLinux, Debian, Ubuntu and Red Hat all apply security fixes to older releases without changing the version number, so a server can report PHP 8.3.8 and already have the fix applied. The version string tells you what was printed, not what was patched. Ask your host, or check your control panel.',
 	},
 	{
 		q: 'Can you tell me if my website has been hacked?',
@@ -176,6 +176,24 @@ export default function Page() {
 					</ol>
 				</section>
 
+				<section className='mt-14'>
+					<h2 className='font-heading text-[26px] font-black tracking-tight text-ink'>
+						Has your host already patched it?
+					</h2>
+					<p className='mt-3 text-[16px] leading-relaxed text-body'>
+						For most people this is the question that actually matters, because on shared
+						and managed hosting the fix is your host&rsquo;s job rather than yours. We
+						keep a dated record of what each major host has{' '}
+						<strong className='text-ink'>publicly said</strong>, quoted from their own
+						pages — and we say so plainly where we could not find a statement.
+					</p>
+					<Link
+						href='/php/host'
+						className='mt-4 inline-flex items-center rounded-xl border-2 border-slate-deep px-5 py-2.5 text-[15px] font-bold text-ink transition hover:bg-slate-deep hover:text-white'>
+						See what each host has said →
+					</Link>
+				</section>
+
 				{/* ── The version matrix. Tables extract cleanly. ────────── */}
 				<section className='mt-14'>
 					<h2 className='font-heading text-[26px] font-black tracking-tight text-ink'>
@@ -231,7 +249,7 @@ export default function Page() {
 						the site, which is the whole reason they work that way.
 					</p>
 					<p className='mt-3 text-[16px] leading-relaxed text-body'>
-						It also cannot confirm that you are patched. Debian, Ubuntu and Red Hat apply
+						It also cannot confirm that you are patched. CloudLinux, Debian, Ubuntu and Red Hat apply
 						security fixes to older releases without changing the version number, so a
 						server reporting PHP 8.3.8 may already have the fix. Anyone telling you from
 						outside that your site is definitely vulnerable is guessing from a banner.

@@ -1,4 +1,5 @@
 import { MetadataRoute } from 'next'
+import { HOSTS } from '@/lib/php-check/hosts';
 import { PHP_RELEASE_ORDER } from '@/lib/php-check/php-releases';
 
 export default function sitemap(): MetadataRoute.Sitemap {
@@ -144,6 +145,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
 			lastModified: new Date('2026-10-24'),
 			changeFrequency: 'monthly' as const,
 			priority: 0.6,
+		})),
+		// Per-host patch status: the index table, then a page per host.
+		{
+			url: `${baseUrl}/php/host`,
+			lastModified: new Date('2026-10-24'),
+			changeFrequency: 'weekly' as const,
+			priority: 0.8,
+		},
+		...HOSTS.map((host) => ({
+			url: `${baseUrl}/php/host/${host.slug}`,
+			lastModified: new Date('2026-10-24'),
+			changeFrequency: 'weekly' as const,
+			priority: 0.7,
 		})),
     {
       url: `${baseUrl}/blog/vibe-coding-website-bugs`,
