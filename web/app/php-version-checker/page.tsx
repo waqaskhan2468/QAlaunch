@@ -59,7 +59,7 @@ const FAQS = [
 	},
 	{
 		q: 'Which PHP version fixed the October 2026 vulnerability?',
-		a: `The fix shipped in PHP ${FIXED_IN['8.5']}, ${FIXED_IN['8.4']}, ${FIXED_IN['8.3']} and ${FIXED_IN['8.2']}, released 22 October 2026. The advisories are ${PHP2SHELL.cves[0]} and ${PHP2SHELL.cves[1]}, both rated CVSS ${PHP2SHELL.cvss} Critical. PHP branches older than 8.2 receive no security updates at all, so no patch level on them is current.`,
+		a: `The fix shipped in PHP ${FIXED_IN['8.5']}, ${FIXED_IN['8.4']}, ${FIXED_IN['8.3']} and ${FIXED_IN['8.2']}, released 21 October 2026. The advisories are ${PHP2SHELL.cves[0]} and ${PHP2SHELL.cves[1]}, both rated CVSS ${PHP2SHELL.cvss} Critical. PHP branches older than 8.2 receive no security updates at all, so no patch level on them is current.`,
 	},
 	{
 		q: 'Does WordPress need updating for this?',
@@ -132,7 +132,7 @@ export default function Page() {
 					<strong className='text-ink'>{FIXED_IN['8.5']}</strong>,{' '}
 					<strong className='text-ink'>{FIXED_IN['8.4']}</strong>,{' '}
 					<strong className='text-ink'>{FIXED_IN['8.3']}</strong> and{' '}
-					<strong className='text-ink'>{FIXED_IN['8.2']}</strong>, released 22 October 2026,
+					<strong className='text-ink'>{FIXED_IN['8.2']}</strong>, released 21 October 2026,
 					for {PHP2SHELL.cves[0]} and {PHP2SHELL.cves[1]} (CVSS {PHP2SHELL.cvss}, Critical).
 					WordPress itself needs no update — the fix comes from your host.
 				</p>
