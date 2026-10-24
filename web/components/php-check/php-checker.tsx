@@ -6,6 +6,7 @@ import { AlertTriangle, Check, Info, Search, X } from 'lucide-react'
 
 import type { DetectResult } from '@/lib/php-check/detect'
 import { hostForPlatform } from '@/lib/php-check/hosts'
+import { NextSteps } from '@/components/php-check/next-steps'
 import { PHP2SHELL, verdictHeadline } from '@/lib/php-check/php-versions'
 import { cn } from '@/lib/utils'
 
@@ -192,7 +193,8 @@ function Result({ result }: { result: DetectResult }) {
 			:	<Panel tone='warn' icon={<AlertTriangle className='size-4' />}>
 					<p className='font-bold text-ink'>{verdictHeadline(phpVerdict, phpVersionDetected)}</p>
 					<p className='mt-2 text-body'>
-						This is worth checking, not panicking about. Debian, Ubuntu and Red Hat all
+						This is worth checking, not panicking about. CloudLinux, Debian, Ubuntu and
+						Red Hat all
 						apply security fixes without changing the version number, so a server can
 						report {phpVersionDetected} and still be patched. The reliable answer comes
 						from your host.
@@ -256,21 +258,11 @@ function Result({ result }: { result: DetectResult }) {
 				</ul>
 			</div>
 
-			<div className='mt-7 rounded-xl bg-slate-deep p-5'>
-				<p className='text-[15px] font-bold text-white'>
-					This read one page. Your site is bigger than that.
-				</p>
-				<p className='mt-1.5 text-[14px] leading-relaxed text-white/70'>
-					A full scan opens your site in a real browser and checks every page you choose —
-					broken links, forms that fail silently, mobile layout, and the configuration
-					findings above across the whole site, with a screenshot of each one.
-				</p>
-				<Link
-					href='/?utm_source=php_checker'
-					className='mt-4 inline-flex items-center justify-center rounded-xl bg-accent-bright px-5 py-2.5 text-[14px] font-extrabold text-white transition hover:-translate-y-0.5'>
-					Run a free full scan →
-				</Link>
-			</div>
+			<NextSteps
+				websiteUrl={result.finalUrl}
+				detectedPhp={phpVersionDetected}
+				detectedHost={platform}
+			/>
 
 			<p className='mt-4 text-[12px] leading-relaxed text-muted-ink'>
 				This check reads one response. It cannot see your files, your database, your

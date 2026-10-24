@@ -157,6 +157,37 @@ export const auditEnquirySchema = z.object({
 	company: honeypot,
 });
 
+/**
+ * "Hire an expert" enquiry from the PHP checker results.
+ *
+ * A different thing from auditEnquirySchema: that one sells the $299 manual
+ * audit off a scan result. This one is someone who has just been told their
+ * PHP is out of date and wants a person to deal with it. Different intent,
+ * different inbox.
+ *
+ * Deliberately short. Everything past the third field costs conversions, and
+ * the whole point is to start a conversation rather than collect a brief.
+ */
+export const expertEnquirySchema = z.object({
+	name: singleLine(120, 'Name').min(1, 'Name is required.'),
+	email: z
+		.string()
+		.trim()
+		.min(1, 'Email is required.')
+		.email('Enter a valid email address.')
+		.max(160),
+	/** Prefilled from the check they just ran, but editable. Reaches the Subject. */
+	websiteUrl: singleLine(300, 'Website').min(1, 'Website is required.'),
+	/** Optional one-liner, so the reply can be useful rather than "what do you need?". */
+	need: singleLine(300, 'Note').optional(),
+	/** Carried through from the check, for context in the alert. Never shown to them. */
+	detectedPhp: singleLine(40, 'PHP version').optional(),
+	detectedHost: singleLine(80, 'Host').optional(),
+	company: honeypot,
+});
+
+export type ExpertEnquiryData = z.infer<typeof expertEnquirySchema>;
+
 export type ScanPackage = z.infer<typeof scanPackageSchema>;
 export type WebsiteType = z.infer<typeof websiteTypeSchema>;
 export type ScanStatus = z.infer<typeof scanStatusSchema>;
