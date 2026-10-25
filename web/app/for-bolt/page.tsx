@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { PACKAGE_PRICE_USD, formatPackagePrice } from '@/components/pricing/pricing-plans'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
@@ -30,8 +31,8 @@ const structuredData = {
   offers: {
     '@type': 'AggregateOffer',
     priceCurrency: 'USD',
-    lowPrice: '9',
-    highPrice: '59',
+    lowPrice: String(PACKAGE_PRICE_USD.basic),
+    highPrice: String(PACKAGE_PRICE_USD.premium),
     offerCount: '3',
   },
   creator: {
@@ -89,7 +90,7 @@ const FAQS = [
   },
   {
     q: 'What does the paid report include?',
-    a: 'The full report covers every page you choose (1 page for $9, 2-5 pages for $24, 6-10 pages for $59), delivered as a PDF by email. One-time purchase, no subscription.',
+    a: `The full report covers the pages in your plan (your homepage for ${formatPackagePrice('basic')}, up to 5 pages for ${formatPackagePrice('standard')}, up to 10 pages for ${formatPackagePrice('premium')}), delivered as a PDF by email. One-time purchase, no subscription.`,
   },
   {
     q: 'Can it find security issues in my Bolt app?',
@@ -171,7 +172,7 @@ export default function ForBoltPage() {
             {[
               { n: '1', t: 'Paste your deployed URL', d: 'The live URL where your Bolt site is hosted — stackblitz.io, your own domain, wherever it\'s deployed.' },
               { n: '2', t: 'Real browser audit', d: 'A real cloud browser opens your site, takes desktop + mobile screenshots, and runs 35+ automated checks.' },
-              { n: '3', t: 'Plain-English report', d: 'Top issues shown free. Full report with every page, delivered as PDF, from $9 one-time.' },
+              { n: '3', t: 'Plain-English report', d: `Top issues shown free. Full report with every page, delivered as PDF, from ${formatPackagePrice('basic')} one-time.` },
             ].map((s) => (
               <div key={s.n} className="flex gap-4">
                 <div className="text-4xl font-extrabold text-[#22c55e] leading-none">{s.n}</div>
@@ -212,7 +213,7 @@ export default function ForBoltPage() {
       <section className="bg-[#09111f] text-white py-16 px-6 text-center">
         <div className="max-w-xl mx-auto">
           <h2 className="text-2xl font-bold mb-3">Find what&apos;s broken before your users do</h2>
-          <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from $9.</p>
+          <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from {formatPackagePrice('basic')}.</p>
           <Link href="/#audit-input" className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
             Audit My Bolt Website Free →
           </Link>

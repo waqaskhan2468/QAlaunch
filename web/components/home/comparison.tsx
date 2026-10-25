@@ -6,6 +6,7 @@ import { motion } from "motion/react"
 import { Reveal, fadeUpSoft, stagger } from "@/components/motion/primitives"
 import { SectionHeader } from "@/components/site/section-header"
 import { cn } from "@/lib/utils"
+import { formatPackagePrice } from "@/components/pricing/pricing-plans"
 
 type Cell =
   | { kind: "yes" }
@@ -59,7 +60,7 @@ const rows: { feature: string; qa: Cell; others: Cell }[] = [
     others: { kind: "no" },
   },
   {
-    feature: "Pricing starting at $9 per report",
+    feature: `Pricing starting at ${formatPackagePrice('basic')} per report`,
     qa: { kind: "yes" },
     others: { kind: "no" },
   },

@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { PACKAGE_PRICE_USD, formatPackagePrice } from '@/components/pricing/pricing-plans'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
@@ -30,8 +31,8 @@ const structuredData = {
   offers: {
     '@type': 'AggregateOffer',
     priceCurrency: 'USD',
-    lowPrice: '9',
-    highPrice: '59',
+    lowPrice: String(PACKAGE_PRICE_USD.basic),
+    highPrice: String(PACKAGE_PRICE_USD.premium),
     offerCount: '3',
   },
   creator: {
@@ -93,7 +94,7 @@ const FAQS = [
   },
   {
     q: 'What does it cost?',
-    a: 'The free scan shows your top issues with no signup. Full reports are one-time purchases from $9 (single page) to $59 (up to 10 pages). No subscription.',
+    a: `The free scan shows your top issues with no signup. Full reports are one-time purchases from ${formatPackagePrice('basic')} (your homepage) to ${formatPackagePrice('premium')} (up to 10 pages). No subscription.`,
   },
 ]
 
@@ -171,7 +172,7 @@ export default function ForWordPressPage() {
             {[
               { n: '1', t: 'Paste your site URL', d: 'No plugin, no login, no admin access. Just the public URL of any page.' },
               { n: '2', t: 'Real browser audit', d: 'Desktop and mobile screenshots, 35+ automated checks, AI-powered visual review of what visitors actually see.' },
-              { n: '3', t: 'Plain-English report', d: 'Top issues free in ~2 minutes. Full multi-page report as PDF from $9, one-time.' },
+              { n: '3', t: 'Plain-English report', d: `Top issues free in ~2 minutes. Full multi-page report as PDF from ${formatPackagePrice('basic')}, one-time.` },
             ].map((s) => (
               <div key={s.n} className="flex gap-4">
                 <div className="text-4xl font-extrabold text-[#22c55e] leading-none">{s.n}</div>
@@ -221,7 +222,7 @@ export default function ForWordPressPage() {
       <section className="bg-[#09111f] text-white py-16 px-6 text-center">
         <div className="max-w-xl mx-auto">
           <h2 className="text-2xl font-bold mb-3">See your site the way visitors do</h2>
-          <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from $9.</p>
+          <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from {formatPackagePrice('basic')}.</p>
           <Link href="/#audit-input" className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
             Audit My WordPress Site Free →
           </Link>

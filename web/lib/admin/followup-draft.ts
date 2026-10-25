@@ -1,3 +1,5 @@
+import { formatPackagePrice } from '@/components/pricing/pricing-plans'
+
 /**
  * Builds the personalised follow-up email offered in /admin for a free scan.
  *
@@ -64,7 +66,7 @@ export function buildFollowUpDraft(scan: FollowUpScan): FollowUpDraft {
 			'',
 			"That's 9 years of professional QA testing, not a tool. Reply and tell me about the site and I'll give you a straight answer — including if I think you don't need it.",
 			'',
-			'If you just want the rest of what the scan found, the full automated report for that page is $9.',
+			`If you just want the rest of what the scan found, the full automated report for that page is ${formatPackagePrice('basic')}.`,
 			'',
 			'Either way, good luck with it.',
 			'',
@@ -88,7 +90,7 @@ export function buildFollowUpDraft(scan: FollowUpScan): FollowUpDraft {
 		'',
 		'The free scan only covers that one page though, and in my experience the problems usually sit deeper in — pricing pages, contact forms, product pages, anything added later or edited after launch. Those are the pages nobody re-checks.',
 		'',
-		'A 5-page report is $24 and covers the paths visitors actually take through the site.',
+		`A 5-page report is ${formatPackagePrice('standard')} and covers the paths visitors actually take through the site.`,
 		'',
 		`If it matters that ${host} actually works — a launch coming up, ads running to it, a checkout that has to hold — I'll test it myself rather than leaving it to a tool. Up to 10 key pages, gone through by hand on real phones and desktops, every flow a customer actually uses. Written report in plain language with screenshots, plus a 15-minute call. $299, done in 3 business days.`,
 		'',

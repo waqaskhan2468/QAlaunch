@@ -3,6 +3,7 @@
 import { ArrowRight } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 import { motion } from "motion/react"
+import { formatPackagePrice } from "@/components/pricing/pricing-plans"
 
 /**
  * Full-width conversion CTA band. Dark brand gradient with a subtle
@@ -58,7 +59,7 @@ export function CtaBand() {
         </h2>
         <p className="mx-auto mt-4 max-w-l  text-base leading-relaxed text-white/70 sm:text-lg">
           Free audit in 120 seconds. No signup needed. Full expert report from
-          just $9.
+          just {formatPackagePrice('basic')}.
         </p>
         <motion.button
           type="button"

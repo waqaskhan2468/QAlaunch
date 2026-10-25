@@ -5,6 +5,7 @@ import { faqPageSchema, jsonLd } from '@/lib/seo/structured-data'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 import type { PlatformConfig } from '@/lib/platform/platforms'
+import { PACKAGE_PRICE_USD, formatPackagePrice } from '@/components/pricing/pricing-plans'
 
 const SITE = 'https://getqalaunch.com'
 
@@ -39,8 +40,8 @@ function structuredData(cfg: PlatformConfig) {
 		offers: {
 			'@type': 'AggregateOffer',
 			priceCurrency: 'USD',
-			lowPrice: '9',
-			highPrice: '59',
+			lowPrice: String(PACKAGE_PRICE_USD.basic),
+			highPrice: String(PACKAGE_PRICE_USD.premium),
 			offerCount: '3',
 		},
 		creator: { '@type': 'Organization', name: 'QAlaunch', url: SITE },
@@ -136,7 +137,7 @@ export function PlatformPage({ config: cfg }: { config: PlatformConfig }) {
 								{
 									n: '3',
 									t: 'Get your report',
-									d: 'Top issues in the free preview. Full report with every page from $9, one-time.',
+									d: `Top issues in the free preview. Full report with every page from ${formatPackagePrice('basic')}, one-time.`,
 								},
 							].map((s) => (
 								<div key={s.n} className="flex gap-4">
@@ -204,7 +205,7 @@ export function PlatformPage({ config: cfg }: { config: PlatformConfig }) {
 					<div className="max-w-xl mx-auto">
 						<h2 className="text-2xl font-bold mb-3">{cfg.bottomCtaHeading}</h2>
 						<p className="text-[#aab3c8] mb-6">
-							Free scan, no signup. Full report from $9.
+							Free scan, no signup. Full report from {formatPackagePrice('basic')}.
 						</p>
 						<Link
 							href="/#audit-input"

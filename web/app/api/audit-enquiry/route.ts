@@ -26,7 +26,7 @@ function row(label: string, value: string | undefined): string {
  *
  * Someone on their own result page asking for the done-for-you manual audit.
  * This is the highest-value lead the site produces — a $299 enquiry against a
- * $9 report — so the alert is sent immediately and the enquirer's address is
+ * $19 report — so the alert is sent immediately and the enquirer's address is
  * set as reply-to, making the reply a single click.
  *
  * Body: { name, email, whatsapp?, websiteUrl?, scanId?, concern? }

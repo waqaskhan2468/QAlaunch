@@ -90,16 +90,16 @@ test('separates free, paid, and abandoned correctly', async () => {
 
 test('revenue uses list prices and ignores unpaid rows', async () => {
 	scanRows = [
-		scan({ package: 'basic', payment_status: 'paid' }), // 9
-		scan({ package: 'standard', payment_status: 'paid' }), // 24
-		scan({ package: 'premium', payment_status: 'paid' }), // 59
+		scan({ package: 'basic', payment_status: 'paid' }), // 19
+		scan({ package: 'standard', payment_status: 'paid' }), // 49
+		scan({ package: 'premium', payment_status: 'paid' }), // 99
 		scan({ package: 'premium', payment_status: 'pending' }), // not counted
 	];
 
 	const d = await loadAdminAnalytics('30d');
 
-	expect(d.summary.revenue).toBe(92);
-	expect(d.summary.abandonedRevenue).toBe(59);
+	expect(d.summary.revenue).toBe(167);
+	expect(d.summary.abandonedRevenue).toBe(99);
 });
 
 test('conversion and checkout-completion rates', async () => {
@@ -141,11 +141,11 @@ test('groups by day and by package', async () => {
 	// Newest day first.
 	expect(d.byDay[0].day).toBe('2026-09-02');
 	expect(d.byDay[0].paid).toBe(1);
-	expect(d.byDay[0].revenue).toBe(24);
+	expect(d.byDay[0].revenue).toBe(49);
 	expect(d.byDay[1].day).toBe('2026-09-01');
 	expect(d.byDay[1].free).toBe(2);
 
-	expect(d.byPackage).toEqual([{ pkg: 'standard', count: 1, revenue: 24 }]);
+	expect(d.byPackage).toEqual([{ pkg: 'standard', count: 1, revenue: 49 }]);
 });
 
 test('funnel counts unique scans per step, not raw events', async () => {

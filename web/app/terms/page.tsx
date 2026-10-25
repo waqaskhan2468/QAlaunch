@@ -3,6 +3,7 @@ import Link from 'next/link';
 
 import { SiteNav } from '@/components/site/site-nav';
 import { SiteFooter } from '@/components/site/site-footer';
+import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 
 export const metadata: Metadata = {
 	alternates: { canonical: '/terms' },
@@ -49,8 +50,8 @@ export default function TermsPage() {
 									Record.
 								</li>
 								<li>
-									Prices are in USD: Basic $9 (1 page), Standard $24 (2–5 pages),
-									and Premium $59 (6–10 pages).
+									Prices are in USD: Homepage {formatPackagePrice('basic')} (your homepage), Small site {formatPackagePrice('standard')} (up to 5 pages),
+									and Whole site {formatPackagePrice('premium')} (up to 10 pages).
 								</li>
 								<li>Payment is one-time per report — there are no subscriptions.</li>
 								<li>You will receive a receipt from Paddle after payment.</li>

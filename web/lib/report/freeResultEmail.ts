@@ -1,5 +1,6 @@
 import { escapeHtml } from '@/lib/api/email-safety';
 import { labelFromScore } from '@/lib/scoring/health';
+import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 
 /**
  * The email someone gets when the free scan they asked to be notified about
@@ -112,7 +113,7 @@ export function buildFreeResultEmailText(input: FreeResultEmailInput): string {
 		'',
 		'Want the rest?',
 		'A full report explains what each issue means, why it matters to a visitor,',
-		'and what to change. One-time payment from $9, no subscription.',
+		`and what to change. One-time payment from ${formatPackagePrice('basic')}, no subscription.`,
 		'',
 		'Or if you would rather not do it yourself: I test the site by hand,',
 		'the way a real customer would use it, and send you a written report in',
@@ -246,7 +247,7 @@ export function buildFreeResultEmailHtml(input: FreeResultEmailInput): string {
 							<p style="margin:0 0 6px;color:${INK};font-size:16px;font-weight:700;line-height:23px;">Want the rest of it?</p>
 							<p style="margin:0 0 18px;color:${INK};font-size:15px;line-height:23px;">
 								A full report explains what each issue means, why it matters to a
-								visitor, and what to change. One-time payment from $9 — no
+								visitor, and what to change. One-time payment from ${formatPackagePrice('basic')} — no
 								subscription.
 							</p>
 							<p style="margin:0 0 6px;color:${INK};font-size:16px;font-weight:700;line-height:23px;">Or I can do it by hand</p>

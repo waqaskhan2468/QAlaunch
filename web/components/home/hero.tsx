@@ -12,6 +12,7 @@ import { isValidPublicWebsiteUrl } from "@/lib/validation/url"
 import { Flag } from "@/components/home/flag"
 import { trackOpenAiEvent } from "@/lib/analytics/openai"
 import { trackRedditEvent } from "@/lib/analytics/reddit"
+import { formatPackagePrice } from "@/components/pricing/pricing-plans"
 
 /**
  * Hero split — marketing copy + URL capture on the left over navy, an audit
@@ -202,7 +203,7 @@ export function Hero() {
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 px-1">
               <TrustItem label="No signup required" />
               <TrustItem label="Free preview in 120s" />
-              <TrustItem label="Full report from $9" />
+              <TrustItem label={`Full report from ${formatPackagePrice('basic')}`} />
             </div>
           </motion.div>
 

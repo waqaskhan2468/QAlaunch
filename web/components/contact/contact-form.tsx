@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { contactFormSchema } from "@/types/zod"
+import { formatPackagePrice } from "@/components/pricing/pricing-plans"
 
 /**
  * Contact form — posts to POST /api/contact, which emails the submission to
@@ -218,9 +219,9 @@ export function ContactForm() {
           <option value="" disabled>
             Select page count
           </option>
-          <option>1 page — Basic ($9)</option>
-          <option>2–5 pages — Standard ($24)</option>
-          <option>6–10 pages — Premium ($59)</option>
+          <option>1 page — Basic ({formatPackagePrice('basic')})</option>
+          <option>2–5 pages — Standard ({formatPackagePrice('standard')})</option>
+          <option>6–10 pages — Premium ({formatPackagePrice('premium')})</option>
           <option>11–25 pages (Custom)</option>
           <option>26–50 pages (Custom)</option>
           <option>50+ pages (Enterprise)</option>

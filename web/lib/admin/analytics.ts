@@ -1,5 +1,6 @@
 import { getServiceSupabase } from '@/lib/db/supabase';
 import type { ScanPackage } from '@/types/zod';
+import { PACKAGE_PRICE_USD } from '@/components/pricing/pricing-plans';
 
 /**
  * Read-only aggregations for the /admin dashboard.
@@ -12,12 +13,14 @@ import type { ScanPackage } from '@/types/zod';
 
 const ROW_LIMIT = 5000;
 
-/** List prices used for revenue estimates — actual charges are not stored. */
+/**
+ * List prices used for revenue estimates — actual charges are not stored, so
+ * every paid scan is counted at today's list price, including ones sold at an
+ * older price.
+ */
 const PACKAGE_PRICE: Record<string, number> = {
 	free: 0,
-	basic: 9,
-	standard: 24,
-	premium: 59,
+	...PACKAGE_PRICE_USD,
 	enterprise: 0, // custom-quoted; excluded from estimates
 };
 

@@ -130,12 +130,12 @@ describe('buildRecoveryDraft', () => {
 	});
 
 	it('quotes the price of the package they actually chose', () => {
-		expect(buildRecoveryDraft({ host: 'a.com', pkg: 'basic', scanId: 'x' }).body).toContain('$9');
+		expect(buildRecoveryDraft({ host: 'a.com', pkg: 'basic', scanId: 'x' }).body).toContain('$19');
 		expect(buildRecoveryDraft({ host: 'a.com', pkg: 'standard', scanId: 'x' }).body).toContain(
-			'$24',
+			'$49',
 		);
 		expect(buildRecoveryDraft({ host: 'a.com', pkg: 'premium', scanId: 'x' }).body).toContain(
-			'$59',
+			'$99',
 		);
 	});
 
