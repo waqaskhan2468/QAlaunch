@@ -1,15 +1,46 @@
 import { NextResponse } from 'next/server';
-import { normalizeUrl, urlHash, isPrivateUrl } from '@/lib/utils/url';
+import {
+	normalizeUrl,
+	urlHash,
+	isPrivateUrl,
+	resolvesToPrivateAddress,
+} from '@/lib/utils/url';
 import { getServiceSupabase } from '@/lib/db/supabase';
 import { scanStartSchema } from '@/types/zod';
 import { AppError, asyncHandler } from '@/lib/api/error';
 import { assertScanStartAllowed } from '@/lib/api/scan-start-rate-limit';
 import { queueScanJob } from '@/lib/api/queue-scan-job';
-import { validateScanTarget } from '@/lib/scan/validate-target';
+import { editorUrlMessage, validateScanTarget } from '@/lib/scan/validate-target';
 import { isBlockedDomain } from '@/lib/scan/blocklist';
 import { logFunnelEvent } from '@/lib/analytics/funnel';
 
 export const runtime = 'nodejs';
+
+const FREE_PREVIEW_USED_MESSAGE =
+	'You have already used your free preview for this website. Your earlier results are still available — unlock the full report to see everything.';
+
+/**
+ * The free scan a paid order is placed from, when it checks out: it must be a
+ * finished free scan of the SAME site, or the paid report would inherit
+ * findings for a different page. Returns null (never throws) so a stale or
+ * forged id simply means "no source", and the purchase goes ahead as a fresh
+ * scan.
+ */
+async function resolveSourceScan(
+	supabase: ReturnType<typeof getServiceSupabase>,
+	sourceScanId: string | undefined,
+	urlHashOfTarget: string,
+): Promise<{ id: string; user_email: string | null } | null> {
+	if (!sourceScanId) return null;
+	const { data } = await supabase
+		.from('scans')
+		.select('id, package, status, url_hash, user_email')
+		.eq('id', sourceScanId)
+		.maybeSingle();
+	if (!data || data.package !== 'free' || data.status !== 'done') return null;
+	if (data.url_hash !== urlHashOfTarget) return null;
+	return { id: data.id, user_email: data.user_email ?? null };
+}
 
 export const POST = asyncHandler(async (req: Request) => {
 	const body = await req.json();
@@ -24,7 +55,8 @@ export const POST = asyncHandler(async (req: Request) => {
 		);
 	}
 
-	const { url, package: pkg, email, acknowledgePublicOnly, attribution } = parsed.data;
+	const { url, package: pkg, email, acknowledgePublicOnly, attribution, sourceScanId } =
+		parsed.data;
 	const normalized = normalizeUrl(url);
 
 	if (isPrivateUrl(normalized)) {
@@ -32,6 +64,17 @@ export const POST = asyncHandler(async (req: Request) => {
 			400,
 			'private_url_not_allowed',
 			'Private or local URLs are not allowed. Please enter a public website URL.',
+		);
+	}
+
+	// A public-looking hostname can still resolve to a private address. The
+	// scanner would fetch whatever it points at, so look it up before anything
+	// else does.
+	if (await resolvesToPrivateAddress(normalized)) {
+		throw new AppError(
+			400,
+			'private_url_not_allowed',
+			'This address points at a private network, so it cannot be scanned. Please enter a public website URL.',
 		);
 	}
 
@@ -61,7 +104,13 @@ export const POST = asyncHandler(async (req: Request) => {
 	// before responding). The identical reachability / login-gate check instead
 	// runs as the first step of the Inngest pipeline — see
 	// lib/scan/steps/checkReachability and run-scan's 'check-reachability' step.
-	if (pkg !== 'free') {
+	// A paid order placed from a finished free scan of the same site skips the
+	// live gate: that site was reachable minutes ago, and the extra fetch only
+	// added a second or two to the moment someone has their card out.
+	const sourceScan =
+		pkg !== 'free' ? await resolveSourceScan(supabase, sourceScanId, hash) : null;
+
+	if (pkg !== 'free' && !sourceScan) {
 		const validation = await validateScanTarget(normalized);
 
 		if (validation.status === 'unreachable') {
@@ -72,6 +121,13 @@ export const POST = asyncHandler(async (req: Request) => {
 					message:
 						"We couldn't load this website. Please check the URL and try again.",
 				},
+				{ status: 422 },
+			);
+		}
+
+		if (validation.status === 'editor_url') {
+			return NextResponse.json(
+				{ ok: false, code: 'editor_url', message: editorUrlMessage(validation) },
 				{ status: 422 },
 			);
 		}
@@ -90,13 +146,18 @@ export const POST = asyncHandler(async (req: Request) => {
 		}
 	}
 
-	if (pkg === 'free') {
+	// The id of the earlier free scan travels with the 409 so the result page
+	// can show those results again instead of a dead end. A returning visitor
+	// is the most likely person on the site to buy; "free preview already
+	// used" with no way back to what they saw was sending them away.
+	const findUsedFreePreview = async (): Promise<string | null> => {
 		const { data: existing, error: freeCheckError } = await supabase
 			.from('scans')
 			.select('id')
 			.eq('url_hash', hash)
 			.eq('package', 'free')
 			.eq('free_preview_used', true)
+			.order('created_at', { ascending: false })
 			.limit(1);
 
 		if (freeCheckError) {
@@ -107,51 +168,61 @@ export const POST = asyncHandler(async (req: Request) => {
 				'Unable to validate free plan eligibility right now.',
 			);
 		}
+		return existing?.[0]?.id ?? null;
+	};
 
-		if (existing?.length) {
-			return NextResponse.json(
-				{
-					ok: false,
-					code: 'free_preview_used',
-					message:
-						'You have already used your free preview for this website. To continue, please select a paid package.',
-				},
-				{ status: 409 },
-			);
-		}
-	}
-
-	const { data: scan, error: insertError } = await supabase
-		.from('scans')
-		.insert({
-			url: normalized,
-			url_hash: hash,
-			package: pkg,
-			status: 'pending',
-			user_email: email ?? null,
-			payment_status: pkg === 'free' ? 'free' : 'pending',
-			free_preview_used: false,
-			// Where this visitor came from. Null throughout for direct traffic,
-			// which is the truthful record rather than a gap to fill in.
-			utm_source: attribution?.utmSource ?? null,
-			utm_medium: attribution?.utmMedium ?? null,
-			utm_campaign: attribution?.utmCampaign ?? null,
-			referrer_host: attribution?.referrerHost ?? null,
-			landing_path: attribution?.landingPath ?? null,
-		})
-		.select('*')
-		.single();
-
-	if (pkg === 'free' && (insertError as { code?: string } | null)?.code === '23505') {
-		return NextResponse.json(
+	const freePreviewUsedResponse = (existingScanId: string | null) =>
+		NextResponse.json(
 			{
 				ok: false,
 				code: 'free_preview_used',
-				message:
-					'You have already used your free preview for this website. To continue, please select a paid package.',
+				message: FREE_PREVIEW_USED_MESSAGE,
+				existingScanId,
 			},
 			{ status: 409 },
 		);
+
+	if (pkg === 'free') {
+		const existingScanId = await findUsedFreePreview();
+		if (existingScanId) return freePreviewUsedResponse(existingScanId);
+	}
+
+	const insertRow = {
+		url: normalized,
+		url_hash: hash,
+		package: pkg,
+		status: 'pending',
+		user_email: email ?? null,
+		payment_status: pkg === 'free' ? 'free' : 'pending',
+		free_preview_used: false,
+		// Where this visitor came from. Null throughout for direct traffic,
+		// which is the truthful record rather than a gap to fill in.
+		utm_source: attribution?.utmSource ?? null,
+		utm_medium: attribution?.utmMedium ?? null,
+		utm_campaign: attribution?.utmCampaign ?? null,
+		referrer_host: attribution?.referrerHost ?? null,
+		landing_path: attribution?.landingPath ?? null,
+	};
+
+	let { data: scan, error: insertError } = await supabase
+		.from('scans')
+		.insert(sourceScan ? { ...insertRow, source_scan_id: sourceScan.id } : insertRow)
+		.select('*')
+		.single();
+
+	// supabase/scans_source_scan.sql not applied yet: the column is a nice-to-
+	// have for the dashboard, never a reason to lose a sale. Retry without it.
+	if (sourceScan && (insertError as { code?: string } | null)?.code === '42703') {
+		console.warn('[scan/start] scans.source_scan_id missing — run supabase/scans_source_scan.sql');
+		({ data: scan, error: insertError } = await supabase
+			.from('scans')
+			.insert(insertRow)
+			.select('*')
+			.single());
+	}
+
+	if (pkg === 'free' && (insertError as { code?: string } | null)?.code === '23505') {
+		return freePreviewUsedResponse(await findUsedFreePreview());
 	}
 
 	if (insertError || !scan) {
@@ -171,6 +242,7 @@ export const POST = asyncHandler(async (req: Request) => {
 				status: scan.status,
 				paymentRequired: true,
 				targetUrl: normalized,
+				sourceScanId: sourceScan?.id ?? null,
 				message: 'Complete payment to start your audit.',
 			},
 			{ status: 201 },

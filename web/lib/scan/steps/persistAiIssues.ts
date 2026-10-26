@@ -8,6 +8,7 @@ export async function persistAiIssuesStep(input: {
 	scanId: string;
 	pkg: ScanPackage;
 	pagesToTest: string[];
+	sourceScanId?: string | null;
 }): Promise<void> {
 	const supabase = getServiceSupabase();
 	try {
@@ -16,6 +17,7 @@ export async function persistAiIssuesStep(input: {
 			input.scanId,
 			input.pagesToTest,
 			input.pkg,
+			{ sourceScanId: input.sourceScanId ?? null },
 		);
 	} catch (error: unknown) {
 		throw new NonRetriableError(toUserFacingScanError(error));

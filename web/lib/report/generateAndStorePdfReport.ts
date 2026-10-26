@@ -134,7 +134,7 @@ async function fetchReportData(
 		supabase
 			.from('issues')
 			.select(
-				'id, category, severity, title, description, impact, page_section, display_order, scan_pages(page_url)',
+				'id, category, severity, title, description, impact, page_section, fix_instructions, screenshot_url, finding_type, display_order, scan_pages(page_url)',
 			)
 			.eq('scan_id', scanId)
 			.order('display_order', { ascending: true }),
@@ -171,6 +171,11 @@ async function fetchReportData(
 			impact: String((row as { impact: string }).impact),
 			page_section:
 				(row as { page_section: string | null }).page_section ?? null,
+			fix_instructions:
+				(row as { fix_instructions: string | null }).fix_instructions ?? null,
+			screenshot_url:
+				(row as { screenshot_url: string | null }).screenshot_url ?? null,
+			finding_type: (row as { finding_type: string | null }).finding_type ?? null,
 			display_order: Number(
 				(row as { display_order: number }).display_order ?? 0,
 			),
@@ -346,7 +351,8 @@ function buildReportEmailHtml(input: {
 	const features = [
 		'Every issue ranked by severity and business impact',
 		'A plain-English explanation of what each issue means and why it matters',
-		'Issues found across functionality, usability, mobile, performance, SEO, and accessibility',
+		'How to fix each one, written for your developer',
+		'Screenshot evidence where the scanner could pinpoint the element',
 		'An overall health score and a clear priority order for what to fix first',
 	];
 
@@ -420,7 +426,8 @@ function buildReportEmailHtml(input: {
 				<!-- Expiry notice -->
 				<tr>
 					<td align="center" style="padding:4px 32px 24px;font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#6B8AA3;">
-						This download link expires in 7 days.<br />
+						This download link expires in 7 days. The same report stays online at<br />
+						<a href="${getPublicAssetOrigin()}/result?scanId=${scanId}" style="color:#1847A8;text-decoration:none;font-weight:600;">${getPublicAssetOrigin()}/result?scanId=${scanId}</a><br />
 						Scan ID: ${scanId}
 					</td>
 				</tr>

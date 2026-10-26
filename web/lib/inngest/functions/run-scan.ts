@@ -71,7 +71,8 @@ export const runScan = inngest.createFunction(
 	},
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	async ({ event, step }: { event: any; step: any }) => {
-		const { scanId, targetUrl, package: pkg, userEmail } = event.data as ProcessPayload;
+		const { scanId, targetUrl, package: pkg, userEmail, sourceScanId } =
+			event.data as ProcessPayload;
 
 		// ── Phase 0: Reachability / login-gate check (FREE only) ────────────
 		// Free scans skip the synchronous front-door fetch in /api/scan/start so
@@ -272,7 +273,12 @@ export const runScan = inngest.createFunction(
 		);
 
 		await step.run('persist-ai-issues', () =>
-			persistAiIssuesStep({ scanId, pkg, pagesToTest: allScannedPages }),
+			persistAiIssuesStep({
+				scanId,
+				pkg,
+				pagesToTest: allScannedPages,
+				sourceScanId: sourceScanId ?? null,
+			}),
 		);
 
 		// ── Phase 5: Report + email (paid packages only) ──────────────────────

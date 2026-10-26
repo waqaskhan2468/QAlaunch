@@ -5,7 +5,7 @@ const productLinks = [
   { href: "/result", label: "Free Website Audit" },
   { href: "/pricing", label: "Pricing" },
   { href: "/compare", label: "Compare" },
-  { href: "/#sample-report", label: "Sample Report" },
+  { href: "/sample-report", label: "Sample Report" },
 ]
 
 const companyLinks = [
@@ -27,6 +27,8 @@ const platformLinks = [
   { href: "/for-wordpress", label: "For WordPress" },
   { href: "/for-base44", label: "For Base44" },
   { href: "/for-replit", label: "For Replit" },
+  { href: "/for-v0", label: "For v0" },
+  { href: "/for-claude", label: "For Claude" },
   { href: "/blog/test-base44-app-before-launch", label: "Base44 App Testing" },
   { href: "/blog/vibe-coding-website-bugs", label: "Vibe Coding Bugs" },
 ]
@@ -72,7 +74,7 @@ export function SiteFooter() {
               />
             </div>
             <p className="mt-4 max-w-sm text-[13.5px] leading-relaxed text-white/45">
-              Expert website auditing backed by 9 years of professional QA
+              Expert website auditing backed by 10 years of professional QA
               experience. Find what&apos;s broken before your users do.
             </p>
             <a

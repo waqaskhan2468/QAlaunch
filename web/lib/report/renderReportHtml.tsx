@@ -16,11 +16,36 @@ function extraLines(text: string, cpl = CHARS_PER_LINE): number {
 	return Math.max(0, Math.ceil(text.length / cpl) - 1);
 }
 
+/** Height budget for an evidence crop block (image capped at EVIDENCE_MAX_H). */
+const EVIDENCE_MAX_H = 220;
+const EVIDENCE_BLOCK_H = EVIDENCE_MAX_H + 40;
+
+/**
+ * Only a real element crop is evidence. A full-page screenshot proves nothing
+ * about one issue and would repeat the same picture under every card, so it is
+ * never embedded — the same rule the result page applies.
+ */
+function evidenceUrl(issue: ReportIssue): string | null {
+	const src = issue.screenshot_url;
+	return src && src.includes('/crop-') ? src : null;
+}
+
 function estimateIssueHeight(issue: ReportIssue): number {
 	const titleLines = 1 + extraLines(issue.title, 72);
 	const descLines = 1 + extraLines(issue.description, CHARS_PER_LINE);
 	const impactLines = 1 + extraLines(issue.impact, CHARS_PER_LINE);
-	return ISSUE_BASE_H + titleLines * 20 + descLines * 17 + impactLines * 17;
+	const fixLines = issue.fix_instructions ? 1 + extraLines(issue.fix_instructions, CHARS_PER_LINE) : 0;
+	const fixBlock = issue.fix_instructions ? 44 : 0;
+	const evidence = evidenceUrl(issue) ? EVIDENCE_BLOCK_H : 0;
+	return (
+		ISSUE_BASE_H +
+		titleLines * 20 +
+		descLines * 17 +
+		impactLines * 17 +
+		fixBlock +
+		fixLines * 17 +
+		evidence
+	);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,6 +181,10 @@ function issueToHtml(issue: ReportIssue): string {
 		? issue.page_section.slice(0, 57) + '…'
 		: issue.page_section;
 
+	const evidence = evidenceUrl(issue);
+	const fix = issue.fix_instructions?.trim() || null;
+	const isSuggestion = issue.finding_type === 'suggestion';
+
 	return `
 <div class="issue" style="border-left:3px solid ${sev.border};">
   <div class="issue-chips">
@@ -163,6 +192,7 @@ function issueToHtml(issue: ReportIssue): string {
       <span class="sev-dot" style="background:${sev.dot};"></span>${sev.label}
     </div>
     <div class="cat-chip" style="background:${cat.bg};color:${cat.color};">${escapeHtml(catLabel)}</div>
+    ${isSuggestion ? '<div class="cat-chip" style="background:#f1f5f9;color:#475569;">Suggestion</div>' : ''}
   </div>
 
   <div class="issue-title">${escapeHtml(issue.title)}</div>
@@ -170,10 +200,22 @@ function issueToHtml(issue: ReportIssue): string {
 
   <div class="issue-desc">${escapeHtml(issue.description)}</div>
 
+  ${evidence ? `
+  <div class="evidence">
+    <img class="evidence-img" src="${escapeHtml(evidence)}" alt="Screenshot evidence: ${escapeHtml(issue.title)}" />
+    <div class="evidence-caption">Screenshot evidence — captured on your page during the scan</div>
+  </div>` : ''}
+
   <div class="field-block impact-block">
     <div class="field-key">⚡ Why it matters</div>
     <div class="field-val">${escapeHtml(issue.impact)}</div>
   </div>
+
+  ${fix ? `
+  <div class="field-block fix-block">
+    <div class="field-key">🛠 How to fix it</div>
+    <div class="field-val">${escapeHtml(fix)}</div>
+  </div>` : ''}
 </div>`;
 }
 
@@ -583,6 +625,17 @@ body {
 .field-val { font-size: 11.5px; color: var(--ink-3); line-height: 1.58; }
 
 .impact-block { background: #fffbeb; border: 1px solid #fef3c7; }
+.fix-block { background: #f0fdf4; border: 1px solid #bbf7d0; }
+.fix-block .field-val { color: var(--ink-2); white-space: pre-line; }
+
+/* ── Evidence crop ────────────────────────────────────────── */
+.evidence { margin: 0 0 10px; break-inside: avoid; page-break-inside: avoid; }
+.evidence-img {
+  display: block; max-width: 100%; max-height: ${EVIDENCE_MAX_H}px;
+  height: auto; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); object-fit: contain;
+}
+.evidence-caption { font-size: 10px; color: var(--ink-4); margin-top: 4px; }
 
 /* ── Performance cards ────────────────────────────────────── */
 .perf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
@@ -696,8 +749,13 @@ ${sectionsHtml}
       <div class="footer-heading">Recommended next steps</div>
       <div class="footer-text">
         Start with Critical and High severity issues — these affect real visitors right now.
-        Share this report with your developer so they can reproduce and resolve each issue.
+        Share this report with your developer: each issue carries a "How to fix it" block they can work from directly.
         Medium and Low issues can be addressed in a follow-up sprint.
+      </div>
+      <div class="footer-text" style="margin-top:10px;">
+        <strong>A note on accuracy.</strong> This report comes from automated testing in a real browser with an AI review on top.
+        It is thorough, but not infallible — a small number of findings may turn out not to be real once checked by hand.
+        Treat it as a prioritised list to verify, not a verdict. If something in it is wrong, reply to your report email and we will look at it.
       </div>
       <a class="footer-contact" href="mailto:support@getqalaunch.com">Questions? Contact support@getqalaunch.com</a>
     </div>

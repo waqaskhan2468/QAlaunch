@@ -57,8 +57,8 @@ const tests: {
     iconTone: "bg-[#F0FDFA] text-[#0D9488]",
     title: "Mobile Responsiveness",
     description:
-      "We test your layout at iPhone SE (375px), iPhone 14 (390px), and iPad (768px) sizes — checking every section, navigation, touch targets, and font readability across real device widths.",
-    tags: ["iPhone SE", "Touch Targets", "Overflow", "Font Scaling"],
+      "We load your site at a real phone width (390px, the iPhone 14 class) and on desktop (1440px), then check navigation, text overflow, button sizes and readability on both — with a screenshot of each so you can see what we saw.",
+    tags: ["390px phone", "1440px desktop", "Overflow", "Readability"],
     priority: "top",
   },
   {

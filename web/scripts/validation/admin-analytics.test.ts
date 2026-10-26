@@ -12,7 +12,7 @@ function makeQuery(rows: Row[], count: number | null) {
 	const builder: Record<string, unknown> = {
 		then: (resolve: (v: typeof result) => unknown) => Promise.resolve(resolve(result)),
 	};
-	for (const method of ['select', 'order', 'limit', 'gte', 'eq', 'in']) {
+	for (const method of ['select', 'order', 'limit', 'gte', 'eq', 'in', 'not']) {
 		builder[method] = () => builder;
 	}
 	// `select(..., {head:true})` resolves to a count-only result.

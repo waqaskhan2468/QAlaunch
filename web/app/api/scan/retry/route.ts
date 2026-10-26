@@ -24,7 +24,7 @@ export const POST = asyncHandler(async (req: Request) => {
 
 	const { data: scan, error } = await supabase
 		.from('scans')
-		.select('id, url, package, status, payment_status, user_email')
+		.select('id, url, package, status, payment_status, user_email, source_scan_id')
 		.eq('id', scanId)
 		.single();
 
@@ -71,6 +71,7 @@ export const POST = asyncHandler(async (req: Request) => {
 		targetUrl: scan.url,
 		package: scan.package,
 		userEmail: scan.user_email ?? null,
+		sourceScanId: (scan as { source_scan_id?: string | null }).source_scan_id ?? null,
 	});
 
 	return NextResponse.json({ ok: true, scanId: scan.id });

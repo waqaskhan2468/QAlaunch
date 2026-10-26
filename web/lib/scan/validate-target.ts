@@ -41,11 +41,99 @@ const gateFetchAgent = new Agent({ connectTimeout: GATE_CONNECT_TIMEOUT_MS });
 
 export type ScanTargetValidation =
 	| { status: 'unreachable' }
+	| { status: 'editor_url'; platform: string; hint: string }
 	| { status: 'ok'; isWebApp: boolean };
+
+/**
+ * Editor, preview and dashboard links from the AI builders this product is
+ * marketed to. 19 of the 59 failed scans in the admin console were
+ * "login-gated", and a good share of those were someone pasting the link in
+ * their editor's address bar (app.base44.com/apps/…/editor/preview, a Lovable
+ * project page, a Vercel dashboard) rather than their published site. Those
+ * people HAVE a public site; the message just has to say where to find it.
+ */
+const EDITOR_URL_PATTERNS: Array<{
+	platform: string;
+	test: (host: string, path: string) => boolean;
+	hint: string;
+}> = [
+	{
+		platform: 'Base44',
+		test: (host, path) => host === 'app.base44.com' || path.includes('/editor'),
+		hint: 'Publish the app in Base44, then paste the published address (yourapp.base44.app or your own domain).',
+	},
+	{
+		platform: 'Lovable',
+		test: (host) => host === 'lovable.dev' || host.endsWith('.lovable.dev'),
+		hint: 'Click Publish in Lovable, then paste the published address (yourapp.lovable.app or your own domain).',
+	},
+	{
+		platform: 'Bolt',
+		test: (host) => host === 'bolt.new' || host.endsWith('.bolt.new'),
+		hint: 'Deploy the project from Bolt, then paste the live address (usually a .netlify.app or .bolt.host link).',
+	},
+	{
+		platform: 'v0',
+		test: (host) => host === 'v0.dev' || host === 'v0.app',
+		hint: 'Deploy the project from v0 to Vercel, then paste the deployed address.',
+	},
+	{
+		platform: 'Replit',
+		test: (host, path) => host === 'replit.com' && path.startsWith('/@'),
+		hint: 'Deploy the Repl, then paste its deployment address (usually a .replit.app link).',
+	},
+	{
+		platform: 'Vercel',
+		test: (host) => host === 'vercel.com',
+		hint: 'Paste the deployed site address (yourproject.vercel.app or your own domain), not the Vercel dashboard.',
+	},
+	{
+		platform: 'Netlify',
+		test: (host) => host === 'app.netlify.com',
+		hint: 'Paste the deployed site address (yoursite.netlify.app or your own domain), not the Netlify dashboard.',
+	},
+	{
+		platform: 'Shopify',
+		test: (host, path) => host === 'admin.shopify.com' || path.startsWith('/admin'),
+		hint: 'Paste your storefront address (yourstore.myshopify.com or your own domain), not the Shopify admin.',
+	},
+	{
+		platform: 'WordPress',
+		test: (host, path) => path.startsWith('/wp-admin') || host === 'wordpress.com' && path.startsWith('/log-in'),
+		hint: 'Paste your public site address, not the WordPress admin or login page.',
+	},
+	{
+		platform: 'Figma',
+		test: (host) => host === 'www.figma.com' || host === 'figma.com',
+		hint: 'A Figma file is a design, not a website. Paste the address of the site built from it.',
+	},
+];
+
+export function detectEditorUrl(
+	url: string,
+): { platform: string; hint: string } | null {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return null;
+	}
+	const host = parsed.hostname.toLowerCase();
+	const path = parsed.pathname.toLowerCase();
+	const match = EDITOR_URL_PATTERNS.find((p) => p.test(host, path));
+	return match ? { platform: match.platform, hint: match.hint } : null;
+}
+
+export function editorUrlMessage(editor: { platform: string; hint: string }): string {
+	return `This looks like a ${editor.platform} editor, preview or admin link rather than your published website, so there is nothing a visitor could see here. ${editor.hint}`;
+}
 
 export async function validateScanTarget(
 	url: string,
 ): Promise<ScanTargetValidation> {
+	const editor = detectEditorUrl(url);
+	if (editor) return { status: 'editor_url', ...editor };
+
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), GATE_TIMEOUT_MS);
 

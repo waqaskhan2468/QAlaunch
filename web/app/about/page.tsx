@@ -19,9 +19,9 @@ title: 'About QAlaunch — Built by a QA Engineer with 9+ Years Experience',
 }
 
 const STATS = [
-  { value: '1,000+', label: 'Websites Audited' },
+  { value: '500+', label: 'Websites Audited' },
   { value: '35+', label: 'Quality Checks' },
-  { value: '9yr', label: 'QA Expertise' },
+  { value: '10yr', label: 'QA Expertise' },
 ]
 
 export default function AboutPage() {
@@ -60,7 +60,7 @@ export default function AboutPage() {
               <p>
                 There&apos;s an irony worth naming upfront: the person behind QAlaunch can&apos;t write a line of
                 application code. QAlaunch itself was built almost entirely through AI-assisted development
-                — Claude Code, prompt by prompt — turning nine years of QA judgment into a product without a
+                — Claude Code, prompt by prompt — turning ten years of QA judgment into a product without a
                 traditional engineering team.
               </p>
               <p>

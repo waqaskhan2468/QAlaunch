@@ -50,12 +50,12 @@ const rows: { feature: string; qa: Cell; others: Cell }[] = [
     others: { kind: "no" },
   },
   {
-    feature: "Multi-page audit (up to 10+ pages)",
+    feature: "Multi-page audit (up to 10 pages)",
     qa: { kind: "yes" },
     others: { kind: "partial", label: "Limited" },
   },
   {
-    feature: "Screenshot evidence attached to each issue",
+    feature: "Screenshot evidence where the element can be pinpointed",
     qa: { kind: "yes" },
     others: { kind: "no" },
   },

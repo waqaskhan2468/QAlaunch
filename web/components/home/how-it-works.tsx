@@ -16,13 +16,13 @@ const steps = [
     n: 2,
     title: "Get Your Free Preview",
     description:
-      "In 120 seconds, we surface your 3 most critical usability, UI, and functionality issues completely free — with severity, impact, and what's at stake.",
+      "In about 2 minutes, we show 3 of the issues found on your homepage — including the most serious — completely free, with severity, impact and what's at stake.",
   },
   {
     n: 3,
     title: "Unlock Your Full Report",
     description:
-      `Choose a plan based on how many pages to audit. Get a full PDF report with 35+ checks, screenshot evidence, and step-by-step developer fix instructions. From just ${formatPackagePrice('basic')}.`,
+      `Choose a plan based on how many pages to test. Get every issue with where it is, how to fix it, and screenshot evidence wherever the scanner could pinpoint it — as a PDF and a web link. From just ${formatPackagePrice('basic')}.`,
   },
 ]
 

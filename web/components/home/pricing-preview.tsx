@@ -15,7 +15,7 @@ export function PricingPreview() {
           <SectionHeader
             eyebrow="Pricing"
             title="Simple, one-time pricing"
-            description="No monthly subscriptions. No hidden fees. Pay only for the pages you want audited. Full PDF report delivered instantly."
+            description="No monthly subscriptions. No hidden fees. Pay once for the pages you want tested. Full PDF report delivered within minutes."
             align="center"
           />
         </Reveal>

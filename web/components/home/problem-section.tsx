@@ -13,6 +13,8 @@ import { SectionHeader } from "@/components/site/section-header"
 
 // `statValue` + `statText` concatenate to the original stat sentence verbatim;
 // the split is purely so the leading number can dominate the card visually.
+// Every number carries its source. The one that had none ("1 in 4 AI-built
+// sites has a critical broken element") is gone: it was never measured.
 const problems = [
   {
     icon: Frown,
@@ -20,7 +22,8 @@ const problems = [
     description:
       "Confusing navigation, unclear CTAs, and poor information hierarchy make visitors give up — even if your product is exactly what they need.",
     statValue: "88%",
-    statText: "of users never return after a bad experience",
+    statText: "of online consumers are less likely to return after a bad experience",
+    source: "Gomez / Econsultancy survey",
   },
   {
     icon: Smartphone,
@@ -28,15 +31,17 @@ const problems = [
     description:
       "Over 60% of web traffic is mobile. Buttons that don't tap, text that overflows, and layouts that collapse are invisible to you on desktop but fatal on mobile.",
     statValue: "61%",
-    statText: "won't return to a mobile-unfriendly site",
+    statText: "are unlikely to return to a mobile site they had trouble using",
+    source: "Google, mobile usability research",
   },
   {
     icon: AlertTriangle,
     title: "Broken forms and non-working buttons",
     description:
-      "Forms that submit nowhere. CTAs that go to 404 pages. These failures happen after every update and most businesses discover them weeks later — from angry customers.",
-    statValue: "1 in 4",
-    statText: "AI-built sites has a critical broken element",
+      "Forms that submit nowhere. CTAs that go to 404 pages. These break after updates and most owners find out weeks later — from a customer who gave up. Most broken forms still say \"message sent\".",
+    statValue: "Silent",
+    statText: "a broken form or button raises no error — visitors just leave",
+    source: null,
   },
   {
     icon: Clock,
@@ -44,7 +49,8 @@ const problems = [
     description:
       "Users decide in 3 seconds. A slow page doesn't just frustrate — it signals an untrustworthy, low-quality product before your content even loads.",
     statValue: "53%",
-    statText: "of users leave if a page takes over 3 seconds",
+    statText: "of mobile visits are abandoned if a page takes over 3 seconds to load",
+    source: "Google / SOASTA, 2017",
   },
 ]
 
@@ -100,7 +106,7 @@ export function ProblemSection() {
           viewport={{ once: true, amount: 0.15 }}
         >
           {problems.map(
-            ({ icon: Icon, title, description, statValue, statText }, i) => (
+            ({ icon: Icon, title, description, statValue, statText, source }, i) => (
               <motion.article
                 key={title}
                 custom={i}
@@ -117,6 +123,11 @@ export function ProblemSection() {
                 </div>
                 <p className="mt-2 text-[13px] font-semibold leading-snug text-body">
                   {statText}
+                  {source ? (
+                    <span className="mt-1 block text-[11px] font-medium text-muted-ink">
+                      Source: {source}
+                    </span>
+                  ) : null}
                 </p>
                 <div className="mt-6 mb-3 flex items-center gap-3">
                   <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-none border-2 border-slate-deep bg-white text-danger">

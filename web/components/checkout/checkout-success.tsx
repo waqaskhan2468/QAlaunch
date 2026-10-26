@@ -27,8 +27,10 @@ type ScanRow = {
   package: string
   status: "pending" | "crawling" | "analyzing" | "done" | "failed"
   payment_status: "free" | "pending" | "paid" | null
-  user_email: string | null
-  report_pdf_url: string | null
+  /** "w…s@example.com" — enough to recognise, nothing to harvest. */
+  user_email_masked: string | null
+  /** True once the PDF exists; /api/scan/report-url serves it. */
+  report_ready: boolean
   error_message: string | null
 }
 
@@ -77,7 +79,7 @@ const STEPS: Step[] = [
     id: "report",
     label: "Generating PDF report",
     detail: "Building your full audit report",
-    activeOn: [],           // gated on report_pdf_url instead of status — see stepState
+    activeOn: [],           // gated on report_ready instead of status — see stepState
     doneOn: [],
   },
   {
@@ -94,8 +96,8 @@ const STEPS: Step[] = [
  *
  * The last two steps don't have their own DB status — the pipeline marks the scan
  * `done` only after the PDF is generated and the email is sent. So we treat
- * `done` WITHOUT a `report_pdf_url` as "still generating the PDF" (step 4 active),
- * and `done` WITH a `report_pdf_url` as fully complete.
+ * `done` WITHOUT `report_ready` as "still generating the PDF" (step 4 active),
+ * and `done` WITH `report_ready` as fully complete.
  */
 function stepState(
   step: Step,
@@ -210,7 +212,7 @@ export function CheckoutSuccessExperience() {
         setScan(s)
         setPages(Array.isArray(data.pages) ? data.pages : null)
 
-        if (s.status === "done" && s.report_pdf_url) {
+        if (s.status === "done" && s.report_ready) {
           // Fully complete: report generated and ready to download.
           setPhase("done")
           stop()
@@ -253,7 +255,7 @@ export function CheckoutSuccessExperience() {
       }
       // Reset to polling — the pipeline is restarting. Bumping pollToken
       // re-runs the polling effect (fresh interval + reset 10-min timeout).
-      setScan((prev) => prev ? { ...prev, status: "pending", report_pdf_url: null, error_message: null } : prev)
+      setScan((prev) => prev ? { ...prev, status: "pending", report_ready: false, error_message: null } : prev)
       setPhase("polling")
       setTimedOut(false)
       setPollToken((n) => n + 1)
@@ -322,7 +324,7 @@ export function CheckoutSuccessExperience() {
   const host = deriveHost(scan?.url ?? null)
   const isPaid = scan?.payment_status === "paid"
   const currentStatus = scan?.status ?? "pending"
-  const hasPdf = Boolean(scan?.report_pdf_url)
+  const hasPdf = Boolean(scan?.report_ready)
 
   // Real-state live status line, sourced from the same poll as the steps above.
   const progressMessage = deriveScanProgressMessage({
@@ -385,7 +387,7 @@ export function CheckoutSuccessExperience() {
               is running.{" "}
               <span className="font-semibold text-ink">
                 You can close this page — we&apos;ll email your report
-                {scan?.user_email ? <> to <span className="break-all font-mono">{scan.user_email}</span></> : null}{" "}
+                {scan?.user_email_masked ? <> to <span className="break-all font-mono">{scan.user_email_masked}</span></> : null}{" "}
                 as soon as it&apos;s ready. No need to wait here.
               </span>
             </>
@@ -427,7 +429,7 @@ export function CheckoutSuccessExperience() {
         {/* Done: download + email confirmation */}
         {phase === "done" && (
           <div className="mt-8 space-y-3">
-            {scan?.report_pdf_url && (
+            {scan?.report_ready && (
               <a
                 href={`/api/scan/report-url?scanId=${scanId}`}
                 target="_blank"
@@ -443,8 +445,8 @@ export function CheckoutSuccessExperience() {
                 <Mail className="size-4 shrink-0 text-brand" strokeWidth={2.5} />
                 Report sent to your inbox
               </div>
-              {scan?.user_email && (
-                <p className="mt-1 break-all font-mono text-xs text-muted-ink">{scan.user_email}</p>
+              {scan?.user_email_masked && (
+                <p className="mt-1 break-all font-mono text-xs text-muted-ink">{scan.user_email_masked}</p>
               )}
             </div>
           </div>
@@ -485,8 +487,8 @@ export function CheckoutSuccessExperience() {
               <Mail className="size-4 shrink-0 text-brand" strokeWidth={2.5} />
               Watch your inbox
             </div>
-            {scan?.user_email && (
-              <p className="mt-1 break-all font-mono text-xs text-muted-ink">{scan.user_email}</p>
+            {scan?.user_email_masked && (
+              <p className="mt-1 break-all font-mono text-xs text-muted-ink">{scan.user_email_masked}</p>
             )}
             {timedOut ? (
               <p className="mt-3 text-sm leading-snug text-body">
@@ -500,7 +502,7 @@ export function CheckoutSuccessExperience() {
                 <span className="font-semibold text-ink">5 minutes</span>.{" "}
                 <span className="font-semibold text-ink">
                   You can close this page — we&apos;ll email your report
-                  {scan?.user_email ? <> to {scan.user_email}</> : ""} as soon as it&apos;s
+                  {scan?.user_email_masked ? <> to {scan.user_email_masked}</> : ""} as soon as it&apos;s
                   ready. No need to wait here.
                 </span>
               </p>
@@ -528,12 +530,15 @@ export function CheckoutSuccessExperience() {
           >
             Back to home
           </Link>
+          {/* The same report as the PDF, on a page that can be sent to a
+              developer. Before this existed /result bounced paid scans back
+              here, so the button was a loop. */}
           {phase === "done" && scan?.id && (
             <Link
               href={`/result?scanId=${scan.id}`}
               className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-extrabold text-white shadow-glow-brand hover:bg-brand-mid"
             >
-              View full results
+              View the report online
             </Link>
           )}
         </div>

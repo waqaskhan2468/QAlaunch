@@ -41,7 +41,10 @@ const CRAWL_ROTATION = [
 	'Checking for broken links…',
 ];
 
-type AiAnalysisLike = { status?: string; issues?: unknown[] } | null | undefined;
+type AiAnalysisLike =
+	| { status?: string; issues?: unknown[]; issue_count?: number }
+	| null
+	| undefined;
 type PageLike = { ai_analysis?: AiAnalysisLike };
 
 /** Real interim issue count: sum of issues across pages with a successful analysis. */
@@ -50,9 +53,10 @@ export function countInterimIssues(pages: PageLike[] | null | undefined): number
 	let total = 0;
 	for (const page of pages) {
 		const ai = page.ai_analysis;
-		if (ai && ai.status === 'ok' && Array.isArray(ai.issues)) {
-			total += ai.issues.length;
-		}
+		if (!ai || ai.status !== 'ok') continue;
+		// The status API sends a count rather than the issues themselves.
+		if (typeof ai.issue_count === 'number') total += ai.issue_count;
+		else if (Array.isArray(ai.issues)) total += ai.issues.length;
 	}
 	return total;
 }

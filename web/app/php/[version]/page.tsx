@@ -53,6 +53,10 @@ export async function generateMetadata({
 		alternates: { canonical: `/php/${version}` },
 		title: versionTitle(facts),
 		description: versionDescription(facts),
+		// 205 near-identical version pages were 226 of the 253 sitemap URLs and
+		// read as thin content next to the pages that sell. The checker and the
+		// per-host pages stay indexable; these are for people who arrive by link.
+		robots: { index: false, follow: true },
 		openGraph: {
 			title: versionTitle(facts),
 			description: versionDescription(facts),

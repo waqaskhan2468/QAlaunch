@@ -26,13 +26,13 @@ const DEFAULT_MAX_RETRIES = 2;
 // null — the JSON is incomplete and parseClaudeIssues throws "Invalid Claude
 // issues payload", killing the scan as NonRetriable.
 //
-// A typical page with 15–20 issues (title + description + impact each)
-// uses ~4 000–6 000 output tokens. 8 000 gives a safe ceiling without wasting
-// significant cost on the typical case.
+// A typical page with 15–20 issues (title + description + impact + fix each)
+// uses ~6 000–9 000 output tokens now that fix instructions are back. 12 000
+// gives a safe ceiling without wasting significant cost on the typical case.
 //
-// DO NOT lower this below 6 000 without verifying stop_reason never hits
+// DO NOT lower this below 8 000 without verifying stop_reason never hits
 // max_tokens in production logs.
-const DEFAULT_MAX_TOKENS = 8_000;
+const DEFAULT_MAX_TOKENS = 12_000;
 
 const MAX_RESPONSE_PREVIEW_LENGTH = 500;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504, 529]); // 529 = Anthropic overloaded
@@ -154,7 +154,8 @@ RULES:
 10. Do NOT pad findings — if fewer than 3 genuine issues exist, report only what you actually observe. An empty or short issues array is valid; a clean page is a valid result.
 11. Write each 'title' as ONE short, plain-English sentence naming the user-facing symptom the way a human tester would say it out loud — e.g. "Footer links open pages without scrolling to the top" or "The mobile menu button doesn't open the navigation". No acronyms, no code/CSS/HTML terms, no element or property names, no jargon.
 12. Write 'description' and 'impact' in plain English for the website owner — describe what the visitor sees or experiences and why it matters for the business (e.g. "Visitors can't complete the checkout because the Pay button is greyed out"). Avoid technical jargon, HTML tag names, CSS property names, WCAG criteria references, and internal code terms.
-13. Use this category mapping strictly:
+13. Write 'fix_instructions' for every issue: 2-4 short sentences a developer can act on without asking a question. Name the element or section, say what to change and what the result should look like (e.g. "Add a text label above the Sort dropdown, such as 'Sort by', or set its first option to 'Sort by…'. Then check the label is still visible at phone width."). Where a specific value helps, give it (a minimum contrast ratio, a tap-target size, a redirect target). No vague advice like "improve the UX".
+14. Use this category mapping strictly:
     - responsiveness: viewport-specific layout breaks (overlap, clipping, horizontal scroll, content off-screen, broken wrapping, elements disappearing only on some screen sizes)
     - ui_bugs: visual defects not tied to viewport size (color, contrast, icon/image glitches, spacing inconsistencies visible across sizes)
     - usability_ux: interaction/confusion issues (unclear CTAs, poor flow, discoverability), not raw layout breakage
@@ -250,6 +251,7 @@ FIELD LENGTHS (required for database storage; responses outside these bounds are
 - title: 20-80 characters (after trimming whitespace)
 - description: 100-800 characters
 - impact: 20-200 characters
+- fix_instructions: 40-1000 characters
 
 OUTPUT: You MUST call the tool "${REPORT_SCAN_ISSUES_TOOL_NAME}" exactly once with every issue in the "issues" array. Do not return issues as plain JSON in assistant text.
 
@@ -306,6 +308,7 @@ const REPORT_SCAN_ISSUES_INPUT_SCHEMA = {
 					title: { type: 'string', minLength: 20, maxLength: 80 },
 					description: { type: 'string', minLength: 100, maxLength: 800 },
 					impact: { type: 'string', minLength: 20, maxLength: 200 },
+					fix_instructions: { type: 'string', minLength: 40, maxLength: 1000 },
 					page_section: { type: 'string', maxLength: 500 },
 					evidence: {
 						type: 'string',
@@ -343,6 +346,7 @@ const REPORT_SCAN_ISSUES_INPUT_SCHEMA = {
 					'title',
 					'description',
 					'impact',
+					'fix_instructions',
 					'evidence',
 					'confidence',
 				],
