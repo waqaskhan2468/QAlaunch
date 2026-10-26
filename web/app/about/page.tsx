@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 import { Flag } from '@/components/home/flag'
+import { formatPackagePrice } from '@/components/pricing/pricing-plans'
 
 export const metadata: Metadata = {
   alternates: { canonical: '/about' },
@@ -109,7 +110,7 @@ export default function AboutPage() {
               See what QAlaunch finds on your site
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/70 sm:text-lg">
-              Free audit in 120 seconds. No signup needed. Full expert report from just $9.
+              Free audit in 120 seconds. No signup needed. Full expert report from just {formatPackagePrice('basic')}.
             </p>
             <Link
               href="/"

@@ -35,7 +35,7 @@ test('clean variant pitches other pages instead of inventing problems', () => {
 	expect(d.variant).toBe('clean');
 	expect(d.subject).toBe('Your QAlaunch scan of yourstore.com');
 	expect(d.body).toContain('came back clean');
-	expect(d.body).toContain('$24');
+	expect(d.body).toContain('$49');
 	// Must never claim unseen issues it cannot name.
 	expect(d.body).not.toMatch(/issues you haven't seen/i);
 });
@@ -52,7 +52,7 @@ test('every draft identifies the sender and offers an opt-out', () => {
 test('both variants lead with the manual audit, and quote its price', () => {
 	// The manual audit used to be a closing afterthought with no price attached,
 	// which is the same as not offering it: no price means no decision. It is
-	// now the primary offer in both variants, and the $9 report is the fallback.
+	// now the primary offer in both variants, and the $19 report is the fallback.
 	for (const d of [buildFollowUpDraft(base), buildFollowUpDraft({ ...base, lockedTitles: [] })]) {
 		expect(d.body).toContain('$299');
 		expect(d.body).toContain('3 business days');
@@ -60,11 +60,11 @@ test('both variants lead with the manual audit, and quote its price', () => {
 	}
 });
 
-test('the locked variant still offers the $9 report, but after the audit', () => {
+test('the locked variant still offers the $19 report, but after the audit', () => {
 	const body = buildFollowUpDraft(base).body;
-	expect(body).toContain('$9');
+	expect(body).toContain('$19');
 	// Price order is the pitch order: the audit has to come first.
-	expect(body.indexOf('$299')).toBeLessThan(body.indexOf('$9'));
+	expect(body.indexOf('$299')).toBeLessThan(body.indexOf('$19'));
 });
 
 test('html rendering escapes user-derived content', () => {

@@ -7,7 +7,7 @@
  * unconverted visitor in the funnel — and nothing was sent to them before this.
  *
  * Selection is deliberately conservative, because the sending domain also
- * delivers paid reports and a spam complaint there costs more than a $9 sale:
+ * delivers paid reports and a spam complaint there costs more than a $19 sale:
  *
  *  - one email per checkout, ever (recovery_sent_at gates it)
  *  - nothing younger than MIN_AGE — they may still be mid-payment

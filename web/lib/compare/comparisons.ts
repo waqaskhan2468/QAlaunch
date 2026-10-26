@@ -1,3 +1,5 @@
+import { PACKAGE_PRICE_USD, formatPackagePrice } from '@/components/pricing/pricing-plans'
+
 /**
  * Config for the /compare/* pages.
  *
@@ -74,7 +76,7 @@ export const LIGHTHOUSE: CompareConfig = {
 		{ capability: 'Clicks buttons and links to see if they work', them: 'No', us: 'Yes' },
 		{ capability: 'Checks a form responds and validates', them: 'No', us: 'Yes' },
 		{ capability: 'Output written for a non-developer', them: 'No — technical audit list', us: 'Yes — plain English' },
-		{ capability: 'Price', them: 'Free, unlimited', us: 'Free preview · full report from $9' },
+		{ capability: 'Price', them: 'Free, unlimited', us: `Free preview · full report from ${formatPackagePrice('basic')}` },
 	],
 	themBetterHeading: 'When Lighthouse is the better tool',
 	themBetter: [
@@ -122,14 +124,14 @@ export const FREELANCER: CompareConfig = {
 	name: 'Hiring a QA Tester',
 	title: 'Hiring a QA Tester: Cost vs Automated Scan',
 	description:
-		'A freelance QA tester costs hundreds and takes days. A scan costs $9 and takes minutes. An honest look at which one your site actually needs.',
+		`A freelance QA tester costs hundreds and takes days. A scan costs ${formatPackagePrice('basic')} and takes minutes. An honest look at which one your site actually needs.`,
 	ogTitle: 'QAlaunch vs Hiring a QA Tester: Which Does Your Site Need?',
 	ogDescription:
 		'A human tester is better at judgement, logged-in flows and business logic. A scan is better at speed, cost and repeating after every change.',
 	headlineLead: 'A freelance tester costs hundreds and takes days.',
 	headlineAccent: 'Sometimes that is still the right call.',
 	summary:
-		'A freelance QA tester typically charges from around $25–75 an hour, or a few hundred dollars for a one-off site audit, and turns it around in days. QAlaunch costs $9–59 as a one-time charge and reports in minutes. The honest split: a human is better for anything requiring judgement — logged-in flows, payment logic, your specific business rules. A scan is better for the public-facing layer and for re-checking after every change, which is where most bugs actually appear.',
+		`A freelance QA tester typically charges from around $25–75 an hour, or a few hundred dollars for a one-off site audit, and turns it around in days. QAlaunch costs ${formatPackagePrice('basic')}–${PACKAGE_PRICE_USD.premium} as a one-time charge and reports in minutes. The honest split: a human is better for anything requiring judgement — logged-in flows, payment logic, your specific business rules. A scan is better for the public-facing layer and for re-checking after every change, which is where most bugs actually appear.`,
 	intro: [
 		'This is the decision most people are actually weighing, and the usual framing — "tool versus human" — is the wrong one. They fail at different things.',
 		'A human tester brings judgement. They can be told what your product is supposed to do, log into it, follow a checkout through to a real card charge, and tell you that the flow is confusing even when nothing is technically broken. No automated scan does that.',
@@ -137,7 +139,7 @@ export const FREELANCER: CompareConfig = {
 	],
 	tableHeading: 'Honest side by side',
 	rows: [
-		{ capability: 'Typical cost', them: 'From ~$25–75/hr, or a few hundred per audit', us: '$9–59, one-time' },
+		{ capability: 'Typical cost', them: 'From ~$25–75/hr, or a few hundred per audit', us: `${formatPackagePrice('basic')}–${PACKAGE_PRICE_USD.premium}, one-time` },
 		{ capability: 'Turnaround', them: 'Days', us: 'About 2 minutes' },
 		{ capability: 'Tests pages behind a login', them: 'Yes', us: 'No — public pages only' },
 		{ capability: 'Completes a real purchase or payment', them: 'Yes', us: 'No' },
@@ -163,7 +165,7 @@ export const FREELANCER: CompareConfig = {
 	],
 	togetherHeading: 'What most people should actually do',
 	together:
-		'Use the scan as the routine check — after every meaningful change, and before anything goes public. Bring in a human for the milestones: a real launch, a payment flow going live, an app whose core value sits behind a login. Spending $9 to find the obvious breakage first also means a paid tester spends their hours on the judgement work you are actually hiring them for.',
+		`Use the scan as the routine check — after every meaningful change, and before anything goes public. Bring in a human for the milestones: a real launch, a payment flow going live, an app whose core value sits behind a login. Spending ${formatPackagePrice('basic')} to find the obvious breakage first also means a paid tester spends their hours on the judgement work you are actually hiring them for.`,
 	faqs: [
 		{
 			q: 'How much does it cost to have someone test my website?',
@@ -215,7 +217,7 @@ export const BROWSERSTACK: CompareConfig = {
 		{ capability: 'Requires writing test scripts', them: 'For automation, yes', us: 'No' },
 		{ capability: 'Setup needed', them: 'Account, config, often scripting', us: 'Paste a URL' },
 		{ capability: 'Plain-English output', them: 'No', us: 'Yes' },
-		{ capability: 'Pricing model', them: 'Monthly subscription', us: 'One-time, from $9' },
+		{ capability: 'Pricing model', them: 'Monthly subscription', us: `One-time, from ${formatPackagePrice('basic')}` },
 	],
 	themBetterHeading: 'When BrowserStack is clearly the right tool',
 	themBetter: [
@@ -249,7 +251,7 @@ export const BROWSERSTACK: CompareConfig = {
 		},
 		{
 			q: 'Which is cheaper?',
-			a: 'They price for different things. BrowserStack is a monthly subscription for ongoing access; QAlaunch is a one-time charge per report, starting at $9, with a free preview. If you audit a site occasionally, the one-time model costs less. If you test continuously across many devices, a subscription is the model that fits.',
+			a: `They price for different things. BrowserStack is a monthly subscription for ongoing access; QAlaunch is a one-time charge per report, starting at ${formatPackagePrice('basic')}, with a free preview. If you audit a site occasionally, the one-time model costs less. If you test continuously across many devices, a subscription is the model that fits.`,
 		},
 	],
 	related: [

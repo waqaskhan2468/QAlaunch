@@ -136,7 +136,7 @@ export async function POST(req: Request) {
   // worth knowing about even if queueing then fails (arguably more so: that
   // case needs manual follow-up). `after` runs it once the response is sent, so
   // a slow or failing email can never delay the webhook ack and trigger a
-  // Paddle retry. Paddle reports totals in minor units ("2400" = $24.00).
+  // Paddle retry. Paddle reports totals in minor units ("4900" = $49.00).
   const totals = eventData.details?.totals;
   const rawTotal = totals?.grandTotal ?? totals?.grand_total;
   const currency =

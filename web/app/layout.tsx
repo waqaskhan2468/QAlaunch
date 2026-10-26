@@ -5,6 +5,7 @@ import { GoogleAnalytics } from "@/components/analytics/google-analytics"
 import { OpenAiPixel } from "@/components/analytics/openai-pixel"
 import { RedditPixel } from "@/components/analytics/reddit-pixel"
 import { PageTransition } from "@/components/motion/page-transition"
+import { formatPackagePrice } from "@/components/pricing/pricing-plans"
 import "./globals.css"
 
 // Body copy — Figtree is warm, highly readable for marketing prose.
@@ -37,7 +38,7 @@ export const metadata: Metadata = {
     template: "%s | QAlaunch",
   },
   description:
-    "Free website bug scan from a QA engineer with 9 years' experience. Find broken buttons, mobile bugs and dead links in 2 minutes. No signup. From $9.",
+    `Free website bug scan from a QA engineer with 9 years' experience. Find broken buttons, mobile bugs and dead links in 2 minutes. No signup. From ${formatPackagePrice('basic')}.`,
   keywords: [
     "test website for bugs",
     "website bug checker",

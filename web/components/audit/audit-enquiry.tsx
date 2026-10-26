@@ -5,8 +5,8 @@ import { useState } from 'react';
 /**
  * Done-for-you manual audit — the high-ticket offer on the result page.
  *
- * Sits below the $9 report rather than replacing it. The two serve different
- * buyers: a hobbyist testing a weekend build wants the $9 PDF, while a business
+ * Sits below the $19 report rather than replacing it. The two serve different
+ * buyers: a hobbyist testing a weekend build wants the $19 PDF, while a business
  * that loses money when its checkout breaks wants a person to go through the
  * whole site. The scan logs are full of the second kind — a plumber, a pharmacy,
  * an eye clinic — and the automated report was the only thing ever offered them.

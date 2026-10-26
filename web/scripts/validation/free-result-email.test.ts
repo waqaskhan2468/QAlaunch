@@ -121,7 +121,7 @@ describe('email body — conversion mechanics', () => {
 
 	it('names both paid options with their real prices', () => {
 		const html = buildFreeResultEmailHtml(base);
-		expect(html).toContain('$9');
+		expect(html).toContain('$19');
 		expect(html).toContain('$299');
 		expect(html).toContain('3 business days');
 	});
@@ -130,7 +130,7 @@ describe('email body — conversion mechanics', () => {
 		const html = buildFreeResultEmailHtml(base);
 		// The first issue must appear before the first price.
 		expect(html.indexOf('Checkout button is off screen')).toBeLessThan(
-			html.indexOf('$9'),
+			html.indexOf('$19'),
 		);
 	});
 

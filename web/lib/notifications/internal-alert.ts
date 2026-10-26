@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 
+import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 import type { ScanPackage } from '@/types/zod';
 
 /** Internal inbox that receives sales/activity alerts. */
@@ -8,9 +9,9 @@ const ALERT_RECIPIENT = 'contact@getqalaunch.com';
 /** Human labels for the alert subject + body. */
 const PACKAGE_LABELS: Record<ScanPackage, string> = {
 	free: 'Free scan',
-	basic: 'Basic ($9 · 1 page)',
-	standard: 'Standard ($24 · 2–5 pages)',
-	premium: 'Premium ($59 · 6–10 pages)',
+	basic: `Basic (${formatPackagePrice('basic')} · homepage)`,
+	standard: `Standard (${formatPackagePrice('standard')} · up to 5 pages)`,
+	premium: `Premium (${formatPackagePrice('premium')} · up to 10 pages)`,
 	enterprise: 'Enterprise (custom)',
 };
 
@@ -159,7 +160,7 @@ export async function sendPaidScanAlert(input: {
 	userEmail?: string | null;
 	pkg: ScanPackage;
 	transactionId: string;
-	/** Charged amount as reported by Paddle, e.g. "24.00 USD". Falls back to the plan's list price. */
+	/** Charged amount as reported by Paddle, e.g. "49.00 USD". Falls back to the plan's list price. */
 	amount?: string | null;
 }): Promise<void> {
 	const host = (() => {

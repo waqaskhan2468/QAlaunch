@@ -7,6 +7,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { PACKAGE_PRICE_USD, formatPackagePrice } from '@/components/pricing/pricing-plans'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
@@ -33,8 +34,8 @@ const structuredData = {
   offers: {
     '@type': 'AggregateOffer',
     priceCurrency: 'USD',
-    lowPrice: '9',
-    highPrice: '59',
+    lowPrice: String(PACKAGE_PRICE_USD.basic),
+    highPrice: String(PACKAGE_PRICE_USD.premium),
     offerCount: '3',
   },
   creator: {
@@ -88,7 +89,7 @@ const FAQS = [
   },
   {
     q: 'Is the free scan really free?',
-    a: 'Yes. Paste your URL, get your top issues in about 2 minutes. No account required. Full reports (all pages, PDF) start at $9, one-time.',
+    a: `Yes. Paste your URL, get your top issues in about 2 minutes. No account required. Full reports (all pages, PDF) start at ${formatPackagePrice('basic')}, one-time.`,
   },
   {
     q: 'What if my Lovable site is still in preview mode?',
@@ -179,7 +180,7 @@ export default function ForLovablePage() {
             {[
               { n: '1', t: 'Paste your Lovable URL', d: 'Any publicly accessible page — your lovable.app subdomain or custom domain.' },
               { n: '2', t: 'Real browser audit runs', d: 'We open it in a real cloud browser, take desktop and mobile screenshots, and run 35+ automated checks.' },
-              { n: '3', t: 'Get your report', d: 'Top issues in the free preview. Full PDF report with every page for $9, one-time.' },
+              { n: '3', t: 'Get your report', d: `Top issues in the free preview. Full PDF report with every page from ${formatPackagePrice('basic')}, one-time.` },
             ].map((s) => (
               <div key={s.n} className="flex gap-4">
                 <div className="text-4xl font-extrabold text-[#22c55e] leading-none">{s.n}</div>
@@ -226,7 +227,7 @@ export default function ForLovablePage() {
       <section className="bg-[#09111f] text-white py-16 px-6 text-center">
         <div className="max-w-xl mx-auto">
           <h2 className="text-2xl font-bold mb-3">Stop guessing what&apos;s broken</h2>
-          <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from $9.</p>
+          <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from {formatPackagePrice('basic')}.</p>
           <Link
             href="/#audit-input"
             className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors"

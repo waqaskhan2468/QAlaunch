@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { PACKAGE_PRICE_USD, formatPackagePrice } from '@/components/pricing/pricing-plans'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
 export const metadata: Metadata = {
@@ -30,8 +31,8 @@ const structuredData = {
   offers: {
     '@type': 'AggregateOffer',
     priceCurrency: 'USD',
-    lowPrice: '9',
-    highPrice: '59',
+    lowPrice: String(PACKAGE_PRICE_USD.basic),
+    highPrice: String(PACKAGE_PRICE_USD.premium),
     offerCount: '3',
   },
   creator: {
@@ -93,7 +94,7 @@ const FAQS = [
   },
   {
     q: 'How much does it cost?',
-    a: 'The free scan shows your top issues, no signup needed. Full reports are one-time purchases: $9 for one page, $24 for 2-5 pages, $59 for 6-10 pages — enough to cover homepage, key collections, a product page, and cart.',
+    a: `The free scan shows your top issues, no signup needed. Full reports are one-time purchases: ${formatPackagePrice('basic')} for your homepage, ${formatPackagePrice('standard')} for up to 5 pages, ${formatPackagePrice('premium')} for up to 10 pages — enough to cover homepage, key collections, a product page, and cart.`,
   },
 ]
 
@@ -172,7 +173,7 @@ export default function ForShopifyPage() {
             {[
               { n: '1', t: 'Paste your store URL', d: 'Homepage, a collection, a product page — any public page of your store.' },
               { n: '2', t: 'Real browser audit', d: 'A real cloud browser loads your store on desktop and mobile widths and runs 35+ automated checks plus AI visual review.' },
-              { n: '3', t: 'Plain-English report', d: 'Top issues free. Full report covering homepage, collections, product pages and cart from $9, one-time.' },
+              { n: '3', t: 'Plain-English report', d: `Top issues free. Full report covering homepage, collections, product pages and cart from ${formatPackagePrice('basic')}, one-time.` },
             ].map((s) => (
               <div key={s.n} className="flex gap-4">
                 <div className="text-4xl font-extrabold text-[#22c55e] leading-none">{s.n}</div>
@@ -219,7 +220,7 @@ export default function ForShopifyPage() {
       <section className="bg-[#09111f] text-white py-16 px-6 text-center">
         <div className="max-w-xl mx-auto">
           <h2 className="text-2xl font-bold mb-3">Find what&apos;s costing you sales</h2>
-          <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from $9.</p>
+          <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from {formatPackagePrice('basic')}.</p>
           <Link href="/#audit-input" className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
             Audit My Shopify Store Free →
           </Link>

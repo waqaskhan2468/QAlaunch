@@ -1,3 +1,5 @@
+import { formatPackagePrice } from '@/components/pricing/pricing-plans'
+
 /**
  * Config for the /for-[platform] landing pages.
  *
@@ -8,6 +10,9 @@
  *
  * Rendered by components/platform/platform-page.tsx.
  */
+
+/** Shared answer to "What does it cost?" on every platform page. */
+const COST_ANSWER = `The free scan shows your top issues with no signup. Full reports are one-time purchases from ${formatPackagePrice('basic')} (your homepage) to ${formatPackagePrice('premium')} (up to 10 pages). No subscription.`
 
 export type PlatformIssue = {
 	title: string
@@ -115,7 +120,7 @@ export const BASE44: PlatformConfig = {
 		},
 		{
 			q: 'What does it cost?',
-			a: 'The free scan shows your top issues with no signup. Full reports are one-time purchases from $9 (single page) to $59 (up to 10 pages). No subscription.',
+			a: COST_ANSWER,
 		},
 	],
 	midCtaHeading: 'See what a stranger sees on your Base44 app',
@@ -197,7 +202,7 @@ export const REPLIT: PlatformConfig = {
 		},
 		{
 			q: 'What does it cost?',
-			a: 'The free scan shows your top issues with no signup. Full reports are one-time purchases from $9 (single page) to $59 (up to 10 pages). No subscription.',
+			a: COST_ANSWER,
 		},
 	],
 	midCtaHeading: 'Check your deployed Replit app',
@@ -279,7 +284,7 @@ export const V0: PlatformConfig = {
 		},
 		{
 			q: 'What does it cost?',
-			a: 'The free scan shows your top issues with no signup. Full reports are one-time purchases from $9 (single page) to $59 (up to 10 pages). No subscription.',
+			a: COST_ANSWER,
 		},
 	],
 	midCtaHeading: 'Check your deployed v0 app',
@@ -361,7 +366,7 @@ export const CLAUDE: PlatformConfig = {
 		},
 		{
 			q: 'What does it cost?',
-			a: 'The free scan shows your top issues with no signup. Full reports are one-time purchases from $9 (single page) to $59 (up to 10 pages). No subscription.',
+			a: COST_ANSWER,
 		},
 	],
 	midCtaHeading: 'Check the site Claude built for you',

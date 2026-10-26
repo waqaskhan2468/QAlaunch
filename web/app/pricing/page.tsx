@@ -3,13 +3,14 @@ import type { Metadata } from 'next';
 import { SiteNav } from '@/components/site/site-nav';
 import { SiteFooter } from '@/components/site/site-footer';
 import { PricingGrid } from '@/components/pricing/pricing-grid';
+import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 import { FAQ, type FAQItem } from '@/components/home/faq';
 
 export const metadata: Metadata = {
 	alternates: { canonical: '/pricing' },
-title: 'Pricing — Website Audit Reports from $9',
+title: `Pricing — Website Audit Reports from ${formatPackagePrice('basic')}`,
 	description:
-		'Simple one-time pricing. Basic $9 (1 page), Standard $24 (2-5 pages), Premium $59 (6-10 pages). No subscriptions. PDF report delivered instantly.',
+		`Simple one-time pricing. Homepage ${formatPackagePrice('basic')}, Small site ${formatPackagePrice('standard')} (up to 5 pages), Whole site ${formatPackagePrice('premium')} (up to 10 pages). No subscriptions. PDF report delivered instantly.`,
 };
 
 const pricingFaqs: FAQItem[] = [

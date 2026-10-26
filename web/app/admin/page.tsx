@@ -13,6 +13,7 @@ import {
 import { AdminLogoutButton } from '@/components/admin/admin-logout-button';
 import { FollowUpComposer } from '@/components/admin/followup-composer';
 import { buildFollowUpDraft } from '@/lib/admin/followup-draft';
+import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 
 export const metadata: Metadata = {
 	title: 'Analytics',
@@ -669,7 +670,7 @@ export default async function AdminDashboardPage({
 				</Section>
 
 				<p className="mt-10 text-[12px] leading-relaxed text-body">
-					Revenue is estimated from list prices ($9 / $24 / $59), since the charged
+					Revenue is estimated from list prices ({formatPackagePrice('basic')} / {formatPackagePrice('standard')} / {formatPackagePrice('premium')}), since the charged
 					amount is not stored per scan. Site-wide visitor counts (pageviews,
 					uniques, traffic sources) are not tracked in this database — those live
 					in Vercel Analytics.

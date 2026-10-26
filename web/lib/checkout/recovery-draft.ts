@@ -7,9 +7,11 @@
  * job is to remove whatever stopped them and hand back the link.
  *
  * Deliberately not written as marketing. No discount, no countdown, no second
- * chase. One short note from the person who built it, sent once. A $9 product
+ * chase. One short note from the person who built it, sent once. A $19 product
  * cannot afford to damage the sending domain that also delivers paid reports.
  */
+
+import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 
 export type RecoveryScan = {
 	/** Bare hostname of the scanned site, e.g. "example.com". */
@@ -31,9 +33,9 @@ const SITE = 'https://getqalaunch.com';
 
 /** What each package actually delivers, in the buyer's words. */
 const PACKAGE_SUMMARY: Record<string, string> = {
-	basic: 'the full report for that page — $9',
-	standard: 'the 5-page report — $24',
-	premium: 'the 10-page report — $59',
+	basic: `the full report for that page — ${formatPackagePrice('basic')}`,
+	standard: `the 5-page report — ${formatPackagePrice('standard')}`,
+	premium: `the 10-page report — ${formatPackagePrice('premium')}`,
 };
 
 function packageLine(pkg: string): string {

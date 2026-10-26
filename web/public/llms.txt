@@ -31,9 +31,12 @@ their checkout works on phones.
 ## Pricing
 
 - Free scan — homepage, top issues shown, no signup or card required
-- Basic — $9 one-time, one page, full report with screenshot evidence and fixes
-- Standard — $24 one-time, 2–5 pages
-- Premium — $59 one-time, 6–10 pages
+- Homepage — $19 one-time, just your homepage, full report with screenshot
+  evidence and fixes
+- Small site — $49 one-time, up to 5 pages (home, about, services, contact,
+  one more)
+- Whole site — $99 one-time, up to 10 pages (adds your blog, landing pages or
+  product pages)
 - Done-for-you manual audit — $299, up to 10 pages tested by hand by a QA
   engineer, written report plus a 15-minute call, delivered in 3 business days
 

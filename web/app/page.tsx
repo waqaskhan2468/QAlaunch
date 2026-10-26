@@ -15,6 +15,7 @@ import { FAQ } from "@/components/home/faq"
 import { homeFaqs } from "@/lib/content/home-faqs"
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 import { CtaBand } from "@/components/home/cta-band"
+import { PACKAGE_PRICE_USD, formatPackagePrice } from "@/components/pricing/pricing-plans"
 
 // The homepage previously had no metadata of its own and relied entirely on the
 // root layout. That was fine until the layout's site-wide `canonical: "/"` was
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
  * Google understand the product, its category, and pricing for rich
  * results. No aggregateRating is included — we have no verified reviews
  * and must not fabricate one. Pricing mirrors the canonical plans
- * (Basic $9 → Premium $59) in components/pricing/pricing-plans.ts.
+ * (Basic → Premium) from components/pricing/pricing-plans.ts.
  */
 const structuredData = {
   "@context": "https://schema.org",
@@ -41,12 +42,12 @@ const structuredData = {
   operatingSystem: "Web",
   url: "https://getqalaunch.com",
   description:
-    "AI website audit tool by a senior QA engineer. Find UI bugs, broken buttons & mobile issues on any site in 120 seconds. Reports from $9.",
+    `AI website audit tool by a senior QA engineer. Find UI bugs, broken buttons & mobile issues on any site in 120 seconds. Reports from ${formatPackagePrice('basic')}.`,
   offers: {
     "@type": "AggregateOffer",
     priceCurrency: "USD",
-    lowPrice: "9",
-    highPrice: "59",
+    lowPrice: String(PACKAGE_PRICE_USD.basic),
+    highPrice: String(PACKAGE_PRICE_USD.premium),
     offerCount: "3",
   },
   creator: {

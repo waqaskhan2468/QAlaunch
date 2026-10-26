@@ -3,6 +3,7 @@
 import { motion } from "motion/react"
 
 import { fadeUp, stagger } from "@/components/motion/primitives"
+import { formatPackagePrice } from "@/components/pricing/pricing-plans"
 
 const steps = [
   {
@@ -21,7 +22,7 @@ const steps = [
     n: 3,
     title: "Unlock Your Full Report",
     description:
-      "Choose a plan based on how many pages to audit. Get a full PDF report with 35+ checks, screenshot evidence, and step-by-step developer fix instructions. From just $9.",
+      `Choose a plan based on how many pages to audit. Get a full PDF report with 35+ checks, screenshot evidence, and step-by-step developer fix instructions. From just ${formatPackagePrice('basic')}.`,
   },
 ]
 

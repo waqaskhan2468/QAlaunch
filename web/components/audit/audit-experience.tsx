@@ -14,6 +14,7 @@ import { AuditEnquiry } from '@/components/audit/audit-enquiry';
 import { ResultEmailCapture } from '@/components/audit/result-email-capture';
 import { ProofOfWorkPanel } from '@/components/audit/proof-of-work-panel';
 import { buildProofOfWork, type ProofOfWork } from '@/lib/scan/proof-of-work';
+import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 import { computeHealthScore, labelFromScore } from '@/lib/scoring/health';
 import {
 	allPagesAnalyzed,
@@ -988,7 +989,7 @@ function ResultsView({
 	// Inflated site-wide estimate (bare number; rendered with a trailing "+").
 	const verdict = headlineVerdict(healthScore);
 
-	// Direct route to the $9 tier. Previously every CTA only scrolled to the
+	// Direct route to the basic tier. Previously every CTA only scrolled to the
 	// pricing grid, so a convinced buyer had to compare four plans and click
 	// again; checkout completion is 100% once reached, so that stretch was
 	// where the drop-off lived. Plan comparison stays available below.
@@ -1494,7 +1495,7 @@ function ResultsView({
 							href={basicCheckoutHref}
 							onClick={trackPlanClick}
 							className='inline-flex items-center justify-center rounded-xl bg-brand px-6 py-3 text-sm font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-brand-mid hover:shadow-lg hover:shadow-brand/30'>
-							Get My Full Report — $9 →
+							Get My Full Report — {formatPackagePrice('basic')} →
 						</Link>
 						<span className='font-mono text-[13px] font-semibold text-body'>
 							One-time payment · Instant PDF delivery
@@ -1612,7 +1613,7 @@ function ResultsView({
 					<span className='text-white/40'>→</span>
 					<div className='flex items-center gap-2'>
 						<span className='text-white/60'>QAlaunch:</span>
-						<span className='font-extrabold text-accent-bright'>From $9</span>
+						<span className='font-extrabold text-accent-bright'>From {formatPackagePrice('basic')}</span>
 					</div>
 				</div>
 
@@ -1687,7 +1688,7 @@ function ResultsView({
 							href={basicCheckoutHref}
 							onClick={trackPlanClick}
 							className='rounded-xl bg-accent-bright px-5 py-2.5 text-[13.5px] font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-accent-bright/90 hover:shadow-lg'>
-							Unlock Full Report — $9 →
+							Unlock Full Report — {formatPackagePrice('basic')} →
 						</Link>
 					</div>
 				</div>

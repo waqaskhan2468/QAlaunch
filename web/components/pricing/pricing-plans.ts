@@ -7,6 +7,23 @@ export type PlanCTA = {
 /** Self-serve Paddle checkout tier slug (Basic / Standard / Premium). */
 export type CheckoutPackageSlug = "basic" | "standard" | "premium"
 
+/**
+ * List price in USD for each self-serve tier. The single source for every
+ * place that states or counts a price (pricing cards, emails, admin revenue).
+ * The amount actually charged is set by the Paddle price behind
+ * NEXT_PUBLIC_PADDLE_*_PRICE_ID, so these must match the Paddle catalog.
+ */
+export const PACKAGE_PRICE_USD: Record<CheckoutPackageSlug, number> = {
+  basic: 19,
+  standard: 49,
+  premium: 99,
+}
+
+/** "$19" — a tier's list price as shown to people. */
+export function formatPackagePrice(slug: CheckoutPackageSlug): string {
+  return `$${PACKAGE_PRICE_USD[slug]}`
+}
+
 export type Plan = {
   tier: string
   price: string
@@ -38,13 +55,17 @@ export type Plan = {
  * "Homepage" cannot be multiplied. It also sets the right expectation up front —
  * the one customer who did pay wrote afterwards that he "was expecting a full
  * website report" and had not noticed the other plans.
+ *
+ * SUBTITLE RULE: `pages` names the actual pages a tier covers. People have
+ * never counted their own pages, so "Up to 5 pages" alone did not let them
+ * recognise their site; "home, about, services, contact, one more" does.
  */
 export const plans: Plan[] = [
   {
     tier: "Homepage",
-    price: "9",
+    price: String(PACKAGE_PRICE_USD.basic),
     priceSymbol: "$",
-    pages: "Your homepage, tested in full",
+    pages: "Just your homepage, tested in full",
     delivery: { icon: "bolt", label: "Instant PDF delivery" },
     features: [
       "Full 35-point audit",
@@ -63,9 +84,9 @@ export const plans: Plan[] = [
   },
   {
     tier: "Small site",
-    price: "24",
+    price: String(PACKAGE_PRICE_USD.standard),
     priceSymbol: "$",
-    pages: "Up to 5 pages",
+    pages: "Up to 5 pages — home, about, services, contact, one more",
     delivery: { icon: "bolt", label: "Instant PDF delivery" },
     popular: true,
     features: [
@@ -85,9 +106,9 @@ export const plans: Plan[] = [
   },
   {
     tier: "Whole site",
-    price: "59",
+    price: String(PACKAGE_PRICE_USD.premium),
     priceSymbol: "$",
-    pages: "Up to 10 pages",
+    pages: "Up to 10 pages — adds your blog, landing pages or product pages",
     delivery: { icon: "bolt", label: "Instant PDF delivery" },
     features: [
       "Everything in Small site",
