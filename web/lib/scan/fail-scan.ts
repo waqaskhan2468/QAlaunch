@@ -84,5 +84,12 @@ export async function failScan(
 	error: unknown,
 ): Promise<void> {
 	const message = toUserFacingScanError(error);
-	await markScannerFailed(supabase, scanId, message);
+	// The raw cause goes to error_detail so /admin can show what actually
+	// happened; "Report generation timed out" alone could not tell a Claude
+	// abort from a PDF render that never finished.
+	const raw =
+		error instanceof Error ? error.message
+		: typeof error === 'string' ? error
+		: String(error);
+	await markScannerFailed(supabase, scanId, message, `pipeline: ${raw.slice(0, 500)}`);
 }

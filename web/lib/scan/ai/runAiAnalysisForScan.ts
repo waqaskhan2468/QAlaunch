@@ -276,6 +276,8 @@ const FREE_SCAN_FOCUS = [
 	'- Ignore the cached instruction to walk the full page or inspect the footer. Do NOT report footer, deep-page, or below-the-fold content you cannot actually see.',
 	'- Do NOT invent or infer issues about parts of the page outside the attached screenshot.',
 	'- Prioritise hero clarity, the primary call-to-action, first-impression layout/contrast, and the first section(s).',
+	'- Keep every fix_instructions to ONE or TWO short sentences (under 220 characters): what to change and where. The free preview must return quickly; the full report carries the longer version.',
+	'- Report at most 12 issues. Prefer the ones a visitor would notice over minor technical notes.',
 ].join('\n');
 
 /** Page-specific text placed before signed screenshot URLs (not prompt-cached). */
