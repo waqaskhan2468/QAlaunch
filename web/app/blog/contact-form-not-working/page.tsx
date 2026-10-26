@@ -89,7 +89,7 @@ export default function ContactFormNotWorkingPost() {
           believe nobody wrote. Both sides think everything is fine.
         </p>
         <p className="text-[#5b6472] text-lg leading-relaxed mb-10">
-          I&apos;ve spent nine years testing software, and forms are where I&apos;ve seen the most
+          I&apos;ve spent ten years testing software, and forms are where I&apos;ve seen the most
           real-world damage per bug. Here&apos;s how they fail, why yours passed when you tested it,
           and the five-minute protocol that actually proves a form works.
         </p>

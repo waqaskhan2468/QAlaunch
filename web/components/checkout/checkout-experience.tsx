@@ -36,6 +36,31 @@ type ScanStartPaidResponse = {
   scanId: string
   paymentRequired: true
   targetUrl: string
+  /** Echoed back when the server accepted `?from=` as the free scan to unlock. */
+  sourceScanId?: string | null
+}
+
+/**
+ * What the checkout shows about the free scan it was opened from: the real
+ * locked count and host, so the page says "unlock the 7 issues on
+ * yoursite.com" instead of asking for the URL again as if nothing had
+ * happened. Fetched from the public status endpoint, which returns only
+ * counts and titles for a free scan.
+ */
+type SourceScanSummary = {
+  id: string
+  url: string
+  host: string
+  totalIssues: number
+  lockedIssues: number
+}
+
+function hostOf(raw: string): string {
+  try {
+    return new URL(raw).hostname.replace(/^www\./, "")
+  } catch {
+    return raw
+  }
 }
 
 /** Keeps the URL field aligned with `?url=` when it is set or updated; ignores removal so user edits are preserved. */
@@ -68,6 +93,8 @@ export function CheckoutExperience() {
   const searchParams = useSearchParams()
   const rawPkg = (searchParams.get("package") ?? "").toLowerCase()
   const prefilledUrl = searchParams.get("url") ?? ""
+  // The free scan this purchase unlocks (set by every CTA on the result page).
+  const fromScanId = searchParams.get("from") ?? ""
 
   const plan = useMemo(() => planForCheckoutPackage(rawPkg), [rawPkg])
 
@@ -78,6 +105,7 @@ export function CheckoutExperience() {
   // Message from the pre-scan gate when the homepage looks like a web app —
   // drives the "public pages only" confirmation interstitial.
   const [pendingConfirm, setPendingConfirm] = useState<string | null>(null)
+  const [sourceScan, setSourceScan] = useState<SourceScanSummary | null>(null)
 
   const fetchAbortRef = useRef<AbortController | null>(null)
 
@@ -86,6 +114,46 @@ export function CheckoutExperience() {
       fetchAbortRef.current?.abort()
     }
   }, [])
+
+  // Load the free scan's summary. Only a finished free scan of the same site
+  // counts; anything else leaves the checkout as it was.
+  useEffect(() => {
+    if (!fromScanId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/scan/status/${encodeURIComponent(fromScanId)}`, {
+          cache: "no-store",
+        })
+        if (!res.ok) return
+        const data = (await res.json()) as {
+          scan?: { id?: string; url?: string | null; package?: string | null; status?: string | null }
+          totalIssueCount?: number
+          lockedIssueCount?: number
+        }
+        if (cancelled) return
+        const s = data.scan
+        if (!s?.id || !s.url || s.package !== "free" || s.status !== "done") return
+        if (prefilledUrl && hostOf(prefilledUrl) !== hostOf(s.url)) return
+        setSourceScan({
+          id: s.id,
+          url: s.url,
+          host: hostOf(s.url),
+          totalIssues: data.totalIssueCount ?? 0,
+          lockedIssues: data.lockedIssueCount ?? 0,
+        })
+      } catch {
+        /* checkout works without it */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [fromScanId, prefilledUrl])
+
+  // The URL field only unlocks the scan it came from while it still names
+  // that site; editing it means buying a fresh scan of something else.
+  const unlockingSource = sourceScan != null && hostOf(url.trim()) === sourceScan.host
 
   const handlePay = useCallback(async (acknowledgePublicOnly = false) => {
     if (!plan) return
@@ -117,6 +185,7 @@ export function CheckoutExperience() {
           package: plan.checkoutPackage,
           email: emailTrim,
           ...(acknowledgePublicOnly ? { acknowledgePublicOnly: true } : {}),
+          ...(unlockingSource && sourceScan ? { sourceScanId: sourceScan.id } : {}),
           attribution: captureAttribution(),
         }),
       })
@@ -179,12 +248,23 @@ export function CheckoutExperience() {
       const successUrl = `${window.location.origin}/checkout/success?scanId=${encodeURIComponent(startPayload.scanId)}`
 
       // Funnel: user clicked buy and the Paddle checkout is being opened.
+      // Recorded against the free scan too, so its funnel runs from "scan
+      // started" to "paid" on one id (the webhook does the same for payment).
       trackFunnelEvent({
         scanId: startPayload.scanId,
         eventType: "checkout_started",
         url: startPayload.targetUrl,
         email: emailTrim,
       })
+      const acceptedSourceScanId = startPayload.sourceScanId ?? null
+      if (acceptedSourceScanId) {
+        trackFunnelEvent({
+          scanId: acceptedSourceScanId,
+          eventType: "checkout_started",
+          url: startPayload.targetUrl,
+          email: emailTrim,
+        })
+      }
       trackOpenAiEvent("checkout_started")
 
       paddle.Checkout.open({
@@ -194,6 +274,7 @@ export function CheckoutExperience() {
           package: plan.checkoutPackage,
           targetUrl: startPayload.targetUrl,
           userEmail: emailTrim,
+          ...(acceptedSourceScanId ? { sourceScanId: acceptedSourceScanId } : {}),
         },
         settings: {
           displayMode: "overlay",
@@ -208,7 +289,7 @@ export function CheckoutExperience() {
     } finally {
       setIsPaying(false)
     }
-  }, [email, plan, url])
+  }, [email, plan, url, sourceScan, unlockingSource])
 
   const invalidPackage =
     !SELF_SERVE.includes(rawPkg as CheckoutPackageSlug) || !plan
@@ -251,7 +332,11 @@ export function CheckoutExperience() {
           {/* Visible and changeable. The one paying customer bought the
               homepage tier expecting a whole-site report, because checkout
               showed a single plan and he never saw the others existed. */}
-          <PlanSwitcher current={plan.checkoutPackage} prefillUrl={url} />
+          <PlanSwitcher
+            current={plan.checkoutPackage}
+            prefillUrl={url}
+            fromScanId={unlockingSource && sourceScan ? sourceScan.id : null}
+          />
 
           <div className="text-[11px] font-bold uppercase tracking-wider text-muted-ink">
             You are buying
@@ -310,11 +395,24 @@ export function CheckoutExperience() {
 
         <div className="flex flex-col justify-center">
           <h2 className="font-heading text-2xl font-black text-ink md:text-3xl">
-            Complete purchase
+            {unlockingSource && sourceScan ?
+              `Unlock the ${sourceScan.lockedIssues > 0 ? `${sourceScan.lockedIssues} locked ` : ""}issues on ${sourceScan.host}`
+            : "Complete purchase"}
           </h2>
           <p className="mt-2 text-body">
-            Enter the site to audit and your email for the PDF receipt. After
-            payment, your full report starts immediately.
+            {unlockingSource && sourceScan ?
+              <>
+                Your free scan found {sourceScan.totalIssues} issues on{" "}
+                <span className="font-mono font-semibold text-ink">{sourceScan.host}</span>. The
+                report keeps every one of them, tests the page in full, and adds where each
+                issue is, screenshot evidence and how to fix it. Enter your email for the PDF
+                and receipt.
+              </>
+            : <>
+                Enter the site to audit and your email for the PDF receipt. After payment,
+                your full report starts immediately.
+              </>
+            }
           </p>
 
           <form
@@ -396,7 +494,12 @@ export function CheckoutExperience() {
           </form>
 
           <p className="mt-5 text-center text-xs leading-relaxed text-body sm:text-left">
-            Paddle handles payment securely. One-time charge — no subscription.
+            Paddle handles payment securely. One-time charge — no subscription. If we
+            can&apos;t deliver your report, you get a{" "}
+            <Link href="/refund" className="font-semibold text-brand hover:underline">
+              full refund
+            </Link>
+            .
           </p>
           {/* Set the expectation before the card, not after. A paying customer
               found a working CTA reported as a dead link and asked us to say

@@ -112,7 +112,7 @@ export function AuditEnquiry({
 							'Tested on real mobile and desktop browsers',
 							'A written report in plain language, with screenshots',
 							'A 15-minute call to walk you through it',
-							'9 years of professional QA experience behind it',
+							'10 years of professional QA experience behind it',
 						].map((item) => (
 							<li key={item} className='flex items-start gap-2.5 text-[14px] text-ink'>
 								<span

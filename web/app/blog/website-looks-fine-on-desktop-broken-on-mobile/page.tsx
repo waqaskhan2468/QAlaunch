@@ -84,7 +84,7 @@ export default function DesktopFineMobileBrokenPost() {
           This is the single most common complaint behind the audits we run: &quot;my site looks
           perfect on my laptop, but someone just told me it&apos;s a mess on their phone.&quot; It&apos;s
           not bad luck and it&apos;s not a mystery. It&apos;s a predictable result of how websites get
-          built — and after nine years of QA work, I can tell you it almost always comes down to
+          built — and after ten years of QA work, I can tell you it almost always comes down to
           the same handful of causes.
         </p>
         <p className="text-[#5b6472] text-lg leading-relaxed mb-10">

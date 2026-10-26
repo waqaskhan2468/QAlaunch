@@ -5,6 +5,7 @@ import { SiteFooter } from '@/components/site/site-footer';
 import { PricingGrid } from '@/components/pricing/pricing-grid';
 import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 import { FAQ, type FAQItem } from '@/components/home/faq';
+import { FreeVsPaidTable } from '@/components/audit/free-vs-paid';
 
 export const metadata: Metadata = {
 	alternates: { canonical: '/pricing' },
@@ -16,15 +17,15 @@ title: `Pricing — Website Audit Reports from ${formatPackagePrice('basic')}`,
 const pricingFaqs: FAQItem[] = [
 	{
 		q: 'How long does the full audit take?',
-		a: 'The free audit preview takes under 120 seconds. A full paid report is ready within 3–5 minutes of payment. Your PDF download link arrives by email immediately.',
+		a: 'The free preview takes about 2 minutes. A full paid report is usually ready within 5 minutes of payment, and the PDF download link arrives by email as soon as it is.',
 	},
 	{
 		q: 'What counts as one "page"?',
-		a: 'A page is any unique URL — homepage, about, services, pricing, contact, product pages, etc. For the Basic plan you choose 1 page. For Standard, up to 5 pages. You specify which pages you want audited after payment.',
+		a: 'A page is any unique URL — homepage, about, services, pricing, contact, product pages and so on. Homepage tests your homepage in full. Small site covers up to 5 pages and Whole site up to 10, chosen automatically from your navigation (home, about, services, contact, products and the like).',
 	},
 	{
 		q: 'Can I send the report to my developer?',
-		a: "Absolutely — that's exactly what it's designed for. The PDF report includes step-by-step developer fix instructions for every issue. Your developer can action these immediately without any follow-up questions.",
+		a: "Yes — that's what it's for. Every issue in the report says what is wrong, why it matters and how to fix it, with a screenshot wherever the scanner could pinpoint the element. You get a PDF and a web link to share.",
 	},
 	{
 		q: 'Do you offer refunds?',
@@ -53,6 +54,7 @@ export default function PricingPage() {
 				<section className='px-5 py-20 md:px-12 md:py-24'>
 					<div className='mx-auto max-w-7xl'>
 						<PricingGrid />
+						<FreeVsPaidTable className='mx-auto mt-14 max-w-3xl' />
 					</div>
 				</section>
 

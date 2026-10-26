@@ -27,7 +27,7 @@ export const ORGANIZATION = {
 	email: 'contact@getqalaunch.com',
 	sameAs: ['https://x.com/QAlaunchHQ', 'https://www.linkedin.com/company/qalaunch'],
 	description:
-		'Website testing built by a QA engineer with 9 years of professional experience. Finds broken buttons, mobile layout failures, dead links and usability problems on any public website.',
+		'Website testing built by a QA engineer with 10 years of professional experience. Finds broken buttons, mobile layout failures, dead links and usability problems on any public website.',
 } as const;
 
 /**

@@ -2,7 +2,7 @@
 
 import { Minus, Plus } from "lucide-react"
 import { useState } from "react"
-import { AnimatePresence, motion } from "motion/react"
+import { motion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { fadeUpSoft, stagger } from "@/components/motion/primitives"
@@ -20,9 +20,11 @@ type FAQProps = {
 
 /**
  * Accessible accordion for FAQs. Items fade up in a stagger on first view.
- * Opening/closing is a motion height + opacity spring, and the chevron
- * rotates smoothly. Single-open behavior — clicking another question
- * collapses the first.
+ * Single-open behavior — clicking another question collapses the first.
+ *
+ * Every answer is in the DOM from the first render. They used to mount only
+ * when opened, so the FAQPage schema promised answers the HTML did not
+ * contain. Open/close animates with a CSS grid-rows transition instead.
  */
 export function FAQ({
   items = homeFaqs,
@@ -67,6 +69,7 @@ export function FAQ({
                   type="button"
                   onClick={() => setOpenIndex(open ? null : i)}
                   aria-expanded={open}
+                  aria-controls={`faq-answer-${i}`}
                   className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left font-bold text-ink transition-colors hover:text-accent-emerald focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-bright/40"
                 >
                   <span className="text-base leading-snug">{item.q}</span>
@@ -78,22 +81,20 @@ export function FAQ({
                     )}
                   </span>
                 </button>
-                <AnimatePresence initial={false}>
-                  {open && (
-                    <motion.div
-                      key="content"
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                      className="overflow-hidden"
-                    >
-                      <p className="px-6 pb-5 text-sm leading-relaxed text-body">
-                        {item.a}
-                      </p>
-                    </motion.div>
+                <div
+                  id={`faq-answer-${i}`}
+                  role="region"
+                  className={cn(
+                    "grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                    open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
                   )}
-                </AnimatePresence>
+                >
+                  <div className="overflow-hidden">
+                    <p className="px-6 pb-5 text-sm leading-relaxed text-body">
+                      {item.a}
+                    </p>
+                  </div>
+                </div>
               </motion.div>
             )
           })}

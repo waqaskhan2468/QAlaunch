@@ -7,7 +7,6 @@ import { Ticker } from "@/components/home/ticker"
 import { ProblemSection } from "@/components/home/problem-section"
 import { TestSuite } from "@/components/home/test-suite"
 import { HowItWorks } from "@/components/home/how-it-works"
-import { Testimonials } from "@/components/home/testimonials"
 import { PricingPreview } from "@/components/home/pricing-preview"
 import { Comparison } from "@/components/home/comparison"
 import { BuiltWith } from "@/components/home/built-with"
@@ -81,7 +80,9 @@ export default function HomePage() {
         <ProblemSection />
         <TestSuite />
         <HowItWorks />
-        <Testimonials />
+        {/* <Testimonials /> is out until there are real, attributable quotes.
+            The three it showed were placeholders, and they described a PDF
+            with screenshot evidence that did not exist at the time. */}
         <PricingPreview />
         <Comparison />
         <BuiltWith />

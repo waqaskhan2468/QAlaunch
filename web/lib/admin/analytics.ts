@@ -96,11 +96,42 @@ function dayKey(iso: string): string {
 const isPaidPackage = (pkg: string | null): boolean =>
 	Boolean(pkg) && pkg !== 'free';
 
+/**
+ * Your own test scans and purchases are not customers.
+ *
+ * On 26 Oct 2026 the dashboard showed 7 paid scans and 9 abandoned checkouts;
+ * 3 of the paid and 8 of the abandoned were internal tests. Every rate on the
+ * page was computed from the wrong numbers. Anything at the company domain is
+ * excluded automatically; personal test addresses go in ADMIN_EXCLUDED_EMAILS.
+ */
+const INTERNAL_EMAIL_DOMAINS = ['getqalaunch.com'];
+
+function excludedEmails(): Set<string> {
+	return new Set(
+		(process.env.ADMIN_EXCLUDED_EMAILS ?? '')
+			.split(',')
+			.map((e) => e.trim().toLowerCase())
+			.filter(Boolean),
+	);
+}
+
+export function isInternalScan(
+	email: string | null | undefined,
+	excluded: Set<string> = excludedEmails(),
+): boolean {
+	const normalized = email?.trim().toLowerCase();
+	if (!normalized) return false;
+	if (excluded.has(normalized)) return true;
+	const domain = normalized.split('@')[1];
+	return Boolean(domain) && INTERNAL_EMAIL_DOMAINS.includes(domain);
+}
+
 export type AdminAnalytics = Awaited<ReturnType<typeof loadAdminAnalytics>>;
 
 export async function loadAdminAnalytics(range: RangeKey) {
 	const supabase = getServiceSupabase();
 	const start = rangeStart(range);
+	const excluded = excludedEmails();
 
 	// ── Window rows ────────────────────────────────────────────────────────
 	let scanQuery = supabase
@@ -127,24 +158,47 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		.select('id', { count: 'exact', head: true })
 		.eq('payment_status', 'paid');
 
-	const [scansRes, funnelRes, totalScansRes, totalPaidRes] = await Promise.all([
-		scanQuery,
-		funnelQuery,
-		totalScansQuery,
-		totalPaidQuery,
-	]);
+	// scans.source_scan_id (supabase/scans_source_scan.sql) links a sale to the
+	// free scan it came from. Queried separately so an older database without
+	// the column still gets a dashboard — the join just stays empty.
+	let sourceLinkQuery = supabase
+		.from('scans')
+		.select('id, source_scan_id')
+		.not('source_scan_id', 'is', null)
+		.limit(ROW_LIMIT);
+	if (start) sourceLinkQuery = sourceLinkQuery.gte('created_at', start);
+
+	const [scansRes, funnelRes, totalScansRes, totalPaidRes, sourceLinkRes] =
+		await Promise.all([
+			scanQuery,
+			funnelQuery,
+			totalScansQuery,
+			totalPaidQuery,
+			sourceLinkQuery,
+		]);
 
 	if (scansRes.error) throw new Error(`scans query failed: ${scansRes.error.message}`);
 
-	const scans = (scansRes.data ?? []) as ScanRow[];
+	const allRows = (scansRes.data ?? []) as ScanRow[];
+	const internalRows = allRows.filter((s) => isInternalScan(s.user_email, excluded));
+	const scans = allRows.filter((s) => !isInternalScan(s.user_email, excluded));
 	// funnel_events is optional — the table may not exist on an older database.
 	const funnel = (funnelRes.error ? [] : (funnelRes.data ?? [])) as FunnelRow[];
+	const sourceScanIdOf = new Map(
+		sourceLinkRes.error ?
+			[]
+		:	((sourceLinkRes.data ?? []) as Array<{ id: string; source_scan_id: string | null }>)
+				.filter((r) => r.source_scan_id)
+				.map((r) => [r.id, r.source_scan_id as string]),
+	);
 
 	// ── Headline numbers ───────────────────────────────────────────────────
 	const freeScans = scans.filter((s) => s.package === 'free');
 	const paidAttempts = scans.filter((s) => isPaidPackage(s.package));
 	const paidCompleted = paidAttempts.filter((s) => s.payment_status === 'paid');
 	const abandoned = paidAttempts.filter((s) => s.payment_status !== 'paid');
+	// Sales traceable to a free scan — the number "free → paid" is meant to be.
+	const paidFromFreeScan = paidCompleted.filter((s) => sourceScanIdOf.has(s.id)).length;
 
 	const revenue = paidCompleted.reduce(
 		(sum, s) => sum + (PACKAGE_PRICE[s.package ?? ''] ?? 0),
@@ -227,11 +281,26 @@ export async function loadAdminAnalytics(range: RangeKey) {
 	});
 
 	// ── Scan health ────────────────────────────────────────────────────────
+	// A paid package nobody paid for sits at 'pending' forever; it is an
+	// abandoned checkout, not a running scan, so it is not counted here.
+	const isRunnable = (s: ScanRow) =>
+		s.package === 'free' || s.payment_status === 'paid';
 	const health = {
 		done: scans.filter((s) => s.status === 'done').length,
 		failed: scans.filter((s) => s.status === 'failed').length,
 		inProgress: scans.filter(
-			(s) => s.status && ['pending', 'crawling', 'analyzing'].includes(s.status),
+			(s) =>
+				isRunnable(s) &&
+				s.status &&
+				['pending', 'crawling', 'analyzing'].includes(s.status),
+		).length,
+		// Anything still "running" after 30 minutes has fallen over somewhere.
+		stuck: scans.filter(
+			(s) =>
+				isRunnable(s) &&
+				s.status &&
+				['pending', 'crawling', 'analyzing'].includes(s.status) &&
+				Date.now() - new Date(s.created_at).getTime() > 30 * 60 * 1000,
 		).length,
 	};
 
@@ -279,6 +348,8 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		email: s.user_email,
 		websiteType: s.website_type,
 		createdAt: s.created_at,
+		/** Links a sale back to the free scan it was placed from. */
+		sourceScanId: sourceScanIdOf.get(s.id) ?? null,
 	}));
 
 	// ── Failed scans ───────────────────────────────────────────────────────
@@ -373,7 +444,10 @@ export async function loadAdminAnalytics(range: RangeKey) {
 
 	const followUpsSent = freeScans.filter((s) => s.followup_sent_at).length;
 
-	// Paid rows that never completed payment — the follow-up list.
+	// Paid rows that never completed payment — the follow-up list. The
+	// recovery cron (lib/checkout/recovery.ts) never emails a checkout older
+	// than seven days, so those are labelled expired rather than "queued".
+	const RECOVERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 	const abandonedCheckouts = abandoned.slice(0, 25).map((s) => ({
 		id: s.id,
 		host: hostOf(s.url),
@@ -382,6 +456,9 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		createdAt: s.created_at,
 		potentialRevenue: PACKAGE_PRICE[s.package ?? ''] ?? 0,
 		recoverySentAt: s.recovery_sent_at ?? null,
+		recoveryExpired:
+			!s.recovery_sent_at &&
+			Date.now() - new Date(s.created_at).getTime() > RECOVERY_MAX_AGE_MS,
 	}));
 
 	// How much of the abandoned pile the recovery cron has actually reached.
@@ -442,6 +519,10 @@ export async function loadAdminAnalytics(range: RangeKey) {
 		summary: {
 			freeScans: freeScans.length,
 			paidScans: paidCompleted.length,
+			paidFromFreeScan,
+			/** Rows left out of every number above because they are your own tests. */
+			internalScans: internalRows.length,
+			internalPaid: internalRows.filter((s) => s.payment_status === 'paid').length,
 			paidAttempts: paidAttempts.length,
 			abandonedCheckouts: abandoned.length,
 			recoveryEmailsSent,

@@ -298,7 +298,7 @@ export default function Page() {
 
 				<p className='mt-8 text-[13px] text-muted-ink'>
 					Last reviewed <time dateTime={LAST_REVIEWED}>{LAST_REVIEWED}</time>. Written and
-					maintained by Waqas Ahmad, a QA engineer with nine years&rsquo; experience.
+					maintained by Waqas Ahmad, a QA engineer with ten years&rsquo; experience.
 				</p>
 			</main>
 

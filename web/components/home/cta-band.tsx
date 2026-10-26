@@ -58,7 +58,7 @@ export function CtaBand() {
           <br className="hidden md:block" /> with your website.
         </h2>
         <p className="mx-auto mt-4 max-w-l  text-base leading-relaxed text-white/70 sm:text-lg">
-          Free audit in 120 seconds. No signup needed. Full expert report from
+          Free audit in about 2 minutes. No signup needed. Full expert report from
           just {formatPackagePrice('basic')}.
         </p>
         <motion.button

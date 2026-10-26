@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     template: "%s | QAlaunch",
   },
   description:
-    `Free website bug scan from a QA engineer with 9 years' experience. Find broken buttons, mobile bugs and dead links in 2 minutes. No signup. From ${formatPackagePrice('basic')}.`,
+    `Free website bug scan from a QA engineer with 10 years' experience. Find broken buttons, mobile bugs and dead links in 2 minutes. No signup. From ${formatPackagePrice('basic')}.`,
   keywords: [
     "test website for bugs",
     "website bug checker",

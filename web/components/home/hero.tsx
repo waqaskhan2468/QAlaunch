@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Check, Link2, Mail, Star } from "lucide-react"
+import { ArrowRight, Check, Link2, Mail } from "lucide-react"
 import { motion, useMotionValue, useSpring } from "motion/react"
 
 import { captureAttribution } from "@/lib/analytics/attribution"
@@ -144,7 +145,7 @@ export function Hero() {
           animate="visible"
         >
           <motion.div variants={fadeUp} className="mb-7">
-            <Flag>9 Years of QA Expertise — Now Automated</Flag>
+            <Flag>10 Years of QA Expertise — Now Automated</Flag>
           </motion.div>
 
           {/* leading-[1.18], not 1.05: the underline below sits inside this
@@ -202,20 +203,24 @@ export function Hero() {
             ) : null}
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 px-1">
               <TrustItem label="No signup required" />
-              <TrustItem label="Free preview in 120s" />
+              <TrustItem label="Free preview in about 2 minutes" />
               <TrustItem label={`Full report from ${formatPackagePrice('basic')}`} />
             </div>
           </motion.div>
 
-          {/* Stats — dominant big numbers */}
+          {/* Stats — dominant big numbers. Rendered with their final value:
+              the count-up used to start at 0 on the server, so crawlers,
+              link previews and AI summaries read "0+ websites audited".
+              500+ is what the database supports (515 scans on 26 Oct 2026);
+              "1,000+" was not. */}
           <motion.div
             variants={fadeUp}
             className="mt-12 grid grid-cols-2 gap-x-8 gap-y-7 sm:flex sm:flex-wrap sm:gap-x-12"
           >
-            <StatItem value={1000} suffix="+" label="Websites Audited" />
-            <StatItem value={35} suffix="+" label="Quality Checks" />
-            <StatItem value={60} suffix="s" label="Free Audit Time" />
-            <StatItem value={9} suffix="yr" label="QA Expertise" />
+            <StatItem value="500+" label="Websites Audited" />
+            <StatItem value="35+" label="Quality Checks" />
+            <StatItem value="2 min" label="Free Audit Time" />
+            <StatItem value="10yr" label="QA Expertise" />
           </motion.div>
         </motion.div>
 
@@ -227,7 +232,7 @@ export function Hero() {
           transition={{ delay: 0.25, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         >
           <ReportCard />
-          <RatingCard />
+          <RealBrowserCard />
         </motion.div>
       </div>
     </section>
@@ -396,49 +401,11 @@ function TrustItem({ label }: { label: string }) {
   )
 }
 
-function StatItem({
-  value,
-  suffix,
-  label,
-}: {
-  value: number
-  suffix: string
-  label: string
-}) {
-  const [display, setDisplay] = useState(0)
-  const ref = useRef<HTMLDivElement | null>(null)
-  const started = useRef(false)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting || started.current) return
-          started.current = true
-          const duration = 1400
-          const start = performance.now()
-          const tick = (now: number) => {
-            const t = Math.min(1, (now - start) / duration)
-            const eased = 1 - Math.pow(1 - t, 3)
-            setDisplay(Math.round(value * eased))
-            if (t < 1) requestAnimationFrame(tick)
-          }
-          requestAnimationFrame(tick)
-        })
-      },
-      { threshold: 0.4 },
-    )
-    io.observe(el)
-    return () => io.disconnect()
-  }, [value])
-
+function StatItem({ value, label }: { value: string; label: string }) {
   return (
-    <div ref={ref} className="flex flex-col">
+    <div className="flex flex-col">
       <span className="font-heading text-4xl font-black leading-none tracking-[-0.02em] text-white sm:text-5xl">
-        {display >= 1000 ? display.toLocaleString() : display}
-        {suffix}
+        {value}
       </span>
       <span className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-white/45">
         {label}
@@ -572,33 +539,42 @@ function ReportCard() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Rating card — real testimonial (James M.)                           */
+/*  "Real browser" card — what the scan actually does                   */
 /* ------------------------------------------------------------------ */
 
-function RatingCard() {
+/**
+ * Replaces a testimonial card whose quote was a placeholder. Until a real,
+ * attributable quote exists this slot carries the one claim no checker can
+ * copy and every scan can back: the site is opened and used, not parsed.
+ */
+function RealBrowserCard() {
+  const facts = [
+    "Loads your site in a real Chrome browser, at phone and desktop width",
+    "Follows your links, clicks your buttons, tries your forms",
+    "Reviews real screenshots — then shows them to you as evidence",
+  ]
   return (
-    <figure className="rounded-none border-2 border-slate-deep bg-white p-5">
-      <div className="mb-3 flex gap-0.5 text-[#F59E0B]" aria-label="5 star rating">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Star key={i} className="size-4" fill="currentColor" strokeWidth={0} />
-        ))}
+    <div className="rounded-none border-2 border-slate-deep bg-white p-5">
+      <div className="text-[10.5px] font-bold uppercase tracking-[1.5px] text-muted-ink">
+        Not a scan of your code
       </div>
-      <blockquote className="text-[13px] italic leading-relaxed text-ink">
-        &ldquo;I thought my Lovable app was ready to launch. QAlaunch found a
-        broken checkout button, an invisible CTA on mobile, and 3 JS errors — all
-        in under a minute. Saved me from a disastrous launch.&rdquo;
-      </blockquote>
-      <figcaption className="mt-4 flex items-center gap-3">
-        <div className="flex size-9 items-center justify-center rounded-full bg-brand font-heading text-xs font-extrabold text-white">
-          JM
-        </div>
-        <div>
-          <div className="text-[13px] font-bold text-ink">James M.</div>
-          <div className="text-[11px] text-muted-ink">
-            SaaS Founder — Built with Lovable
-          </div>
-        </div>
-      </figcaption>
-    </figure>
+      <ul className="mt-3 flex flex-col gap-2">
+        {facts.map((f) => (
+          <li key={f} className="flex items-start gap-2 text-[13px] leading-snug text-ink">
+            <span className="mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-none bg-accent-bright/20 text-[#15803D]">
+              <Check className="size-2.5" strokeWidth={3} />
+            </span>
+            {f}
+          </li>
+        ))}
+      </ul>
+      <Link
+        href="/sample-report"
+        className="mt-4 inline-flex items-center gap-1 text-[13px] font-bold text-brand hover:underline"
+      >
+        See a full sample report
+        <ArrowRight className="size-3.5" />
+      </Link>
+    </div>
   )
 }

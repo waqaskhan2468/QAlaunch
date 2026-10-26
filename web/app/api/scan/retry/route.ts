@@ -28,6 +28,13 @@ export const POST = asyncHandler(async (req: Request) => {
 		.eq('id', scanId)
 		.single();
 
+	// Separate, best-effort read: works whether or not scans_source_scan.sql ran.
+	const { data: sourceLink } = await supabase
+		.from('scans')
+		.select('source_scan_id')
+		.eq('id', scanId)
+		.maybeSingle();
+
 	if (error || !scan) {
 		throw new AppError(404, 'not_found', 'Scan not found.');
 	}
@@ -71,6 +78,8 @@ export const POST = asyncHandler(async (req: Request) => {
 		targetUrl: scan.url,
 		package: scan.package,
 		userEmail: scan.user_email ?? null,
+		sourceScanId:
+			(sourceLink as { source_scan_id?: string | null } | null)?.source_scan_id ?? null,
 	});
 
 	return NextResponse.json({ ok: true, scanId: scan.id });

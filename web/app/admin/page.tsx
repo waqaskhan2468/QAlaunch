@@ -178,8 +178,21 @@ export default async function AdminDashboardPage({
 					<p className="mt-4 border-l-4 border-warn bg-warn-pale px-3 py-2 text-[12.5px] font-semibold text-[#78350F]">
 						Showing the most recent 5,000 scans for this range — older rows in
 						this window are not included in the totals below.
-					</p>
-				)}
+						</p>
+					)}
+					{s.internalScans > 0 ? (
+						<p className="mt-4 text-[12.5px] text-body">
+							{fmt(s.internalScans)} of your own test scans
+							{s.internalPaid > 0 ? ` (${fmt(s.internalPaid)} paid)` : ''} are left out of
+							every number on this page. Addresses come from ADMIN_EXCLUDED_EMAILS plus
+							anything at getqalaunch.com.
+						</p>
+					) : (
+						<p className="mt-4 text-[12.5px] text-muted-ink">
+							Tip: set ADMIN_EXCLUDED_EMAILS to the addresses you test with, so your own
+							purchases do not count as customers here.
+						</p>
+					)}
 
 				{/* Headline stats */}
 				<div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -199,7 +212,7 @@ export default async function AdminDashboardPage({
 					<StatCard
 						label="Free → paid"
 						value={pct(s.conversionRate)}
-						sub={`${fmt(s.paidScans)} paid / ${fmt(s.freeScans)} free`}
+						sub={`${fmt(s.paidScans)} paid / ${fmt(s.freeScans)} free · ${fmt(s.paidFromFreeScan)} traced to a free scan`}
 					/>
 				</div>
 
@@ -212,7 +225,12 @@ export default async function AdminDashboardPage({
 					<StatCard
 						label="Scans completed"
 						value={fmt(data.health.done)}
-						sub={`${fmt(data.health.inProgress)} running`}
+						sub={
+							data.health.stuck > 0 ?
+								`${fmt(data.health.inProgress)} running · ${fmt(data.health.stuck)} stuck over 30 min`
+							:	`${fmt(data.health.inProgress)} running`
+						}
+						tone={data.health.stuck > 0 ? 'warn' : 'default'}
 					/>
 					<StatCard
 						label="Scans failed"
@@ -368,9 +386,17 @@ export default async function AdminDashboardPage({
 											key={row.id}
 											className="border-b border-border-soft last:border-0">
 											<td className={TD}>{shortDate(row.createdAt)}</td>
-											<td className={`${TD} font-semibold`}>{row.host}</td>
-											<td className={TD}>
-												{fmt(row.totalIssues)}
+											<td className={`${TD} font-semibold`}>
+											<a
+												href={`/result?scanId=${row.id}&url=${encodeURIComponent(row.url)}`}
+												target="_blank"
+												rel="noopener noreferrer"
+												className="underline decoration-border-soft underline-offset-2 hover:text-brand">
+												{row.host}
+											</a>
+										</td>
+										<td className={TD}>
+											{fmt(row.totalIssues)}
 												{row.highSeverityCount > 0 && (
 													<span className="ml-1 text-danger font-semibold">
 														({fmt(row.highSeverityCount)} high)
@@ -435,9 +461,11 @@ export default async function AdminDashboardPage({
 												<span className="font-semibold text-accent-emerald">
 													sent {shortDate(row.recoverySentAt)}
 												</span>
-											: row.email ?
-												<span className="text-muted-ink">queued</span>
-											:	<span className="text-muted-ink">no email given</span>}
+											: !row.email ?
+												<span className="text-muted-ink">no email given</span>
+											: row.recoveryExpired ?
+												<span className="text-muted-ink">expired (over 7 days)</span>
+											:	<span className="text-muted-ink">queued</span>}
 										</td>
 										<td className={TD}>{money(row.potentialRevenue)}</td>
 									</tr>
@@ -619,7 +647,9 @@ export default async function AdminDashboardPage({
 				</Section>
 
 				{/* Recent scans */}
-				<Section title="Recent scans" note="Latest 50 in this range.">
+				<Section
+					title="Recent scans"
+					note="Latest 50 in this range. The website opens the results page a visitor sees; Report opens the delivered PDF.">
 					{data.recentScans.length === 0 ?
 						<Empty>No scans in this range.</Empty>
 					:	<table className="w-full">
@@ -632,13 +662,32 @@ export default async function AdminDashboardPage({
 									<th className={TH}>Status</th>
 									<th className={TH}>Email</th>
 									<th className={TH}>Type</th>
+									<th className={TH}>Open</th>
 								</tr>
 							</thead>
 							<tbody>
 								{data.recentScans.map((row) => (
 									<tr key={row.id} className="border-b border-border-soft last:border-0">
 										<td className={TD}>{shortDate(row.createdAt)}</td>
-										<td className={`${TD} font-semibold`}>{row.host}</td>
+										<td className={`${TD} font-semibold`}>
+											<a
+												href={`/result?scanId=${row.id}&url=${encodeURIComponent(row.url)}`}
+												target="_blank"
+												rel="noopener noreferrer"
+												className="underline decoration-border-soft underline-offset-2 hover:text-brand">
+												{row.host}
+											</a>
+											{row.sourceScanId ? (
+												<a
+													href={`/result?scanId=${row.sourceScanId}`}
+													target="_blank"
+													rel="noopener noreferrer"
+													className="ml-2 text-[11px] font-medium text-muted-ink hover:text-brand"
+													title="The free scan this purchase was placed from">
+													from free scan ↗
+												</a>
+											) : null}
+										</td>
 										<td className={TD}>{row.pkg}</td>
 										<td className={TD}>
 											<span
@@ -662,6 +711,17 @@ export default async function AdminDashboardPage({
 										</td>
 										<td className={TD}>{row.email ?? '—'}</td>
 										<td className={TD}>{row.websiteType ?? '—'}</td>
+										<td className={TD}>
+											{row.paymentStatus === 'paid' && row.status === 'done' ?
+												<a
+													href={`/api/scan/report-url?scanId=${row.id}`}
+													target="_blank"
+													rel="noopener noreferrer"
+													className="font-semibold text-brand hover:underline">
+													Report
+												</a>
+											:	<span className="text-muted-ink">—</span>}
+										</td>
 									</tr>
 								))}
 							</tbody>

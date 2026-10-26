@@ -73,6 +73,12 @@ export const scanStartSchema = z
 		 */
 		acknowledgePublicOnly: z.boolean().optional(),
 		/**
+		 * The free scan a paid order is placed from (`?from=` on /checkout). The
+		 * server verifies it is a finished free scan of the same site before
+		 * trusting it; its findings are then inherited into the paid report.
+		 */
+		sourceScanId: z.string().trim().uuid().optional(),
+		/**
 		 * First-touch attribution captured in the browser. Optional throughout:
 		 * direct traffic genuinely has none, and a scan must never fail because
 		 * analytics could not be read.

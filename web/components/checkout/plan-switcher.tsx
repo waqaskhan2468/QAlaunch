@@ -25,9 +25,12 @@ import { plans, type CheckoutPackageSlug } from '@/components/pricing/pricing-pl
 export function PlanSwitcher({
 	current,
 	prefillUrl,
+	fromScanId,
 }: {
 	current: CheckoutPackageSlug | undefined;
 	prefillUrl: string;
+	/** Kept in the URL across a plan switch so the free scan stays attached. */
+	fromScanId?: string | null;
 }) {
 	const options = plans.filter(
 		(p): p is typeof p & { checkoutPackage: CheckoutPackageSlug } =>
@@ -35,7 +38,9 @@ export function PlanSwitcher({
 	);
 
 	const hrefFor = (slug: CheckoutPackageSlug) =>
-		`/checkout?package=${slug}${prefillUrl ? `&url=${encodeURIComponent(prefillUrl)}` : ''}`;
+		`/checkout?package=${slug}${prefillUrl ? `&url=${encodeURIComponent(prefillUrl)}` : ''}${
+			fromScanId ? `&from=${encodeURIComponent(fromScanId)}` : ''
+		}`;
 
 	return (
 		<div className='mb-6'>

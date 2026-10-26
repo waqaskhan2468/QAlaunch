@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Check, Lock, X, Zap, ZoomIn } from 'lucide-react';
-import { createPortal } from 'react-dom';
+import { Check, Lock } from 'lucide-react';
 
 import { captureAttribution } from '@/lib/analytics/attribution';
 import { cn } from '@/lib/utils';
@@ -13,7 +12,10 @@ import { plans } from '@/components/pricing/pricing-plans';
 import { AuditEnquiry } from '@/components/audit/audit-enquiry';
 import { ResultEmailCapture } from '@/components/audit/result-email-capture';
 import { ProofOfWorkPanel } from '@/components/audit/proof-of-work-panel';
-import { buildProofOfWork, type ProofOfWork } from '@/lib/scan/proof-of-work';
+import { FindingCard, type ScanIssue } from '@/components/audit/finding-card';
+import { FreeVsPaidTable } from '@/components/audit/free-vs-paid';
+import { FullReportView } from '@/components/report/full-report-view';
+import type { ProofOfWork } from '@/lib/scan/proof-of-work';
 import { formatPackagePrice } from '@/components/pricing/pricing-plans';
 import { computeHealthScore, labelFromScore } from '@/lib/scoring/health';
 import {
@@ -110,15 +112,17 @@ function categoryNoun(cat: string, count: number): string {
 function lockedCategoryBreakdown(
 	lockedIssues: Array<{ category: string; severity: string }>,
 ) {
-	const byCat = new Map<string, { count: number; maxSev: string }>();
+	const byCat = new Map<string, { count: number; maxSev: string; severeCount: number }>();
 	for (const issue of lockedIssues) {
 		const cat = issue.category.toLowerCase();
 		const sev = issue.severity.toLowerCase();
+		const severe = sev === 'critical' || sev === 'high' ? 1 : 0;
 		const cur = byCat.get(cat);
 		if (!cur) {
-			byCat.set(cat, { count: 1, maxSev: sev });
+			byCat.set(cat, { count: 1, maxSev: sev, severeCount: severe });
 		} else {
 			cur.count += 1;
+			cur.severeCount += severe;
 			if ((SEVERITY_RANK[sev] ?? -1) > (SEVERITY_RANK[cur.maxSev] ?? -1)) {
 				cur.maxSev = sev;
 			}
@@ -130,7 +134,7 @@ function lockedCategoryBreakdown(
 		return i === -1 ? order.length : i;
 	};
 	return [...byCat.entries()]
-		.map(([cat, { count, maxSev }]) => ({ cat, count, maxSev }))
+		.map(([cat, { count, maxSev, severeCount }]) => ({ cat, count, maxSev, severeCount }))
 		.sort((a, b) => rank(a.cat) - rank(b.cat));
 }
 
@@ -205,28 +209,10 @@ type UiState =
 	| 'starting'
 	| 'processing'
 	| 'completed'
+	/** A finished paid scan: the full report renders in place of the preview. */
+	| 'paid'
 	| 'failed'
 	| 'free_preview_used';
-
-type ScanIssue = {
-	id: string;
-	category: string;
-	severity: string;
-	title: string;
-	description: string;
-	impact: string;
-	finding_type?: string | null;
-	/** Highlighted evidence crop, or the full page screenshot (see getIssueEvidence). */
-	screenshot_url?: string | null;
-	/** Evidence highlight in the screenshot's pixel space (AI findings only). */
-	bounding_box?: {
-		target: 'desktop' | 'mobile';
-		x: number;
-		y: number;
-		width: number;
-		height: number;
-	} | null;
-};
 
 type LockedIssue = {
 	id: string;
@@ -237,15 +223,17 @@ type LockedIssue = {
 };
 
 type ScanPageStatus = {
-	/** Raw scanner output. Already returned by /api/scan/status (select *), and
-	 *  the source for the "how we tested this" panel. */
-	playwright_data?: unknown;
+	id?: string;
+	page_url?: string;
+	page_role?: string | null;
+	/** What the scanner did, computed server-side (the raw payload stays there). */
+	proof?: ProofOfWork | null;
 	ai_analysis?: {
 		status?: string;
 		error?: string;
 		analysis_mode?: 'full' | 'hybrid' | 'text_only';
 		screenshots_available?: boolean;
-		issues?: unknown[];
+		issue_count?: number;
 	} | null;
 	screenshot_desktop_url?: string | null;
 	screenshot_mobile_url?: string | null;
@@ -259,6 +247,9 @@ type ScanStatusResponse = {
 		package?: string;
 		/** The scanned target. Lets a bare /result?scanId=… restore its own url. */
 		url?: string | null;
+		/** Paid scans: the PDF exists and /api/scan/report-url will serve it. */
+		report_ready?: boolean;
+		created_at?: string | null;
 	};
 	pages?: ScanPageStatus[];
 	issues: ScanIssue[];
@@ -427,8 +418,14 @@ function AuditExperienceInner({
 	const freePreviewUsedParam = resolvedFreePreviewUsed;
 	const host = deriveHost(inputUrl);
 
+	// "Free preview already used" used to be a dead end: a card with "view paid
+	// plans" and "try another website", and the results the visitor had seen
+	// before were gone. The 409 now carries the earlier scan's id, so with a
+	// scanId we show those results again (with a banner) and only fall back to
+	// the card when there is genuinely nothing to show.
+	const returningVisitor = freePreviewUsedParam === '1' && Boolean(initialScanId);
 	const [uiState, setUiState] = useState<UiState>(() => {
-		if (freePreviewUsedParam === '1') return 'free_preview_used';
+		if (freePreviewUsedParam === '1' && !initialScanId) return 'free_preview_used';
 		return initialScanId ? 'processing' : 'idle';
 	});
 	const [statusData, setStatusData] = useState<ScanStatusResponse | null>(null);
@@ -437,7 +434,9 @@ function AuditExperienceInner({
 	const [pendingSince, setPendingSince] = useState<number | null>(null);
 	const [queuedStuckSec, setQueuedStuckSec] = useState<number | null>(null);
 	const [message, setMessage] = useState<string | null>(() =>
-		freePreviewUsedParam === '1' ? 'You already used your free preview for this website.' : null,
+		freePreviewUsedParam === '1' && !initialScanId ?
+			'You already used your free preview for this website.'
+		:	null,
 	);
 	const [statusFetchNote, setStatusFetchNote] = useState<string | null>(null);
 	const [isRetrying, setIsRetrying] = useState(false);
@@ -455,7 +454,7 @@ function AuditExperienceInner({
 	useEffect(() => {
 		let cancelled = false;
 
-		if (freePreviewUsedParam === '1') {
+		if (freePreviewUsedParam === '1' && !initialScanId) {
 			return () => { cancelled = true; };
 		}
 
@@ -557,6 +556,14 @@ function AuditExperienceInner({
 					if (cancelled || data.scan?.id !== initialScanId) return;
 					const pkg = data.scan?.package;
 					if (pkg && pkg !== 'free') {
+						// A finished paid scan is the full report, here on the web. One
+						// still in progress (or unpaid) keeps its order page, which has
+						// the live progress and the retry button.
+						if (data.scan.status === 'done') {
+							setStatusData(data);
+							setUiState('paid');
+							return;
+						}
 						router.replace(
 							`/checkout/success?scanId=${encodeURIComponent(initialScanId)}`,
 						);
@@ -573,7 +580,7 @@ function AuditExperienceInner({
 						router.replace(
 							`/result?scanId=${encodeURIComponent(initialScanId)}&url=${encodeURIComponent(
 								data.scan.url,
-							)}`,
+							)}${freePreviewUsedParam === '1' ? '&freePreviewUsed=1' : ''}`,
 						);
 						return;
 					}
@@ -657,15 +664,18 @@ function AuditExperienceInner({
 
 			const payload = (await res.json()) as
 				| { ok: true; scanId: string }
-				| { ok: false; code?: string; message?: string };
+				| { ok: false; code?: string; message?: string; existingScanId?: string | null };
 
 			if (
 				res.status === 409 &&
 				payload.ok === false &&
 				payload.code === 'free_preview_used'
 			) {
+				const existing = payload.existingScanId ?
+					`&scanId=${encodeURIComponent(payload.existingScanId)}`
+				:	'';
 				router.replace(
-					`/result?url=${encodeURIComponent(value)}&freePreviewUsed=1`,
+					`/result?url=${encodeURIComponent(value)}&freePreviewUsed=1${existing}`,
 				);
 				return;
 			}
@@ -688,6 +698,37 @@ function AuditExperienceInner({
 			setIsRetrying(false);
 		}
 	};
+
+	// ── Paid report ────────────────────────────────────────────────────────────
+	if (uiState === 'paid' && statusForCurrentScan) {
+		const pageUrlById: Record<string, string> = {};
+		for (const page of statusForCurrentScan.pages ?? []) {
+			if (page.id && page.page_url) pageUrlById[page.id] = page.page_url;
+		}
+		return (
+			<FullReportView
+				mode='paid'
+				scan={{
+					id: statusForCurrentScan.scan.id,
+					url: statusForCurrentScan.scan.url ?? inputUrl,
+					package: statusForCurrentScan.scan.package ?? null,
+					created_at: statusForCurrentScan.scan.created_at ?? null,
+					report_ready: Boolean(statusForCurrentScan.scan.report_ready),
+				}}
+				issues={statusForCurrentScan.issues}
+				pages={(statusForCurrentScan.pages ?? []).map((p) => ({
+					page_url: p.page_url ?? '',
+					page_role: p.page_role ?? null,
+					screenshot_desktop_url: p.screenshot_desktop_url ?? null,
+					screenshot_mobile_url: p.screenshot_mobile_url ?? null,
+				}))}
+				healthScore={statusForCurrentScan.healthScore ?? computeHealthScore(
+					statusForCurrentScan.issues.map((i) => i.severity),
+				)}
+				scanPageIdToUrl={pageUrlById}
+			/>
+		);
+	}
 
 	// ── Loading state ──────────────────────────────────────────────────────────
 	if (
@@ -787,13 +828,15 @@ function AuditExperienceInner({
 						Free preview already used
 					</h1>
 					<p className='mt-2 text-sm text-body'>
-						{message ?? 'You have already used the free preview for this website.'}
+						{message ?? 'You have already used the free preview for this website.'}{' '}
+						The full report tests the whole page again and shows every issue with
+						evidence and a fix, from {formatPackagePrice('basic')}.
 					</p>
 					<div className='mt-5 flex flex-wrap justify-center gap-3'>
 						<Link
-							href='/pricing'
+							href={`/checkout?package=basic${inputUrl ? `&url=${encodeURIComponent(inputUrl)}` : ''}`}
 							className='inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand-mid'>
-							View paid plans
+							Get the full report — {formatPackagePrice('basic')}
 						</Link>
 						<button
 							type='button'
@@ -861,14 +904,7 @@ function AuditExperienceInner({
 	// A visitor told us the preview "shows 3 issues like every other tool" —
 	// the findings cannot carry the difference, the work has to be visible.
 	const primaryPage = (statusForCurrentScan?.pages ?? [])[0];
-	const proofOfWork: ProofOfWork | null =
-		primaryPage ?
-			buildProofOfWork({
-				playwrightData: primaryPage.playwright_data,
-				hasDesktopScreenshot: Boolean(primaryPage.screenshot_desktop_url),
-				hasMobileScreenshot: Boolean(primaryPage.screenshot_mobile_url),
-			})
-		:	null;
+	const proofOfWork: ProofOfWork | null = primaryPage?.proof ?? null;
 
 	const incompleteVisualScan = (statusForCurrentScan?.pages ?? []).some(
 		(page) => {
@@ -898,6 +934,8 @@ function AuditExperienceInner({
 			proofOfWork={proofOfWork}
 			desktopScreenshotUrl={primaryPage?.screenshot_desktop_url ?? null}
 			mobileScreenshotUrl={primaryPage?.screenshot_mobile_url ?? null}
+			returningVisitor={returningVisitor}
+			scannedAt={statusForCurrentScan?.scan.created_at ?? null}
 		/>
 	);
 }
@@ -918,6 +956,9 @@ type ResultsViewProps = {
 	proofOfWork: ProofOfWork | null;
 	desktopScreenshotUrl: string | null;
 	mobileScreenshotUrl: string | null;
+	/** Came back for a site whose free preview was already used. */
+	returningVisitor: boolean;
+	scannedAt: string | null;
 };
 
 function ResultsView({
@@ -934,6 +975,8 @@ function ResultsView({
 	proofOfWork,
 	desktopScreenshotUrl,
 	mobileScreenshotUrl,
+	returningVisitor,
+	scannedAt,
 }: ResultsViewProps) {
 	const [ringAnimated, setRingAnimated] = useState(false);
 	const [displayScore, setDisplayScore] = useState(0);
@@ -993,9 +1036,30 @@ function ResultsView({
 	// pricing grid, so a convinced buyer had to compare four plans and click
 	// again; checkout completion is 100% once reached, so that stretch was
 	// where the drop-off lived. Plan comparison stays available below.
-	const basicCheckoutHref = `/checkout?package=basic${
-		inputUrl ? `&url=${encodeURIComponent(inputUrl)}` : ''
+	//
+	// `from` carries this scan's id into checkout: the paid report then
+	// inherits these findings (the locked titles the buyer is paying to read
+	// cannot go missing) and the sale is attributed to this free scan.
+	const checkoutQuery = `${inputUrl ? `&url=${encodeURIComponent(inputUrl)}` : ''}${
+		scanId ? `&from=${encodeURIComponent(scanId)}` : ''
 	}`;
+	const basicCheckoutHref = `/checkout?package=basic${checkoutQuery}`;
+
+	// Free scans skip PageSpeed entirely, so "no performance issues" would be
+	// a claim about a test that never ran. Say which categories were not
+	// tested rather than listing them as clean.
+	const NOT_TESTED_IN_FREE = new Set(['performance']);
+	const cleanCategories = categoriesWithoutIssues.filter((c) => !NOT_TESTED_IN_FREE.has(c.key));
+	const untestedCategories = categoriesWithoutIssues.filter((c) => NOT_TESTED_IN_FREE.has(c.key));
+
+	const scannedAtLabel =
+		scannedAt ?
+			new Date(scannedAt).toLocaleDateString('en-US', {
+				day: 'numeric',
+				month: 'short',
+				year: 'numeric',
+			})
+		:	null;
 
 	/**
 	 * Fired on every route from this page to /checkout.
@@ -1070,6 +1134,13 @@ function ResultsView({
 
 	return (
 		<div className='bg-surface-soft'>
+			{returningVisitor ? (
+				<div className='border-b border-warn/30 bg-warn-pale px-5 py-3 text-center text-sm font-medium text-[#78350F] md:px-10'>
+					You already used the free preview for {host}
+					{scannedAtLabel ? ` on ${scannedAtLabel}` : ''} — here are those results again.
+					The full report re-tests the page and shows every issue with its fix.
+				</div>
+			) : null}
 			<div className='border-b border-brand/20 bg-brand-pale px-5 py-3 text-center text-sm font-medium text-brand md:px-10'>
 				This is a homepage-only preview. A full scan checks every important
 				page on your site.
@@ -1155,9 +1226,9 @@ function ResultsView({
 						<p className='mt-4 max-w-xl text-[15px] leading-relaxed text-white/65'>
 							A full automated + AI review found{' '}
 							<strong className='text-white'>{realIssueCount} issues on your homepage</strong>{' '}
-							actively affecting how real visitors experience it.{' '}
+							that affect how visitors, phones or search engines see it.{' '}
 							<strong className='text-white'>
-								The {criticalShownCount} most serious are shown free below.
+								{criticalShownCount} of them, including the most serious, are shown free below.
 							</strong>
 						</p>
 						<p className='mt-3 max-w-xl text-[12.5px] leading-relaxed text-white/45'>
@@ -1335,10 +1406,17 @@ function ResultsView({
 						})}
 					</div>
 				) : null}
-				{categoriesWithoutIssues.length > 0 ? (
+				{cleanCategories.length > 0 ? (
 					<p className='mt-4 text-[12px] leading-relaxed text-muted-ink'>
 						<span className='font-semibold text-accent-bright'>No issues found:</span>{' '}
-						{categoriesWithoutIssues.map((c) => c.label).join(', ')}
+						{cleanCategories.map((c) => c.label).join(', ')}
+					</p>
+				) : null}
+				{untestedCategories.length > 0 ? (
+					<p className='mt-1.5 text-[12px] leading-relaxed text-muted-ink'>
+						<span className='font-semibold text-ink'>Not tested in the free preview:</span>{' '}
+						{untestedCategories.map((c) => c.label).join(', ')} (Google PageSpeed runs in
+						the full report).
 					</p>
 				) : null}
 			</div>
@@ -1372,11 +1450,12 @@ function ResultsView({
 						3 of {totalIssueCount} issues shown · {lockedIssueCount} issues remain locked
 					</div>
 					<p className='mt-0.5 text-[13px] leading-snug' style={{ color: '#7C2D12' }}>
-						Your visitors are hitting{' '}
-						<strong style={{ color: '#991B1B' }}>all {totalIssueCount} issues</strong>{' '}
-						right now — not just the 3 below. Unlock the full report for every issue
-						with <strong style={{ color: '#991B1B' }}>screenshot evidence</strong> and{' '}
-						<strong style={{ color: '#991B1B' }}>developer-ready fix instructions</strong>.
+						All <strong style={{ color: '#991B1B' }}>{totalIssueCount} issues</strong> are
+						on your homepage right now — not just the 3 below. The full report shows every
+						one with <strong style={{ color: '#991B1B' }}>where it is</strong>,{' '}
+						<strong style={{ color: '#991B1B' }}>screenshot evidence</strong> where the
+						scanner could pinpoint it, and{' '}
+						<strong style={{ color: '#991B1B' }}>how to fix it</strong>.
 					</p>
 				</div>
 			</div>
@@ -1384,7 +1463,7 @@ function ResultsView({
 			{/* Section label */}
 			<div className='mb-5 flex items-center gap-3'>
 				<span className='whitespace-nowrap font-mono text-[10.5px] font-bold uppercase tracking-[2px] text-muted-ink'>
-					Free preview · your {criticalShownCount} most serious issues
+					Free preview · {criticalShownCount} of your {totalIssueCount} issues
 				</span>
 				<div className='h-px flex-1 bg-border-soft' />
 			</div>
@@ -1440,19 +1519,24 @@ function ResultsView({
 							What&apos;s locked in your full report
 						</div>
 						<ul className='flex flex-col gap-2'>
-							{lockedBreakdown.map(({ cat, count, maxSev }) => (
+							{lockedBreakdown.map(({ cat, count, maxSev, severeCount }) => (
 								<li
 									key={cat}
 									className='flex items-center gap-2 text-[13.5px] font-semibold text-ink'>
 									<Lock className='size-3.5 shrink-0 text-danger' />
 									<span>
-										{count}{' '}
-										{maxSev === 'critical' ? (
-											<span className='text-danger'>critical </span>
-										) : maxSev === 'high' ? (
-											<span className='text-warn'>high-severity </span>
+										{count} {categoryNoun(cat, count)}
+										{/* "2 high-severity accessibility issues" when one was high and
+										    one was low: the category used to take its worst severity.
+										    Say how many are actually severe. */}
+										{severeCount > 0 && (maxSev === 'critical' || maxSev === 'high') ? (
+											<span className={maxSev === 'critical' ? 'text-danger' : 'text-warn'}>
+												{' '}
+												({severeCount === count ?
+													maxSev === 'critical' ? 'critical' : 'high severity'
+												:	`${severeCount} ${maxSev === 'critical' ? 'critical' : 'high severity'}`})
+											</span>
 										) : null}
-										{categoryNoun(cat, count)}
 									</span>
 								</li>
 							))}
@@ -1508,7 +1592,11 @@ function ResultsView({
 								Need more pages? See all plans
 							</button>
 							<span aria-hidden='true'>·</span>
-							<Link href='/#sample-report' className='font-semibold text-brand hover:underline'>
+							<Link
+								href='/sample-report'
+								target='_blank'
+								rel='noopener'
+								className='font-semibold text-brand hover:underline'>
 								See a sample report
 							</Link>
 						</div>
@@ -1521,6 +1609,13 @@ function ResultsView({
 						</span>
 					</div>
 				</div>
+
+				{/* What changes between the free preview and the report, as a table —
+				    the growth plan's "never claim more than measured" rule applies to
+				    every row, so each one is something the report actually does. */}
+				<div className='px-6 pb-6'>
+					<FreeVsPaidTable lockedCount={lockedIssueCount} totalCount={totalIssueCount} />
+				</div>
 			</div>
 
 			{/* ── TRUST STRIP ──────────────────────────────────────────── */}
@@ -1528,7 +1623,7 @@ function ResultsView({
 				{[
 					{ ico: '⚡', t: 'Instant Delivery', s: 'PDF in your inbox in 120 seconds' },
 					{ ico: '🛡️', t: 'Delivery Guaranteed', s: "Full refund if we can't deliver it" },
-					{ ico: '👤', t: 'Built by Experts', s: '9 years of senior QA experience' },
+					{ ico: '👤', t: 'Built by an Expert', s: '10 years of senior QA experience' },
 					{ ico: '🔁', t: 'No Subscription', s: 'Pay once — own the report forever' },
 				].map((item) => (
 					<div
@@ -1623,6 +1718,7 @@ function ResultsView({
 							key={plan.tier}
 							plan={plan}
 							prefillUrl={inputUrl}
+							fromScanId={scanId || null}
 							onSelect={trackPlanClick}
 						/>
 					))}
@@ -1673,7 +1769,7 @@ function ResultsView({
 								{lockedIssueCount} more issues found on your website
 							</div>
 							<div className='text-[12px] text-white/50'>
-								Unlock the full report — all {totalIssueCount} issues + fix instructions
+								Unlock the full report — all {totalIssueCount} issues, each with how to fix it
 							</div>
 						</div>
 					</div>
@@ -1695,237 +1791,6 @@ function ResultsView({
 			</div>
 		)}
 	</div>
-	);
-}
-
-// ─── Evidence image (screenshot proof on a finding card) ─────────────────────
-
-/**
- * Decide what visual evidence a finding can show:
- *  - a pre-highlighted element crop (uploaded under `/crop-…`, see
- *    lib/scan/screenshot-paths.ts) renders at natural size — never upscaled;
- *  - an AI finding that carried a bounding box renders the page screenshot as
- *    a thumbnail. The box itself is deliberately NOT drawn — model-produced
- *    boxes are not yet reliable enough, and a wrong annotation costs more
- *    trust than no annotation. Its presence is used only as a signal that the
- *    finding is visual and worth showing a screenshot for.
- * A bare full-page screenshot with no box proves nothing and would repeat the
- * same image under every card, so it renders no evidence at all.
- */
-function getIssueEvidence(
-	finding: ScanIssue,
-): { src: string; kind: 'crop' | 'page'; deviceLabel: string } | null {
-	const src = finding.screenshot_url;
-	if (!src) return null;
-
-	if (src.includes('/crop-')) {
-		return { src, kind: 'crop', deviceLabel: 'desktop view' };
-	}
-
-	const box = finding.bounding_box;
-	if (box && box.width > 0 && box.height > 0) {
-		return {
-			src,
-			kind: 'page',
-			deviceLabel: box.target === 'mobile' ? 'mobile view' : 'desktop view',
-		};
-	}
-
-	return null;
-}
-
-/**
- * Compact evidence thumbnail with a click-to-enlarge lightbox.
- *
- * Sits in a fixed-width side column next to the finding text on desktop (the
- * finding text gets the room; the thumbnail is a small proof-of-evidence
- * teaser) and stacks full-width below the text on mobile — sizing is
- * responsive via Tailwind breakpoints, no JS layout logic needed. Element
- * crops render via object-contain (upscaling small crops to fill the column
- * made them a blurry mess); page screenshots use object-cover so an
- * arbitrary-aspect screenshot still fills the thumbnail box cleanly.
- *
- * The lightbox is portalled to <body> (the card has a hover transform, which
- * would break `position: fixed`) and closes on backdrop click, the ✕ button,
- * or Escape.
- */
-function EvidenceImage({
-	src,
-	kind,
-	deviceLabel,
-	alt,
-}: {
-	src: string;
-	kind: 'crop' | 'page';
-	deviceLabel: string;
-	alt: string;
-}) {
-	const [open, setOpen] = useState(false);
-	const [failed, setFailed] = useState(false);
-
-	useEffect(() => {
-		if (!open) return;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') setOpen(false);
-		};
-		document.addEventListener('keydown', onKey);
-		const previousOverflow = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.removeEventListener('keydown', onKey);
-			document.body.style.overflow = previousOverflow;
-		};
-	}, [open]);
-
-	if (failed) return null;
-
-	return (
-		<>
-			<button
-				type='button'
-				onClick={() => setOpen(true)}
-				aria-label={`Enlarge screenshot evidence (${deviceLabel})`}
-				title='Click to view full-size evidence'
-				className={cn(
-					'group relative block w-full overflow-hidden rounded-xl border border-border-soft bg-surface-soft text-left',
-					'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40',
-					kind === 'crop' && 'flex items-center justify-center p-2',
-				)}>
-				{/* Supabase storage URL — next/image remote config not needed for evidence shots. */}
-				{/* eslint-disable-next-line @next/next/no-img-element */}
-				<img
-					src={src}
-					alt={alt}
-					loading='lazy'
-					onError={() => setFailed(true)}
-					className={cn(
-						kind === 'page' ?
-							'h-[170px] w-full object-cover object-top sm:h-28'
-						:	'max-h-[170px] w-auto max-w-full object-contain sm:max-h-28',
-					)}
-				/>
-				{/* Persistent (not hover-only) zoom cue — the column is too narrow on
-				    desktop for a text banner, and hover doesn't exist on touch. */}
-				<span className='pointer-events-none absolute bottom-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded-full bg-white/95 shadow-sm transition-transform group-hover:scale-110'>
-					<ZoomIn className='size-3.5 text-ink' />
-				</span>
-			</button>
-			<span className='mt-1.5 block text-center text-[10.5px] font-semibold text-muted-ink sm:text-left'>
-				View evidence
-			</span>
-
-			{open &&
-				typeof document !== 'undefined' &&
-				createPortal(
-					<div
-						role='dialog'
-						aria-modal='true'
-						aria-label='Screenshot evidence — full size'
-						className='fixed inset-0 z-[100] flex flex-col items-center justify-center gap-3 bg-slate-950/85 p-4 sm:p-10'
-						onClick={() => setOpen(false)}>
-						<button
-							type='button'
-							onClick={() => setOpen(false)}
-							aria-label='Close screenshot preview'
-							className='absolute right-4 top-4 z-10 inline-flex size-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/25'>
-							<X className='size-5' />
-						</button>
-						{/* eslint-disable-next-line @next/next/no-img-element */}
-						<img
-							src={src}
-							alt={alt}
-							className='max-h-full max-w-full rounded-lg object-contain shadow-2xl'
-							onClick={(event) => event.stopPropagation()}
-						/>
-						<span className='text-[12.5px] font-semibold text-white/70'>
-							Evidence — captured on your page ({deviceLabel})
-						</span>
-					</div>,
-					document.body,
-				)}
-		</>
-	);
-}
-
-// ─── FindingCard ──────────────────────────────────────────────────────────────
-
-function FindingCard({ finding }: { finding: ScanIssue }) {
-	const evidence = getIssueEvidence(finding);
-	const normSev = finding.severity.toUpperCase();
-	const normCat = (v: string) => {
-		const map: Record<string, string> = {
-			functionality: 'Functionality',
-			ui_bugs: 'UI Bugs',
-			usability_ux: 'Usability',
-			responsiveness: 'Mobile',
-			performance: 'Performance',
-			seo: 'SEO',
-			accessibility: 'Accessibility',
-			security: 'Security',
-			content: 'Content',
-		};
-		return map[v] ?? v;
-	};
-
-	const tone = {
-		CRITICAL: { card: 'border-l-[4px] border-l-danger', badge: 'bg-danger-pale text-danger' },
-		HIGH:     { card: 'border-l-[4px] border-l-warn',   badge: 'bg-warn-pale text-warn'     },
-		MEDIUM:   { card: 'border-l-[4px] border-l-brand',  badge: 'bg-brand-pale text-brand'   },
-		LOW:      { card: 'border-l-[4px] border-l-muted-ink', badge: 'bg-surface-soft text-muted-ink' },
-	}[normSev] ?? { card: 'border-l-[4px] border-l-brand', badge: 'bg-brand-pale text-brand' };
-
-	return (
-		<article
-			className={cn(
-				'rounded-2xl border-[1.5px] border-border-soft bg-white p-6 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5',
-				tone.card,
-			)}>
-			<div
-				className={cn(
-					'flex flex-col gap-4',
-					// Thumbnail sits in a fixed-width side column on desktop (text gets
-					// the room); on mobile it's a full-width row below the text — order
-					// classes reorder visually without touching DOM order.
-					evidence && 'sm:flex-row sm:items-start',
-				)}>
-				{evidence && (
-					<div className='order-2 sm:order-1 sm:w-[132px] sm:shrink-0'>
-						<EvidenceImage
-							src={evidence.src}
-							kind={evidence.kind}
-							deviceLabel={evidence.deviceLabel}
-							alt={`Screenshot evidence: ${finding.title}`}
-						/>
-					</div>
-				)}
-				<div className={cn('order-1 min-w-0', evidence && 'sm:order-2 sm:flex-1')}>
-					<div className='mb-3 flex flex-wrap items-center gap-2'>
-						<span
-							className={cn(
-								'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-extrabold tracking-wider',
-								tone.badge,
-							)}>
-							● {normSev}
-						</span>
-						<span className='text-[11px] font-bold uppercase tracking-widest text-muted-ink'>
-							{normCat(finding.category)}
-						</span>
-					</div>
-					<h3 className='font-heading text-[17px] font-extrabold leading-snug text-ink'>
-						{finding.title}
-					</h3>
-					<p className='mt-2.5 text-[13.5px] leading-[1.65] text-body'>
-						{finding.description}
-					</p>
-					<div className='mt-3.5 flex items-start gap-2 rounded-lg bg-warn-pale px-3.5 py-2.5 text-[12.5px] font-semibold text-[#78350F]'>
-						<Zap className='mt-0.5 size-3.5 shrink-0 text-warn' />
-						<span>
-							<span className='font-extrabold'>Impact:</span> {finding.impact}
-						</span>
-					</div>
-				</div>
-			</div>
-		</article>
 	);
 }
 
@@ -1977,10 +1842,13 @@ function LockedIssueRow({ issue }: { issue: LockedIssue }) {
 function MiniPlanCard({
 	plan,
 	prefillUrl,
+	fromScanId,
 	onSelect,
 }: {
 	plan: (typeof plans)[number];
 	prefillUrl: string | null;
+	/** The free scan to unlock — inherited into the paid report. */
+	fromScanId: string | null;
 	/** Records the funnel step before navigating away. */
 	onSelect: () => void;
 }) {
@@ -1988,7 +1856,7 @@ function MiniPlanCard({
 		plan.checkoutPackage != null ?
 			`/checkout?package=${plan.checkoutPackage}${
 				prefillUrl ? `&url=${encodeURIComponent(prefillUrl)}` : ''
-			}`
+			}${fromScanId ? `&from=${encodeURIComponent(fromScanId)}` : ''}`
 		:	'/contact';
 
 	return (

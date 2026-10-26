@@ -42,12 +42,14 @@ export async function POST(req: Request) {
         package?: string;
         targetUrl?: string;
         userEmail?: string;
+        sourceScanId?: string;
       };
       custom_data?: {
         scanId?: string;
         package?: string;
         targetUrl?: string;
         userEmail?: string;
+        sourceScanId?: string;
       };
     };
   }).data;
@@ -63,8 +65,14 @@ export async function POST(req: Request) {
   }
 
   const transactionId = eventData.id;
-  const { scanId, package: rawPackage, targetUrl, userEmail } =
+  const { scanId, package: rawPackage, targetUrl, userEmail, sourceScanId: rawSourceScanId } =
     eventData.customData ?? eventData.custom_data ?? {};
+  // Custom data comes back from Paddle, so it is treated as a hint: the row's
+  // own source_scan_id (set server-side at /api/scan/start) wins when present.
+  const hintedSourceScanId =
+    typeof rawSourceScanId === "string" && /^[0-9a-f-]{36}$/i.test(rawSourceScanId) ?
+      rawSourceScanId
+    : null;
   const packageResult = scanPackageSchema.safeParse(rawPackage);
   if (!scanId || !targetUrl || !packageResult.success || packageResult.data === "free") {
     return NextResponse.json({ error: "missing_or_invalid_custom_data" }, { status: 400 });
@@ -77,6 +85,14 @@ export async function POST(req: Request) {
     .select("id, package, payment_id, payment_status")
     .eq("id", scanId)
     .single();
+
+  // Read separately so a database without supabase/scans_source_scan.sql
+  // still processes the payment; the link is a nice-to-have, the sale is not.
+  const { data: sourceLink } = await supabase
+    .from("scans")
+    .select("source_scan_id")
+    .eq("id", scanId)
+    .maybeSingle();
 
   if (scanFetchError || !existingScan) {
     console.error("[paddle webhook] scan lookup failed", { scanId, transactionId, scanFetchError });
@@ -123,13 +139,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "scan_update_failed" }, { status: 500 });
   }
 
+  const sourceScanId =
+    (sourceLink as { source_scan_id?: string | null } | null)?.source_scan_id ??
+    hintedSourceScanId;
+
   // Funnel: payment confirmed for this scan (transaction.paid/completed).
+  // Logged against the free scan it came from as well, so the funnel can be
+  // read per free scan from "scan started" all the way to "paid" — before
+  // this, the paid row was a stranger to the free one and the last two steps
+  // of the funnel were counted on different scans from the first five.
   await logFunnelEvent(supabase, {
     scanId,
     eventType: "payment_completed",
     url: targetUrl,
     email: userEmail ?? null,
   });
+  if (sourceScanId && sourceScanId !== scanId) {
+    await logFunnelEvent(supabase, {
+      scanId: sourceScanId,
+      eventType: "payment_completed",
+      url: targetUrl,
+      email: userEmail ?? null,
+    });
+  }
 
   // Internal sale alert. Scheduled here — before the queue step — because the
   // payment is already confirmed and persisted at this point, so the sale is
@@ -166,6 +198,7 @@ export async function POST(req: Request) {
       package: pkg,
       targetUrl,
       userEmail: userEmail ?? null,
+      sourceScanId,
     });
   } catch (error) {
     console.error("[paddle webhook] queue publish failed", { scanId, transactionId, error });

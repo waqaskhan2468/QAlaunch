@@ -64,8 +64,10 @@ export const claudeBoundingBoxSchema = z.object({
  * supabase/issues_confidence.sql) where it gates persistence and free-preview
  * eligibility.
  *
- * Note: the model no longer produces "how to fix" text — issues carry only
- * title / area / description / impact / severity / category.
+ * `fix_instructions` is what the paid report sells ("developer fix
+ * instructions"). It was dropped in June and the report shipped without it
+ * while every plan card still promised it. Optional in the schema so a legacy
+ * payload still parses; persistence falls back to a category-level fix.
  */
 export const claudeIssueSchema = z.object({
 	category: issueCategorySchema,
@@ -73,6 +75,7 @@ export const claudeIssueSchema = z.object({
 	title: trimmed.pipe(z.string().min(20).max(80)),
 	description: trimmed.pipe(z.string().min(100).max(800)),
 	impact: trimmed.pipe(z.string().min(20).max(200)),
+	fix_instructions: trimmed.pipe(z.string().min(20).max(1000)).optional(),
 	page_section: z
 		.union([trimmed.pipe(z.string().min(1).max(500)), z.literal('')])
 		.optional(),
@@ -116,6 +119,7 @@ export const CLAUDE_ISSUE_STRING_LIMITS = {
 	title: { min: 20, max: 80 },
 	description: { min: 100, max: 800 },
 	impact: { min: 20, max: 200 },
+	fix_instructions: { min: 20, max: 1000 },
 	page_section: { min: 1, max: 500 },
 } as const;
 
@@ -170,9 +174,21 @@ function normalizeIssueRow(row: unknown): unknown {
 			row.finding_type
 		:	undefined;
 
+	// An empty or missing fix is left out (persistence supplies a fallback)
+	// rather than padded into a meaningless sentence.
+	const fixInstructions =
+		typeof row.fix_instructions === 'string' && row.fix_instructions.trim().length > 0 ?
+			clampClaudeString(
+				row.fix_instructions,
+				CLAUDE_ISSUE_STRING_LIMITS.fix_instructions.min,
+				CLAUDE_ISSUE_STRING_LIMITS.fix_instructions.max,
+			)
+		:	undefined;
+
 	return {
 		...row,
 		finding_type: findingType,
+		fix_instructions: fixInstructions,
 		title: clampClaudeString(
 			row.title,
 			CLAUDE_ISSUE_STRING_LIMITS.title.min,

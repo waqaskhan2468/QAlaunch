@@ -24,6 +24,7 @@ import {
 	updateScanPageAiAnalysis,
 } from '@/lib/db/supabase-retry';
 import { failScan, toUserFacingScanError } from '@/lib/scan/fail-scan';
+import { attachEvidenceCrops } from './evidence-crops';
 import {
 	CLAUDE_ISSUE_STRING_LIMITS,
 	clampClaudeString,
@@ -78,7 +79,10 @@ const FREE_PREVIEW_ISSUE_COUNT = 3;
 // trust than the other two earn, so a shorter preview of solid findings beats
 // a padded one.
 const MIN_ISSUE_CONFIDENCE = 0.5;
-const MIN_PREVIEW_CONFIDENCE = 0.7;
+// 0.8, up from 0.7: a scan of a public demo store put a 0.75-confidence
+// "filter sidebar shows empty lists" in the preview, and the sidebar had 22
+// working filters. One wrong preview finding gets the other two dismissed.
+const MIN_PREVIEW_CONFIDENCE = 0.8;
 
 // Verified patterns are concrete and reproducible but often minor. Cap how many
 // preview slots they can occupy so a run of small deterministic findings can
@@ -502,12 +506,85 @@ function buildAnalysisPromptAfterImages(input: {
 }
 
 /**
- * Constant placeholder for the legacy issues.fix_instructions column. The model
- * no longer produces fix guidance and the report no longer renders it, but the
- * column is NOT NULL with a minimum-length CHECK — this satisfies it (>= 20 chars)
- * without a DB migration. It is never displayed anywhere.
+ * What older rows hold in issues.fix_instructions from the months when fix
+ * guidance was switched off. Treated as "no fix recorded" wherever a row is
+ * read back, so a merged or re-rendered issue never shows this to a customer.
  */
-const FIX_INSTRUCTIONS_PLACEHOLDER = 'Not included in report.';
+export const LEGACY_FIX_PLACEHOLDER = 'Not included in report.';
+
+/**
+ * Fix text for the deterministic pattern checks, keyed by check id. These
+ * checks are fixed payloads, so their fixes are fixed too. `hero-height-*`
+ * matches both devices.
+ */
+const PATTERN_CHECK_FIX: Record<string, string> = {
+	'logo-home-link':
+		'Wrap the header logo in a link to the homepage (href="/"), on every page including the homepage itself. Check it on a phone as well: a logo inside a hamburger menu or a sticky header is easy to leave unlinked.',
+	'nav-active-state':
+		'Give the navigation link for the current page a visibly different style — a different colour, bold weight or an underline — using an "active" or "current" class set from the current route. Keep the same treatment on mobile.',
+	'link-destination':
+		'Open each social icon in the header and footer and point it at the correct profile URL. Remove icons for networks you are not on rather than leaving them pointing at "#" or the homepage.',
+	'text-contrast':
+		'Darken the text or lighten the background until the contrast ratio is at least 4.5:1 for normal text and 3:1 for large text (check with a contrast tool). Text placed over photos usually needs a dark overlay or a solid panel behind it.',
+	'hero-height':
+		'Reduce the hero so the headline and the main button are visible without scrolling: shrink the top padding, use a shorter image or limit the hero height to the viewport (min-height: 100vh at most). Check at 390px wide as well as on desktop.',
+	'button-hover':
+		'Give buttons a fixed min-width or padding that does not change on hover and focus, so the label never wraps or shifts. If the hover state adds a border, add a transparent border in the normal state too.',
+};
+
+function patternCheckFix(checkId: unknown): string | null {
+	if (typeof checkId !== 'string') return null;
+	if (PATTERN_CHECK_FIX[checkId]) return PATTERN_CHECK_FIX[checkId];
+	const prefix = Object.keys(PATTERN_CHECK_FIX).find((k) => checkId.startsWith(k));
+	return prefix ? PATTERN_CHECK_FIX[prefix] : null;
+}
+
+/**
+ * Last-resort fix text by category, for the rare issue the model returned
+ * without one and for pattern checks with no entry above. Generic, but still
+ * tells a developer where to start — which beats a blank block.
+ */
+const CATEGORY_FALLBACK_FIX: Record<string, string> = {
+	functionality:
+		'Reproduce the problem in a browser on the page and section named above, then fix the element so it does what its label says. Check the browser console while doing so; a JavaScript error on this page usually points at the cause.',
+	ui_bugs:
+		'Open the page at desktop and phone width, find the element named above and correct its styling (spacing, colour, image size or alignment) so it matches the rest of the page.',
+	usability_ux:
+		'Make the intended action obvious on the section named above: a clear label, one visually distinct button and enough contrast. Ask someone unfamiliar with the site to try it before shipping.',
+	responsiveness:
+		'Open the page at 390px wide and fix the layout of the section named above so nothing overflows, overlaps or gets cut off. Use flexible widths (max-width: 100%) and stack columns on small screens.',
+	performance:
+		'Follow the specific PageSpeed opportunities for this page: compress and size images correctly, defer non-critical scripts, and make sure the largest element above the fold loads first.',
+	seo:
+		'Add or correct the on-page element named above (title, meta description, a single H1, image alt text or canonical tag) and re-check the page with a crawler or the browser inspector.',
+	accessibility:
+		'Fix the element named above so it works for keyboard and screen-reader users: a visible label or aria-label, correct heading order, and enough contrast. Re-run an axe-core check on the page afterwards.',
+	security:
+		'Have your developer or host add the missing response header(s) named above and confirm every page loads over HTTPS. Most hosts and CDNs expose these as settings.',
+	content:
+		'Replace or complete the content named above (placeholder text, missing details or inconsistent copy) and read the page end to end once more before publishing.',
+};
+
+function fallbackFix(category: string): string {
+	return (
+		CATEGORY_FALLBACK_FIX[category] ??
+		'Reproduce the problem on the page and section named above, then correct the element so it behaves as a visitor would expect.'
+	);
+}
+
+/** The fix to store: the model's own text, else a category fallback. */
+function resolveFixInstructions(
+	provided: string | null | undefined,
+	category: string,
+): string {
+	const text = provided?.trim() ?? '';
+	const usable = text.length > 0 && text !== LEGACY_FIX_PLACEHOLDER ? text : fallbackFix(category);
+	return clampClaudeString(
+		usable,
+		CLAUDE_ISSUE_STRING_LIMITS.fix_instructions.min,
+		CLAUDE_ISSUE_STRING_LIMITS.fix_instructions.max,
+	);
+}
 
 type IssueInsert = {
 	scan_id: string;
@@ -589,7 +666,10 @@ function buildVerifiedPatternIssues(
 				typeof r.pageSection === 'string' && r.pageSection.length > 0
 					? r.pageSection
 					: null,
-			fix_instructions: FIX_INSTRUCTIONS_PLACEHOLDER,
+			fix_instructions: resolveFixInstructions(
+				patternCheckFix(r.id),
+				r.category as string,
+			),
 			// Prefer the highlighted evidence crop captured at check time; fall back
 			// to the full desktop screenshot if the crop could not be produced.
 			screenshot_url:
@@ -741,6 +821,28 @@ export function selectBalancedPreview(
 		);
 		if (!next) break;
 		selected.push(next);
+	}
+
+	// 2b. Never hide the worst thing we found. The page tells the visitor these
+	//     are the most serious issues; a preview of three mediums while a high
+	//     stays locked makes that a lie, and it also throws away the strongest
+	//     reason to buy. If nothing picked so far matches the top severity on
+	//     the page (and that top severity is critical/high), the first such
+	//     issue takes the next slot regardless of category.
+	const topSeverity = [...selected, ...remaining].reduce<string | null>(
+		(best, issue) =>
+			best === null || (SEVERITY_RANK[issue.severity] ?? 99) < (SEVERITY_RANK[best] ?? 99) ?
+				issue.severity
+			:	best,
+		null,
+	);
+	if (
+		selected.length < count &&
+		(topSeverity === 'critical' || topSeverity === 'high') &&
+		!selected.some((issue) => issue.severity === topSeverity)
+	) {
+		const worst = pickFirstMatching(remaining, (issue) => issue.severity === topSeverity);
+		if (worst) selected.push(worst);
 	}
 
 	// 3. Remaining strong converters, in category priority order.
@@ -1016,11 +1118,80 @@ type ScanPageForIssuePersist = {
 	playwright_data?: unknown;
 };
 
+/**
+ * Issues from the free scan a paid order was placed from.
+ *
+ * Paying used to start an unrelated scan: the AI is not deterministic, so the
+ * seven locked titles a buyer had just read could be missing from the report
+ * they paid to see. The free findings are now carried into the paid scan as a
+ * guaranteed base and merged with the fuller paid analysis (dedupeIssues keeps
+ * one of each). Rows are re-pointed at the new scan's pages by URL; their
+ * evidence crops stay valid because screenshots live in a public bucket.
+ */
+async function loadSourceScanIssues(
+	supabase: ServiceSupabase,
+	sourceScanId: string,
+	targetScanId: string,
+	targetPages: ScanPageForIssuePersist[],
+): Promise<IssueInsert[]> {
+	const { data: sourcePages } = await supabase
+		.from('scan_pages')
+		.select('id, page_url')
+		.eq('scan_id', sourceScanId);
+	const sourcePageUrl = new Map(
+		((sourcePages ?? []) as Array<{ id: string; page_url: string }>).map((p) => [
+			p.id,
+			p.page_url,
+		]),
+	);
+
+	const { data: rows, error } = await supabase
+		.from('issues')
+		.select(
+			'scan_page_id, category, severity, title, description, impact, page_section, fix_instructions, screenshot_url, finding_type, confidence, bounding_box',
+		)
+		.eq('scan_id', sourceScanId);
+	if (error || !rows?.length) return [];
+
+	const targetByUrl = new Map(targetPages.map((p) => [p.page_url, p]));
+	const fallbackPage = targetPages[0];
+
+	return (rows as Array<Record<string, unknown>>).flatMap((row) => {
+		const pageUrl = sourcePageUrl.get(String(row.scan_page_id ?? ''));
+		const target = (pageUrl && targetByUrl.get(pageUrl)) || fallbackPage;
+		if (!target) return [];
+		const category = String(row.category ?? 'functionality');
+		return [
+			{
+				scan_id: targetScanId,
+				scan_page_id: target.id,
+				category: category as ClaudeIssue['category'],
+				severity: String(row.severity ?? 'low') as ClaudeIssue['severity'],
+				title: String(row.title ?? ''),
+				description: String(row.description ?? ''),
+				impact: String(row.impact ?? ''),
+				page_section: typeof row.page_section === 'string' ? row.page_section : null,
+				fix_instructions: resolveFixInstructions(
+					typeof row.fix_instructions === 'string' ? row.fix_instructions : null,
+					category,
+				),
+				screenshot_url: typeof row.screenshot_url === 'string' ? row.screenshot_url : null,
+				is_in_free_preview: false,
+				display_order: 0,
+				finding_type: (row.finding_type as IssueFindingType) ?? 'general',
+				confidence: typeof row.confidence === 'number' ? row.confidence : 0.7,
+				bounding_box: (row.bounding_box as ClaudeBoundingBox | null) ?? null,
+			},
+		];
+	});
+}
+
 export async function persistScanIssuesFromAnalysis(
 	supabase: ServiceSupabase,
 	scanId: string,
 	pagesToTest: string[] | null | undefined,
 	pkg: ScanPackage,
+	options: { sourceScanId?: string | null } = {},
 ): Promise<void> {
 	const { data: pages, error: pagesError } = await supabase
 		.from('scan_pages')
@@ -1117,10 +1288,7 @@ export async function persistScanIssuesFromAnalysis(
 				description: issue.description,
 				impact: issue.impact,
 				page_section: pageSection,
-				// "How to fix" is no longer generated or shown. The issues.fix_instructions
-				// column is NOT NULL, so write a constant, never-displayed placeholder to
-				// satisfy it without a schema migration (see FIX_INSTRUCTIONS_PLACEHOLDER).
-				fix_instructions: FIX_INSTRUCTIONS_PLACEHOLDER,
+				fix_instructions: resolveFixInstructions(issue.fix_instructions, issue.category),
 				screenshot_url: screenshotUrl,
 				is_in_free_preview: false,
 				display_order: 0,
@@ -1163,6 +1331,26 @@ export async function persistScanIssuesFromAnalysis(
 			successfulAnalysisCount,
 			failedAnalysisCount: analysisFailures.length,
 		});
+	}
+
+	// A paid scan placed from a free one carries that free scan's findings as a
+	// guaranteed base (see loadSourceScanIssues). They go in FIRST so that, for
+	// an identical title, dedupe keeps the row the buyer already saw.
+	if (options.sourceScanId && pkg !== 'free') {
+		const inherited = await loadSourceScanIssues(
+			supabase,
+			options.sourceScanId,
+			scanId,
+			ordered,
+		);
+		if (inherited.length > 0) {
+			console.log('[runAiAnalysisForScan] inheriting free-scan issues', {
+				scanId,
+				sourceScanId: options.sourceScanId,
+				inherited: inherited.length,
+			});
+			pending = [...inherited, ...pending];
+		}
 	}
 
 	// Merge near-duplicates (same category + same root cause) before sorting,
@@ -1208,6 +1396,18 @@ export async function persistScanIssuesFromAnalysis(
 		row.display_order = index;
 		row.is_in_free_preview = isFree && freePreviewIssues.has(row);
 	});
+
+	// Turn AI bounding boxes into real evidence crops (best-effort; see
+	// lib/scan/ai/evidence-crops.ts). Free scans only crop the preview issues —
+	// locked ones are never shown with evidence, so there is nothing to gain.
+	const pageUrlById = new Map(ordered.map((p) => [p.id, p.page_url]));
+	const cropTargets = isFree ? pending.filter((row) => row.is_in_free_preview) : pending;
+	const cropped = await attachEvidenceCrops(cropTargets, (row) =>
+		pageUrlById.get(row.scan_page_id) ?? null,
+	);
+	if (cropped > 0) {
+		console.log('[runAiAnalysisForScan] evidence crops attached', { scanId, cropped });
+	}
 
 	const chunkSize = 50;
 

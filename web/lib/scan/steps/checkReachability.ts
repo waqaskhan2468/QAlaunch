@@ -1,5 +1,5 @@
 import { getServiceSupabase } from '@/lib/db/supabase';
-import { validateScanTarget } from '@/lib/scan/validate-target';
+import { editorUrlMessage, validateScanTarget } from '@/lib/scan/validate-target';
 
 export type ReachabilityResult = { ok: true } | { ok: false; reason: string };
 
@@ -40,6 +40,9 @@ export async function checkReachabilityStep(input: {
 		if (validation.status === 'unreachable') {
 			reason = UNREACHABLE_MESSAGE;
 			detail = `reachability: target did not respond to the pre-scan fetch (${targetUrl})`;
+		} else if (validation.status === 'editor_url') {
+			reason = editorUrlMessage(validation);
+			detail = `reachability: ${validation.platform} editor/preview/admin link, not a published site (${targetUrl})`;
 		} else if (validation.isWebApp) {
 			reason = WEBAPP_MESSAGE;
 			detail = `reachability: homepage looks login-gated or app-shell only (${targetUrl})`;

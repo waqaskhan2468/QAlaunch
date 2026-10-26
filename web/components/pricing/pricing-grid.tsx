@@ -144,13 +144,24 @@ function CTAButton({ plan }: { plan: Plan }) {
   }[plan.cta.variant]
 
   return (
-    <motion.div whileTap={{ scale: 0.97 }} whileHover={{ y: -2 }}>
-      <Link
-        href={plan.cta.href}
-        className={cn(baseClasses, variantClasses, "block","flex justify-center")}
-      >
-        {plan.cta.label}
-      </Link>
-    </motion.div>
+    <div>
+      <motion.div whileTap={{ scale: 0.97 }} whileHover={{ y: -2 }}>
+        <Link
+          href={plan.cta.href}
+          className={cn(baseClasses, variantClasses, "block","flex justify-center")}
+        >
+          {plan.cta.label}
+        </Link>
+      </motion.div>
+      {plan.checkoutPackage ? (
+        <p className="mt-2.5 text-center text-[11.5px] leading-snug text-muted-ink">
+          One-time payment. If we can&apos;t deliver your report, you get a{" "}
+          <Link href="/refund" className="font-semibold text-brand hover:underline">
+            full refund
+          </Link>
+          .
+        </p>
+      ) : null}
+    </div>
   )
 }
