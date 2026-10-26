@@ -12,11 +12,12 @@ const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 // Most responses arrive in 30–60 s; 120 s gives a comfortable ceiling.
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-// Free tier: shorter per-attempt ceiling. Free scans are a single homepage with a
-// smaller (viewport-only) image and modest output — 60s covers the typical
-// 30–60s response while halving the worst case (a hung attempt would otherwise
-// run the full 120s, then compound on the Inngest step retry). Paid keeps 120s.
-export const FREE_CLAUDE_TIMEOUT_MS = 60_000;
+// Free tier: shorter per-attempt ceiling than paid (120s). It was 60s, and the
+// first free scan after fix instructions came back aborted on all three
+// attempts: the longer output pushed a typical response past the minute. The
+// free prompt now asks for one-sentence fixes; 90s leaves room for a slow page
+// without letting a hung attempt eat the whole Inngest step.
+export const FREE_CLAUDE_TIMEOUT_MS = 90_000;
 
 // Retries: 2 retries = 3 total attempts, safe under Inngest's 14-min step timeout.
 const DEFAULT_MAX_RETRIES = 2;
