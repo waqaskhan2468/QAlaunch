@@ -82,9 +82,17 @@ export async function POST(req: Request) {
 
   const { data: existingScan, error: scanFetchError } = await supabase
     .from("scans")
-    .select("id, package, payment_id, payment_status, source_scan_id")
+    .select("id, package, payment_id, payment_status")
     .eq("id", scanId)
     .single();
+
+  // Read separately so a database without supabase/scans_source_scan.sql
+  // still processes the payment; the link is a nice-to-have, the sale is not.
+  const { data: sourceLink } = await supabase
+    .from("scans")
+    .select("source_scan_id")
+    .eq("id", scanId)
+    .maybeSingle();
 
   if (scanFetchError || !existingScan) {
     console.error("[paddle webhook] scan lookup failed", { scanId, transactionId, scanFetchError });
@@ -132,7 +140,8 @@ export async function POST(req: Request) {
   }
 
   const sourceScanId =
-    (existingScan as { source_scan_id?: string | null }).source_scan_id ?? hintedSourceScanId;
+    (sourceLink as { source_scan_id?: string | null } | null)?.source_scan_id ??
+    hintedSourceScanId;
 
   // Funnel: payment confirmed for this scan (transaction.paid/completed).
   // Logged against the free scan it came from as well, so the funnel can be
