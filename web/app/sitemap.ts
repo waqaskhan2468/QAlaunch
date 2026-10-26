@@ -1,6 +1,13 @@
 import { MetadataRoute } from 'next'
 import { HOSTS } from '@/lib/php-check/hosts';
 import { PHP_RELEASE_ORDER } from '@/lib/php-check/php-releases';
+import { ALL_GUIDES, activePlatforms, guidesFor } from '@/lib/seo-pages';
+import { TOOLS } from '@/lib/seo-pages/tools';
+
+/** Latest `updated` date among a set of programmatic pages. */
+function latest(dates: string[]): Date {
+  return new Date(dates.reduce((a, b) => (a > b ? a : b)))
+}
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = 'https://getqalaunch.com'
@@ -159,6 +166,38 @@ export default function sitemap(): MetadataRoute.Sitemap {
 			changeFrequency: 'weekly' as const,
 			priority: 0.7,
 		})),
+    // Programmatic fix guides and tool pages (lib/seo-pages). Dates come from
+    // each record's `updated` field, so a page only looks changed when it was.
+    {
+      url: `${baseUrl}/fix`,
+      lastModified: latest(ALL_GUIDES.map((g) => g.updated)),
+      changeFrequency: 'weekly' as const,
+      priority: 0.7,
+    },
+    ...activePlatforms().map((p) => ({
+      url: `${baseUrl}/fix/${p.slug}`,
+      lastModified: latest(guidesFor(p.slug).map((g) => g.updated)),
+      changeFrequency: 'weekly' as const,
+      priority: 0.6,
+    })),
+    ...ALL_GUIDES.map((g) => ({
+      url: `${baseUrl}/fix/${g.platform}/${g.problem}`,
+      lastModified: new Date(g.updated),
+      changeFrequency: 'monthly' as const,
+      priority: 0.6,
+    })),
+    {
+      url: `${baseUrl}/tools`,
+      lastModified: latest(TOOLS.map((t) => t.updated)),
+      changeFrequency: 'monthly' as const,
+      priority: 0.7,
+    },
+    ...TOOLS.map((t) => ({
+      url: `${baseUrl}/tools/${t.slug}`,
+      lastModified: new Date(t.updated),
+      changeFrequency: 'monthly' as const,
+      priority: 0.8,
+    })),
     {
       url: `${baseUrl}/blog/vibe-coding-website-bugs`,
       lastModified: new Date('2026-07-07'),
