@@ -6,6 +6,8 @@ const productLinks = [
   { href: "/pricing", label: "Pricing" },
   { href: "/compare", label: "Compare" },
   { href: "/sample-report", label: "Sample Report" },
+  { href: "/tools", label: "Free Tools" },
+  { href: "/fix", label: "Fix Guides" },
 ]
 
 const companyLinks = [

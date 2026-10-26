@@ -47,6 +47,9 @@ const BUILDER_PAGES = [
 const DYNAMIC_PAGES = [
 	{ file: 'app/php/[version]/page.tsx', sitemapRoute: '/php/${version}' },
 	{ file: 'app/php/host/[host]/page.tsx', sitemapRoute: '/php/host/${host.slug}' },
+	{ file: 'app/fix/[platform]/page.tsx', sitemapRoute: '/fix/${p.slug}' },
+	{ file: 'app/fix/[platform]/[problem]/page.tsx', sitemapRoute: '/fix/${g.platform}/${g.problem}' },
+	{ file: 'app/tools/[tool]/page.tsx', sitemapRoute: '/tools/${t.slug}' },
 ];
 
 const INDEXABLE_PAGES = [
@@ -61,6 +64,8 @@ const INDEXABLE_PAGES = [
 	'app/blog/wordpress-broken-after-update/page.tsx',
 	'app/compare/page.tsx',
 	'app/contact/page.tsx',
+	'app/fix/page.tsx',
+	'app/tools/page.tsx',
 	'app/for-bolt/page.tsx',
 	'app/for-lovable/page.tsx',
 	'app/for-shopify/page.tsx',
