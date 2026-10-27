@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
 
-import { faqPageSchema, jsonLd, ORGANIZATION } from '@/lib/seo/structured-data';
+import {
+	faqPageSchema,
+	jsonLd,
+	ORGANIZATION,
+	ORGANIZATION_ID,
+	FOUNDER_ID,
+	articleSchema,
+	pricingProductSchema,
+	siteGraphSchema,
+} from '@/lib/seo/structured-data';
 import { PLATFORMS } from '@/lib/platform/platforms';
 import { COMPARISONS } from '@/lib/compare/comparisons';
 import { homeFaqs } from '@/components/home/faq';
@@ -80,5 +89,50 @@ describe('every FAQ on the site is marked up', () => {
 			expect(f.q.trim().length).toBeGreaterThan(5);
 			expect(f.a.trim().length).toBeGreaterThan(40);
 		}
+	});
+});
+
+describe('siteGraphSchema', () => {
+	it('emits Organization and WebSite in one graph, linked by @id', () => {
+		const graph = siteGraphSchema()['@graph'];
+		const org = graph.find((n) => n['@type'] === 'Organization');
+		const site = graph.find((n) => n['@type'] === 'WebSite') as { publisher: { '@id': string } };
+		expect(org?.['@id']).toBe(ORGANIZATION_ID);
+		expect(site.publisher['@id']).toBe(ORGANIZATION_ID);
+	});
+});
+
+describe('pricingProductSchema', () => {
+	const offers = [
+		{ name: 'Homepage', description: 'Just your homepage', priceUsd: 19, path: '/checkout?package=basic' },
+		{ name: 'Small site', description: 'Up to 5 pages', priceUsd: 49, path: '/checkout?package=standard' },
+	];
+
+	it('produces a Product with one priced USD Offer per tier', () => {
+		const schema = pricingProductSchema(offers);
+		expect(schema['@type']).toBe('Product');
+		expect(schema.offers).toHaveLength(2);
+		expect(schema.offers[0]).toMatchObject({
+			'@type': 'Offer',
+			price: '19',
+			priceCurrency: 'USD',
+			url: 'https://getqalaunch.com/checkout?package=basic',
+		});
+	});
+
+	it('never invents a rating', () => {
+		expect(JSON.stringify(pricingProductSchema(offers))).not.toMatch(/aggregateRating|review/i);
+	});
+});
+
+describe('founder entity', () => {
+	it('is in the site graph, linked from the Organization and every article author', () => {
+		const graph = siteGraphSchema()['@graph'];
+		const person = graph.find((n) => n['@type'] === 'Person') as { '@id': string; sameAs: readonly string[] };
+		expect(person['@id']).toBe(FOUNDER_ID);
+		expect(person.sameAs[0]).toMatch(/^https:\/\/www\.linkedin\.com\/in\//);
+		expect(ORGANIZATION.founder['@id']).toBe(FOUNDER_ID);
+		const article = articleSchema({ headline: 'h', description: 'd', url: 'u', datePublished: '2026-10-27' });
+		expect(article.author['@id']).toBe(FOUNDER_ID);
 	});
 });

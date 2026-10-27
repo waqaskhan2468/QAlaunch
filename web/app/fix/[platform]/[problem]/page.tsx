@@ -201,7 +201,11 @@ export default async function FixGuidePage({ params }: { params: Params }) {
 
 					<div className="mt-10 border-t border-[#e3e5ea] pt-6 text-[13px] text-[#5b6472]">
 						<p>
-							Written by Waqas Ahmad, QA engineer with 10 years of professional testing experience. Last checked{" "}
+							Written by{" "}
+							<Link href="/about" rel="author" className="font-semibold underline hover:text-[#09111f]">
+								Waqas Ahmad
+							</Link>
+							, QA engineer with 10 years of professional testing experience. Last checked{" "}
 							{new Date(guide.updated).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}.
 						</p>
 						<p className="mt-2">

@@ -66,9 +66,9 @@ export const plans: Plan[] = [
     price: String(PACKAGE_PRICE_USD.basic),
     priceSymbol: "$",
     pages: "Just your homepage, tested in full",
-    delivery: { icon: "bolt", label: "Instant PDF delivery" },
+    delivery: { icon: "bolt", label: "PDF by email in ~5 minutes" },
     features: [
-      "Full 35-point audit",
+      "35+ automated checks",
       "Usability + UI + functionality",
       "Mobile responsiveness",
       "Performance + SEO checks",
@@ -87,7 +87,7 @@ export const plans: Plan[] = [
     price: String(PACKAGE_PRICE_USD.standard),
     priceSymbol: "$",
     pages: "Up to 5 pages — home, about, services, contact, one more",
-    delivery: { icon: "bolt", label: "Instant PDF delivery" },
+    delivery: { icon: "bolt", label: "PDF by email in ~5 minutes" },
     popular: true,
     features: [
       "Everything in Homepage",
@@ -109,7 +109,7 @@ export const plans: Plan[] = [
     price: String(PACKAGE_PRICE_USD.premium),
     priceSymbol: "$",
     pages: "Up to 10 pages — adds your blog, landing pages or product pages",
-    delivery: { icon: "bolt", label: "Instant PDF delivery" },
+    delivery: { icon: "bolt", label: "PDF by email in ~5 minutes" },
     features: [
       "Everything in Small site",
       "Twice the coverage",

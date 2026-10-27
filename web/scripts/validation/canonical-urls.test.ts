@@ -127,6 +127,17 @@ describe('canonical URLs', () => {
 		expect(src).toMatch(/canonical:\s*`[^`]*\$\{[^}]+\}`/);
 	});
 
+	it('the sitemap lists no noindex page', () => {
+		// A sitemap entry asks for indexing; a noindex page refuses it. Listing
+		// both sends Google a contradiction and wastes crawl on pages it drops.
+		const sitemap = read('app/sitemap.ts');
+		expect(read('app/php/[version]/page.tsx')).toMatch(/index:\s*false/);
+		expect(sitemap).not.toMatch(/\/php\/\$\{version\}/);
+		for (const rel of NOINDEX_PAGES) {
+			expect(sitemap).not.toContain(`\${baseUrl}${routeFor(rel)}\``);
+		}
+	});
+
 	it('every URL in the sitemap has a page that sets a canonical', () => {
 		const sitemap = read('app/sitemap.ts');
 		const routes = [...sitemap.matchAll(/\$\{baseUrl\}([^`]*)`/g)].map((m) => m[1] || '/');

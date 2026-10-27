@@ -1566,7 +1566,7 @@ function ResultsView({
 					className='mx-6 mb-6 rounded-xl border-2 border-brand p-6 text-center'
 					style={{ background: 'linear-gradient(135deg, #EEF3FD, #F0F9FF)' }}>
 					<div className='mb-3 inline-flex items-center gap-2 rounded-full bg-accent-bright px-3 py-1 font-heading text-[11px] font-black uppercase tracking-wide text-white'>
-						⚡ Instant unlock
+						⚡ One-time unlock
 					</div>
 					<h3 className='font-heading text-xl font-black text-ink'>
 						Unlock your full audit report
@@ -1582,7 +1582,7 @@ function ResultsView({
 							Get My Full Report — {formatPackagePrice('basic')} →
 						</Link>
 						<span className='font-mono text-[13px] font-semibold text-body'>
-							One-time payment · Instant PDF delivery
+							One-time payment · PDF in about 5 minutes
 						</span>
 						<div className='flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-muted-ink'>
 							<button
@@ -1621,7 +1621,7 @@ function ResultsView({
 			{/* ── TRUST STRIP ──────────────────────────────────────────── */}
 			<div className='mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4'>
 				{[
-					{ ico: '⚡', t: 'Instant Delivery', s: 'PDF in your inbox in 120 seconds' },
+					{ ico: '⚡', t: 'Fast Delivery', s: 'PDF in your inbox, usually within 5 minutes' },
 					{ ico: '🛡️', t: 'Delivery Guaranteed', s: "Full refund if we can't deliver it" },
 					{ ico: '👤', t: 'Built by an Expert', s: '10 years of senior QA experience' },
 					{ ico: '🔁', t: 'No Subscription', s: 'Pay once — own the report forever' },
@@ -1696,7 +1696,7 @@ function ResultsView({
 						Get your full audit report
 					</h2>
 					<p className='mt-2 text-[15px] text-body'>
-						One-time payment. PDF delivered instantly. Share directly with your developer.
+						One-time payment. PDF usually ready within 5 minutes. Share it directly with your developer.
 					</p>
 				</div>
 
