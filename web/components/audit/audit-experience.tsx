@@ -260,7 +260,6 @@ type ScanStatusResponse = {
 	healthScore?: number;
 	healthGrade?: string;
 	healthLabel?: string;
-	previewHealthScore?: number;
 };
 
 // ─── Loading helpers ──────────────────────────────────────────────────────────
@@ -1206,7 +1205,7 @@ function ResultsView({
 									{host}
 								</div>
 								<div className='mt-0.5 text-xs text-white/40'>
-									Homepage tested · Free preview · 3 of {totalIssueCount} issues shown
+									Homepage tested · Free preview · {criticalShownCount} of {totalIssueCount} issues shown
 								</div>
 							</div>
 						</div>
@@ -1287,6 +1286,27 @@ function ResultsView({
 								</div>
 							))}
 					</div>
+
+					{/* The hero used to end at the chips: the first button on the page
+					    was in the locked section, well below three findings and the
+					    proof panel, so a visitor who was convinced by the headline had
+					    to scroll past everything to find out what to do about it. */}
+					<div className='mt-7 flex flex-wrap items-center gap-3'>
+						<Link
+							href={basicCheckoutHref}
+							onClick={trackPlanClick}
+							className='inline-flex items-center justify-center rounded-xl bg-accent-bright px-6 py-3.5 text-[15px] font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-accent-bright/90 hover:shadow-lg hover:shadow-accent-bright/30'>
+							Get all {realIssueCount} issues with fixes — {formatPackagePrice('basic')} →
+						</Link>
+						<a
+							href='#free-issues'
+							className='inline-flex items-center justify-center rounded-xl border border-white/20 px-5 py-3.5 text-[14px] font-semibold text-white/85 transition hover:bg-white/5 hover:text-white'>
+							See the {criticalShownCount} free {criticalShownCount === 1 ? 'issue' : 'issues'} first ↓
+						</a>
+					</div>
+					<p className='mt-3 text-[12px] text-white/45'>
+						One-time payment · PDF in about 5 minutes · full refund if it can&apos;t be delivered
+					</p>
 				</div>
 
 				{/* Right — score ring */}
@@ -1435,7 +1455,9 @@ function ResultsView({
 				/>
 			) : null}
 
-			{/* Tease banner */}
+			{/* Tease banner. Only when something is actually locked: "3 of 2 issues
+			    shown · 0 remain locked" is what a two-issue site used to read. */}
+			{lockedIssueCount > 0 ? (
 			<div
 				className='mb-8 flex items-start gap-3.5 rounded-xl border p-5'
 				style={{
@@ -1447,21 +1469,23 @@ function ResultsView({
 				</div>
 				<div>
 					<div className='font-heading text-[14.5px] font-extrabold text-danger'>
-						3 of {totalIssueCount} issues shown · {lockedIssueCount} issues remain locked
+						{criticalShownCount} of {totalIssueCount} issues shown · {lockedIssueCount}{' '}
+						{lockedIssueCount === 1 ? 'issue remains' : 'issues remain'} locked
 					</div>
 					<p className='mt-0.5 text-[13px] leading-snug' style={{ color: '#7C2D12' }}>
 						All <strong style={{ color: '#991B1B' }}>{totalIssueCount} issues</strong> are
-						on your homepage right now — not just the 3 below. The full report shows every
-						one with <strong style={{ color: '#991B1B' }}>where it is</strong>,{' '}
+						on your homepage right now — not just the {criticalShownCount} below. The full
+						report shows every one with <strong style={{ color: '#991B1B' }}>where it is</strong>,{' '}
 						<strong style={{ color: '#991B1B' }}>screenshot evidence</strong> where the
 						scanner could pinpoint it, and{' '}
 						<strong style={{ color: '#991B1B' }}>how to fix it</strong>.
 					</p>
 				</div>
 			</div>
+			) : null}
 
 			{/* Section label */}
-			<div className='mb-5 flex items-center gap-3'>
+			<div id='free-issues' className='mb-5 flex scroll-mt-24 items-center gap-3'>
 				<span className='whitespace-nowrap font-mono text-[10.5px] font-bold uppercase tracking-[2px] text-muted-ink'>
 					Free preview · {criticalShownCount} of your {totalIssueCount} issues
 				</span>
@@ -1503,11 +1527,21 @@ function ResultsView({
 					<h2
 						className='relative z-10 font-heading font-black text-white'
 						style={{ fontSize: 28, letterSpacing: -1 }}>
-						<span style={{ color: '#FCA5A5' }}>{lockedIssueCount} more issues</span>{' '}
-						found on your site
+						{lockedIssueCount > 0 ? (
+							<>
+								<span style={{ color: '#FCA5A5' }}>
+									{lockedIssueCount} more {lockedIssueCount === 1 ? 'issue' : 'issues'}
+								</span>{' '}
+								found on your site
+							</>
+						) : (
+							'The fix for each issue is in the full report'
+						)}
 					</h2>
 					<p className='relative z-10 mt-1.5 text-sm text-white/55'>
-						Each one is actively affecting how real visitors experience your website
+						{lockedIssueCount > 0 ?
+							'Each one is actively affecting how real visitors experience your website'
+						:	'Every issue the scan found is shown above. The report adds where each one is, a screenshot of it, and how to fix it.'}
 					</p>
 				</div>
 
@@ -1766,7 +1800,9 @@ function ResultsView({
 						</div>
 						<div>
 							<div className='font-heading text-[14.5px] font-extrabold text-white'>
-								{lockedIssueCount} more issues found on your website
+								{lockedIssueCount > 0 ?
+									`${lockedIssueCount} more ${lockedIssueCount === 1 ? 'issue' : 'issues'} found on your website`
+								:	`${totalIssueCount} ${totalIssueCount === 1 ? 'issue' : 'issues'} found on your homepage`}
 							</div>
 							<div className='text-[12px] text-white/50'>
 								Unlock the full report — all {totalIssueCount} issues, each with how to fix it
