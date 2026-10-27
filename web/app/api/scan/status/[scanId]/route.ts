@@ -200,9 +200,6 @@ export async function GET(
 	const visibleIssues = allIssues
 		.filter((issue) => issue.is_in_free_preview)
 		.map((issue) => ({ ...issue, fix_instructions: null }));
-	const previewHealthScore = computeHealthScore(
-		visibleIssues.filter(isBug).map((issue) => issue.severity),
-	);
 	const lockedIssues = allIssues
 		.filter((issue) => !issue.is_in_free_preview)
 		.map((issue) => ({
@@ -225,6 +222,5 @@ export async function GET(
 		healthScore,
 		healthGrade,
 		healthLabel,
-		previewHealthScore,
 	});
 }
