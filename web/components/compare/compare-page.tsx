@@ -4,6 +4,7 @@ import { articleSchema, faqPageSchema, jsonLd } from '@/lib/seo/structured-data'
 
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { ScanBox } from '@/components/seo/scan-box'
 import type { CompareConfig } from '@/lib/compare/comparisons'
 
 const SITE = 'https://getqalaunch.com'
@@ -153,14 +154,9 @@ export function ComparePage({ config: cfg }: { config: CompareConfig }) {
 					<div className="max-w-2xl mx-auto">
 						<h2 className="text-xl font-bold mb-3">{cfg.togetherHeading}</h2>
 						<p className="text-[#3b4253] leading-relaxed mb-6">{cfg.together}</p>
-						<Link
-							href="/#audit-input"
-							className="inline-block bg-[#09111f] text-white font-bold px-8 py-3 hover:bg-[#1f2c44] transition-colors">
-							Run a free scan on your site →
-						</Link>
-						<p className="text-[#5b6472] text-xs mt-3">
-							Free · No signup · Results in ~2 min
-						</p>
+						<div id="scan" className="scroll-mt-24 max-w-2xl">
+							<ScanBox heading="Test your own site free" />
+						</div>
 					</div>
 				</section>
 
@@ -204,7 +200,7 @@ export function ComparePage({ config: cfg }: { config: CompareConfig }) {
 							reports back in plain English. Free scan, no signup.
 						</p>
 						<Link
-							href="/#audit-input"
+							href="#scan"
 							className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
 							Audit My Website Free →
 						</Link>

@@ -4,6 +4,7 @@ import { faqPageSchema, jsonLd } from '@/lib/seo/structured-data'
 
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { ScanBox } from '@/components/seo/scan-box'
 import type { PlatformConfig } from '@/lib/platform/platforms'
 import { PACKAGE_PRICE_USD, formatPackagePrice } from '@/components/pricing/pricing-plans'
 
@@ -85,12 +86,9 @@ export function PlatformPage({ config: cfg }: { config: PlatformConfig }) {
 						<p className="text-[#aab3c8] text-lg leading-relaxed mb-8 max-w-2xl">
 							{cfg.intro}
 						</p>
-						<Link
-							href="/#audit-input"
-							className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-6 py-3 text-sm hover:bg-[#16a34a] transition-colors whitespace-nowrap">
-							Audit My Website Free →
-						</Link>
-						<p className="text-[#5c6884] text-xs mt-3">{cfg.heroNote}</p>
+						<div id="scan" className="scroll-mt-24 max-w-2xl">
+							<ScanBox tone="dark" heading={`Test your ${cfg.name} site free`} />
+						</div>
 					</div>
 				</section>
 
@@ -162,7 +160,7 @@ export function PlatformPage({ config: cfg }: { config: PlatformConfig }) {
 							No account needed. See your top issues in about 2 minutes.
 						</p>
 						<Link
-							href="/#audit-input"
+							href="#scan"
 							className="inline-block bg-[#09111f] text-white font-bold px-8 py-3 hover:bg-[#1f2c44] transition-colors">
 							Start Free Audit →
 						</Link>
@@ -208,7 +206,7 @@ export function PlatformPage({ config: cfg }: { config: PlatformConfig }) {
 							Free scan, no signup. Full report from {formatPackagePrice('basic')}.
 						</p>
 						<Link
-							href="/#audit-input"
+							href="#scan"
 							className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
 							{cfg.bottomCtaButton}
 						</Link>

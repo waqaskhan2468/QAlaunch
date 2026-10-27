@@ -22,6 +22,23 @@ export type FaqItem = { q: string; a: string };
 export const ORGANIZATION_ID = `${SITE_URL}/#organization`;
 export const WEBSITE_ID = `${SITE_URL}/#website`;
 
+export const FOUNDER_ID = `${SITE_URL}/about#founder`;
+export const FOUNDER_LINKEDIN = 'https://www.linkedin.com/in/wqasahmad';
+
+/** The person behind QAlaunch, who also writes and checks every guide. One
+ *  node with a stable @id so bylines, the About page and the Organization all
+ *  point at the same person, tied to a real profile through `sameAs`. */
+export const FOUNDER = {
+	'@type': 'Person',
+	'@id': FOUNDER_ID,
+	name: 'Waqas Ahmad',
+	jobTitle: 'QA Engineer, founder of QAlaunch',
+	description: 'QA engineer with 10 years of professional software testing experience.',
+	url: `${SITE_URL}/about`,
+	sameAs: [FOUNDER_LINKEDIN],
+	worksFor: { '@id': `${SITE_URL}/#organization` },
+} as const;
+
 export const ORGANIZATION = {
 	'@type': 'Organization',
 	'@id': ORGANIZATION_ID,
@@ -29,6 +46,7 @@ export const ORGANIZATION = {
 	url: SITE_URL,
 	logo: `${SITE_URL}/brand/qalaunch-logo-dark-bg.svg`,
 	email: 'contact@getqalaunch.com',
+	founder: { '@id': FOUNDER_ID },
 	sameAs: ['https://x.com/QAlaunchHQ', 'https://www.linkedin.com/company/qalaunch'],
 	description:
 		'Website testing built by a QA engineer with 10 years of professional experience. Finds broken buttons, mobile layout failures, dead links and usability problems on any public website.',
@@ -83,13 +101,7 @@ export function articleSchema(input: {
 			width: 1200,
 			height: 630,
 		},
-		author: {
-			'@type': 'Person',
-			name: 'Waqas Ahmad',
-			jobTitle: 'QA Engineer',
-			description: 'QA engineer with 10 years of professional software testing experience.',
-			url: `${SITE_URL}/about`,
-		},
+		author: { '@id': FOUNDER_ID, '@type': 'Person', name: FOUNDER.name, url: FOUNDER.url },
 		publisher: {
 			'@type': 'Organization',
 			'@id': ORGANIZATION_ID,
@@ -115,6 +127,7 @@ export function siteGraphSchema() {
 		'@context': 'https://schema.org',
 		'@graph': [
 			ORGANIZATION,
+			FOUNDER,
 			{
 				'@type': 'WebSite',
 				'@id': WEBSITE_ID,

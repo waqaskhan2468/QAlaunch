@@ -5,6 +5,8 @@ import {
 	jsonLd,
 	ORGANIZATION,
 	ORGANIZATION_ID,
+	FOUNDER_ID,
+	articleSchema,
 	pricingProductSchema,
 	siteGraphSchema,
 } from '@/lib/seo/structured-data';
@@ -120,5 +122,17 @@ describe('pricingProductSchema', () => {
 
 	it('never invents a rating', () => {
 		expect(JSON.stringify(pricingProductSchema(offers))).not.toMatch(/aggregateRating|review/i);
+	});
+});
+
+describe('founder entity', () => {
+	it('is in the site graph, linked from the Organization and every article author', () => {
+		const graph = siteGraphSchema()['@graph'];
+		const person = graph.find((n) => n['@type'] === 'Person') as { '@id': string; sameAs: readonly string[] };
+		expect(person['@id']).toBe(FOUNDER_ID);
+		expect(person.sameAs[0]).toMatch(/^https:\/\/www\.linkedin\.com\/in\//);
+		expect(ORGANIZATION.founder['@id']).toBe(FOUNDER_ID);
+		const article = articleSchema({ headline: 'h', description: 'd', url: 'u', datePublished: '2026-10-27' });
+		expect(article.author['@id']).toBe(FOUNDER_ID);
 	});
 });

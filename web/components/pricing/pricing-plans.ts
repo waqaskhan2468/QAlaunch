@@ -68,7 +68,7 @@ export const plans: Plan[] = [
     pages: "Just your homepage, tested in full",
     delivery: { icon: "bolt", label: "PDF by email in ~5 minutes" },
     features: [
-      "Full 35-point audit",
+      "35+ automated checks",
       "Usability + UI + functionality",
       "Mobile responsiveness",
       "Performance + SEO checks",

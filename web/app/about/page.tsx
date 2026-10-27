@@ -4,14 +4,15 @@ import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
 import { Flag } from '@/components/home/flag'
 import { formatPackagePrice } from '@/components/pricing/pricing-plans'
+import { FOUNDER_LINKEDIN } from '@/lib/seo/structured-data'
 
 export const metadata: Metadata = {
   alternates: { canonical: '/about' },
-title: 'About QAlaunch — Built by a QA Engineer with 9+ Years Experience',
+title: 'About QAlaunch — Built by QA Engineer Waqas Ahmad',
   description:
     "QAlaunch is built by a non-technical QA engineer with 10 years of professional testing experience, using AI-assisted development to help website owners find what visitors see that they can't.",
   openGraph: {
-    title: 'About QAlaunch — Built by a QA Engineer with 9+ Years Experience',
+    title: 'About QAlaunch — Built by QA Engineer Waqas Ahmad',
     description:
       'How a non-technical QA engineer built an AI-powered website audit tool almost entirely through AI-assisted development.',
     url: 'https://getqalaunch.com/about',
@@ -53,7 +54,7 @@ export default function AboutPage() {
           <div className="mx-auto max-w-3xl">
             <div className="space-y-6 text-base leading-relaxed text-body sm:text-lg">
               <p>
-                QAlaunch was founded by a QA engineer with 10 years of professional software testing
+                QAlaunch was founded by Waqas Ahmad, a QA engineer with 10 years of professional software testing
                 experience — someone who has spent the better part of a decade finding the bugs that make
                 it into production, and figuring out why the processes meant to catch them didn&apos;t.
               </p>
@@ -73,12 +74,32 @@ export default function AboutPage() {
               <p>
                 QAlaunch closes that gap. It opens any public website in a real cloud browser, runs it through
                 automated checks plus AI-powered visual analysis, and hands back a plain-English report — what&apos;s
-                broken and where, with no developer jargon and no fix instructions to interpret. It works the
+                broken and where, with fix steps you can hand straight to whoever built the site. It works the
                 same way regardless of what built the site — WordPress, Shopify, Webflow, hand-written code, or
                 an AI builder like Lovable, Bolt, or Replit. And because most people don&apos;t need an audit every
                 week, pricing is one-time, not a subscription — you pay for the audit you actually need, not a
                 recurring charge for a tool you&apos;ll use occasionally.
               </p>
+            </div>
+
+            {/* Founder */}
+            <div className="mt-12 border-l-4 border-accent-bright bg-surface-soft p-6">
+              <p className="font-heading text-xl font-black text-ink">Waqas Ahmad</p>
+              <p className="mt-1 text-sm font-semibold text-body">
+                Founder · QA engineer, 10 years of professional software testing
+              </p>
+              <p className="mt-3 text-sm leading-relaxed text-body">
+                Every fix guide on this site is written and checked by Waqas. For a hands-on review of
+                your site, or anything a scan can&apos;t reach, write to contact@getqalaunch.com.
+              </p>
+              <a
+                href={FOUNDER_LINKEDIN}
+                rel="me noopener"
+                target="_blank"
+                className="mt-4 inline-block text-sm font-bold text-brand underline-offset-4 hover:underline"
+              >
+                Waqas Ahmad on LinkedIn →
+              </a>
             </div>
 
             {/* Stats */}
