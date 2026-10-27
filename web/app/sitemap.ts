@@ -1,6 +1,5 @@
 import { MetadataRoute } from 'next'
 import { HOSTS } from '@/lib/php-check/hosts';
-import { PHP_RELEASE_ORDER } from '@/lib/php-check/php-releases';
 import { ALL_GUIDES, activePlatforms, guidesFor } from '@/lib/seo-pages';
 import { TOOLS } from '@/lib/seo-pages/tools';
 
@@ -145,14 +144,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
 			changeFrequency: 'weekly',
 			priority: 0.9,
 		},
-		// One page per PHP release. People search exact patch levels, and no
-		// incumbent holds any individual version page.
-		...PHP_RELEASE_ORDER.map((version) => ({
-			url: `${baseUrl}/php/${version}`,
-			lastModified: new Date('2026-10-24'),
-			changeFrequency: 'monthly' as const,
-			priority: 0.6,
-		})),
+		// The per-version pages (/php/<version>) are noindex, so they are not
+		// listed: a sitemap URL is a request to index it, and ~200 noindex
+		// entries contradicted that and spent crawl budget the selling pages need.
 		// Per-host patch status: the index table, then a page per host.
 		{
 			url: `${baseUrl}/php/host`,

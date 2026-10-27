@@ -12,7 +12,7 @@ import { Comparison } from "@/components/home/comparison"
 import { BuiltWith } from "@/components/home/built-with"
 import { FAQ } from "@/components/home/faq"
 import { homeFaqs } from "@/lib/content/home-faqs"
-import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
+import { faqPageSchema, jsonLd, ORGANIZATION_ID, WEBSITE_ID } from "@/lib/seo/structured-data"
 import { CtaBand } from "@/components/home/cta-band"
 import { PACKAGE_PRICE_USD, formatPackagePrice } from "@/components/pricing/pricing-plans"
 
@@ -35,13 +35,14 @@ export const metadata: Metadata = {
 const structuredData = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
+  "@id": "https://getqalaunch.com/#software",
   name: "QAlaunch",
   applicationCategory: "BusinessApplication",
   applicationSubCategory: "Website Audit & QA Testing Tool",
   operatingSystem: "Web",
   url: "https://getqalaunch.com",
   description:
-    `AI website audit tool by a senior QA engineer. Find UI bugs, broken buttons & mobile issues on any site in 120 seconds. Reports from ${formatPackagePrice('basic')}.`,
+    `AI website audit tool by a senior QA engineer. Find UI bugs, broken buttons & mobile issues on any site. Free scan in about 2 minutes; full reports from ${formatPackagePrice('basic')}.`,
   offers: {
     "@type": "AggregateOffer",
     priceCurrency: "USD",
@@ -49,11 +50,19 @@ const structuredData = {
     highPrice: String(PACKAGE_PRICE_USD.premium),
     offerCount: "3",
   },
-  creator: {
-    "@type": "Organization",
-    name: "QAlaunch",
-    url: "https://getqalaunch.com",
-  },
+  featureList: [
+    "Real-browser testing in Chromium",
+    "Desktop and phone (390px) viewports",
+    "Broken link detection",
+    "Button and form interaction checks",
+    "Console error capture",
+    "axe-core accessibility checks",
+    "Google PageSpeed scores",
+    "Screenshot evidence",
+    "Fix instructions for every issue",
+  ],
+  creator: { "@id": ORGANIZATION_ID },
+  isPartOf: { "@id": WEBSITE_ID },
 }
 
 /**

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/about' },
 title: 'About QAlaunch — Built by a QA Engineer with 9+ Years Experience',
   description:
-    "QAlaunch is built by a non-technical QA engineer with 9+ years of professional testing experience, using AI-assisted development to help website owners find what visitors see that they can't.",
+    "QAlaunch is built by a non-technical QA engineer with 10 years of professional testing experience, using AI-assisted development to help website owners find what visitors see that they can't.",
   openGraph: {
     title: 'About QAlaunch — Built by a QA Engineer with 9+ Years Experience',
     description:
@@ -40,7 +40,7 @@ export default function AboutPage() {
               <Flag>About QAlaunch</Flag>
             </div>
             <h1 className="font-heading text-[clamp(2.25rem,5.2vw,3.5rem)] font-black leading-[1.05] tracking-tight text-balance text-white">
-              Built by someone who&apos;s spent 9+ years finding what&apos;s broken.
+              Built by someone who&apos;s spent 10 years finding what&apos;s broken.
             </h1>
             <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-white/65 sm:text-lg">
               QAlaunch exists because most websites ship with bugs nobody catches until a customer hits them.
@@ -53,7 +53,7 @@ export default function AboutPage() {
           <div className="mx-auto max-w-3xl">
             <div className="space-y-6 text-base leading-relaxed text-body sm:text-lg">
               <p>
-                QAlaunch was founded by a QA engineer with 9+ years of professional software testing
+                QAlaunch was founded by a QA engineer with 10 years of professional software testing
                 experience — someone who has spent the better part of a decade finding the bugs that make
                 it into production, and figuring out why the processes meant to catch them didn&apos;t.
               </p>
@@ -110,7 +110,7 @@ export default function AboutPage() {
               See what QAlaunch finds on your site
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/70 sm:text-lg">
-              Free audit in 120 seconds. No signup needed. Full expert report from just {formatPackagePrice('basic')}.
+              Free scan in about 2 minutes. No signup needed. Full expert report from just {formatPackagePrice('basic')}.
             </p>
             <Link
               href="/"
