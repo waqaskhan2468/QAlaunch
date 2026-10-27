@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { SiteNav } from '@/components/site/site-nav'
 import { SiteFooter } from '@/components/site/site-footer'
+import { ScanBox } from '@/components/seo/scan-box'
 import { PACKAGE_PRICE_USD, formatPackagePrice } from '@/components/pricing/pricing-plans'
 import { faqPageSchema, jsonLd } from "@/lib/seo/structured-data"
 
@@ -128,13 +129,9 @@ export default function ForBoltPage() {
             Features that look fine in Chrome can break in Safari. Mobile layouts that seem correct 
             at your desk fall apart at 375px. QAlaunch catches these before your users do.
           </p>
-          <Link
-            href="/#audit-input"
-            className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-6 py-3 text-sm hover:bg-[#16a34a] transition-colors whitespace-nowrap"
-          >
-            Audit My Website Free →
-          </Link>
-          <p className="text-[#5c6884] text-xs mt-3">Free · No signup · Results in ~2 min</p>
+          <div id="scan" className="scroll-mt-24 max-w-2xl">
+            <ScanBox tone="dark" heading='Test your Bolt site free' />
+          </div>
         </div>
       </section>
 
@@ -190,7 +187,7 @@ export default function ForBoltPage() {
         <div className="max-w-xl mx-auto text-center">
           <h2 className="text-xl font-bold mb-2">Try it free on your Bolt.new site</h2>
           <p className="text-sm text-[#5b6472] mb-5">No account needed. See your top issues in about 2 minutes.</p>
-          <Link href="/#audit-input" className="inline-block bg-[#09111f] text-white font-bold px-8 py-3 hover:bg-[#1f2c44] transition-colors">
+          <Link href="#scan" className="inline-block bg-[#09111f] text-white font-bold px-8 py-3 hover:bg-[#1f2c44] transition-colors">
             Start Free Audit →
           </Link>
         </div>
@@ -214,7 +211,7 @@ export default function ForBoltPage() {
         <div className="max-w-xl mx-auto">
           <h2 className="text-2xl font-bold mb-3">Find what&apos;s broken before your users do</h2>
           <p className="text-[#aab3c8] mb-6">Free scan, no signup. Full report from {formatPackagePrice('basic')}.</p>
-          <Link href="/#audit-input" className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
+          <Link href="#scan" className="inline-block bg-[#22c55e] text-[#06140d] font-bold px-8 py-3 hover:bg-[#16a34a] transition-colors">
             Audit My Bolt Website Free →
           </Link>
         </div>

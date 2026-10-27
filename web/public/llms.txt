@@ -42,6 +42,10 @@ their checkout works on phones.
 
 All one-time payments. No subscription.
 
+How long it takes: the free scan returns its top issues in about 2 minutes. A
+paid report is usually emailed as a PDF within 5 minutes of payment. See a full
+example before buying: https://getqalaunch.com/sample-report
+
 ## Key pages
 
 - Homepage and free scan: https://getqalaunch.com
@@ -59,8 +63,37 @@ All one-time payments. No subscription.
 - Testing a Shopify store: https://getqalaunch.com/for-shopify
 - Testing a WordPress site: https://getqalaunch.com/for-wordpress
 - Articles: https://getqalaunch.com/blog
+- Sample paid report: https://getqalaunch.com/sample-report
 - About: https://getqalaunch.com/about
 - Contact: https://getqalaunch.com/contact
+
+## Fix guides
+
+Step-by-step guides for specific problems on specific platforms, each with
+causes, fix steps and how to confirm the fix in a browser. All guides:
+https://getqalaunch.com/fix
+
+- Shopify add-to-cart button not working: https://getqalaunch.com/fix/shopify/add-to-cart-button-not-working
+- WooCommerce checkout stuck spinning: https://getqalaunch.com/fix/woocommerce/checkout-stuck-spinning
+- WordPress mobile menu not working: https://getqalaunch.com/fix/wordpress/mobile-menu-not-working
+- WordPress Contact Form 7 spinning, not sending: https://getqalaunch.com/fix/wordpress/contact-form-7-spinning-not-sending
+- Lovable contact form not sending: https://getqalaunch.com/fix/lovable/contact-form-not-sending
+- Lovable site not showing on Google: https://getqalaunch.com/fix/lovable/site-not-showing-on-google
+- Bolt blank page after deploy: https://getqalaunch.com/fix/bolt/blank-page-after-deploy
+- Webflow form "Oops! Something went wrong": https://getqalaunch.com/fix/webflow/form-oops-something-went-wrong
+- Wix mobile menu not working: https://getqalaunch.com/fix/wix/mobile-menu-not-working
+- Website not working on iPhone Safari: https://getqalaunch.com/fix/any-website/website-not-working-on-iphone-safari
+
+## Free tools
+
+Each runs the same real-browser scan on any public URL, free and without signup.
+
+- Website bug checker: https://getqalaunch.com/tools/website-bug-checker
+- Mobile-friendly test: https://getqalaunch.com/tools/mobile-friendly-test
+- Broken button checker: https://getqalaunch.com/tools/broken-button-checker
+- Contact form tester: https://getqalaunch.com/tools/contact-form-tester
+- JavaScript error checker: https://getqalaunch.com/tools/javascript-error-checker
+- AI website tester: https://getqalaunch.com/tools/ai-website-tester
 
 ## How it differs from similar tools
 
@@ -78,6 +111,12 @@ All one-time payments. No subscription.
 - The free scan covers the homepage only.
 - Business logic specific to your company is not tested; that is what the manual
   audit exists for.
+
+## Policies
+
+- Refund policy: https://getqalaunch.com/refund
+- Terms: https://getqalaunch.com/terms
+- Privacy: https://getqalaunch.com/privacy
 
 ## Contact
 

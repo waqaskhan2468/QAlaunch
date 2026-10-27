@@ -3,7 +3,8 @@ import type { Metadata } from 'next';
 import { SiteNav } from '@/components/site/site-nav';
 import { SiteFooter } from '@/components/site/site-footer';
 import { PricingGrid } from '@/components/pricing/pricing-grid';
-import { formatPackagePrice } from '@/components/pricing/pricing-plans';
+import { formatPackagePrice, plans } from '@/components/pricing/pricing-plans';
+import { faqPageSchema, jsonLd, pricingProductSchema } from '@/lib/seo/structured-data';
 import { FAQ, type FAQItem } from '@/components/home/faq';
 import { FreeVsPaidTable } from '@/components/audit/free-vs-paid';
 
@@ -11,8 +12,21 @@ export const metadata: Metadata = {
 	alternates: { canonical: '/pricing' },
 title: `Pricing — Website Audit Reports from ${formatPackagePrice('basic')}`,
 	description:
-		`Simple one-time pricing. Homepage ${formatPackagePrice('basic')}, Small site ${formatPackagePrice('standard')} (up to 5 pages), Whole site ${formatPackagePrice('premium')} (up to 10 pages). No subscriptions. PDF report delivered instantly.`,
+		`Simple one-time pricing. Homepage ${formatPackagePrice('basic')}, Small site ${formatPackagePrice('standard')} (up to 5 pages), Whole site ${formatPackagePrice('premium')} (up to 10 pages). No subscriptions. PDF report by email, usually within 5 minutes.`,
 };
+
+/**
+ * Product + Offer markup, one Offer per self-serve tier, built from the same
+ * `plans` array the cards render. The custom "Larger site" tier has no price
+ * and is left out rather than marked up as $0.
+ */
+const productSchema = pricingProductSchema(
+	plans.flatMap((p) =>
+		p.checkoutPackage
+			? [{ name: p.tier, description: p.pages, priceUsd: Number(p.price), path: p.cta.href }]
+			: [],
+	),
+);
 
 const pricingFaqs: FAQItem[] = [
 	{
@@ -36,6 +50,9 @@ const pricingFaqs: FAQItem[] = [
 export default function PricingPage() {
 	return (
 		<>
+			<script type='application/ld+json' dangerouslySetInnerHTML={{ __html: jsonLd(productSchema) }} />
+			{/* Built from pricingFaqs — the same array <FAQ /> renders below. */}
+			<script type='application/ld+json' dangerouslySetInnerHTML={{ __html: jsonLd(faqPageSchema(pricingFaqs)) }} />
 			<SiteNav />
 			<main className='pt-16'>
 				{/* Page header */}
@@ -45,8 +62,8 @@ export default function PricingPage() {
 							Simple, one-time pricing
 						</h1>
 						<p className='mx-auto pt-2 text-[17px] text-white/60'>
-							No subscriptions. No surprises. Pay once, get your expert audit
-							report instantly.
+							No subscriptions. No surprises. Pay once, and your full report
+							arrives by email, usually within 5 minutes.
 						</p>
 					</div>
 				</section>
