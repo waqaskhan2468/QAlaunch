@@ -71,6 +71,7 @@ const INDEXABLE_PAGES = [
 	'app/for-shopify/page.tsx',
 	'app/for-wordpress/page.tsx',
 	'app/php-version-checker/page.tsx',
+	'app/wordpress-checker/page.tsx',
 	'app/php/host/page.tsx',
 	'app/pricing/page.tsx',
 	'app/privacy/page.tsx',
