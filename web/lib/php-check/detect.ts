@@ -36,7 +36,7 @@ export type DetectResult = {
 	/** Hosting platform inferred from headers, when it names itself. */
 	platform: string | null
 	/** Whether the page looks like WordPress, and on what evidence. */
-	wordpress: { detected: boolean; evidence: string[] }
+	wordpress: { detected: boolean; evidence: string[]; version: string | null }
 	/** XML-RPC / REST reachability, read from headers only — never probed. */
 	xmlrpcAdvertised: boolean
 	restApiAdvertised: boolean
@@ -160,13 +160,20 @@ export function readSecurityHeaders(h: Headers): HeaderFinding[] {
 export function detectWordPress(
 	headers: Headers,
 	html: string,
-): { detected: boolean; evidence: string[] } {
+): { detected: boolean; evidence: string[]; version: string | null } {
 	const evidence: string[] = []
+	let version: string | null = null
 
 	const generator = /<meta[^>]+name=["']generator["'][^>]+content=["']([^"']*WordPress[^"']*)["']/i.exec(
 		html,
 	)
-	if (generator) evidence.push(`Generator tag: ${generator[1].slice(0, 60)}`)
+	if (generator) {
+		evidence.push(`Generator tag: ${generator[1].slice(0, 60)}`)
+		// "WordPress 6.7.1" -> "6.7.1". Often stripped by security plugins, so
+		// absence says nothing either way.
+		const v = /WordPress\s+(\d+\.\d+(?:\.\d+)?)/i.exec(generator[1])
+		if (v) version = v[1]
+	}
 	if (/\/wp-content\//i.test(html)) evidence.push("Loads files from /wp-content/")
 	if (/\/wp-includes\//i.test(html)) evidence.push("Loads files from /wp-includes/")
 	if (header(headers, "x-pingback")) evidence.push("Sends an X-Pingback header")
@@ -174,7 +181,7 @@ export function detectWordPress(
 		evidence.push("Advertises the WordPress REST API")
 	}
 
-	return { detected: evidence.length > 0, evidence }
+	return { detected: evidence.length > 0, evidence, version }
 }
 
 export function buildDetectResult(input: {

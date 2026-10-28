@@ -144,6 +144,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
 			changeFrequency: 'weekly',
 			priority: 0.9,
 		},
+		{
+			url: `${baseUrl}/wordpress-checker`,
+			lastModified: new Date('2026-10-28'),
+			changeFrequency: 'weekly' as const,
+			priority: 0.9,
+		},
 		// The per-version pages (/php/<version>) are noindex, so they are not
 		// listed: a sitemap URL is a request to index it, and ~200 noindex
 		// entries contradicted that and spent crawl budget the selling pages need.
